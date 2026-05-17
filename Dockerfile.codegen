@@ -1,0 +1,11 @@
+FROM nebulit/codegen
+
+USER root
+
+RUN npm install -g yo@latest \
+    && mkdir -p /tmp/yo-home \
+    && chmod -R 777 /tmp/yo-home
+
+ENV HOME=/tmp/yo-home
+
+WORKDIR /workspace

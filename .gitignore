@@ -36,3 +36,8 @@ node
 ### MAC OS ###
 
 .DS_Store
+
+### Example generated files ###
+example/**
+!example/
+!example/config.json

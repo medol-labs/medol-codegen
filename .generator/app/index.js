@@ -21,7 +21,7 @@ module.exports = class extends Generator {
     async prompting() {
         if (!this.opts.generator) {
             this.answers = await this.prompt([{
-                type: 'select',
+                type: 'list',
                 name: 'generator',
                 message: 'Which generator?',
                 choices: ["axon"],

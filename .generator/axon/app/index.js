@@ -33,23 +33,32 @@ module.exports = class extends Generator {
 
     // Async Await
     async prompting() {
-        this.answers = await this.prompt([{
-            type: 'input',
-            name: 'appName',
-            message: 'Projectame?',
-            when: () => !config?.codeGen?.application,
-        }, {
-            type: 'input',
-            name: 'rootPackageName',
-            message: 'Root Package?',
-            when: () => !config?.codeGen?.rootPackage,
-        },
-            {
-                type: 'select',
-                name: 'generatorType',
-                message: 'What should be generated?',
-                choices: ['Skeleton', 'slices', "aggregates"]
-            }]);
+        const prompts = []
+
+        if (!config?.codeGen?.application) {
+            prompts.push({
+                type: 'input',
+                name: 'appName',
+                message: 'Projectame?',
+            })
+        }
+
+        if (!config?.codeGen?.rootPackage) {
+            prompts.push({
+                type: 'input',
+                name: 'rootPackageName',
+                message: 'Root Package?',
+            })
+        }
+
+        prompts.push({
+            type: 'list',
+            name: 'generatorType',
+            message: 'What should be generated?',
+            choices: ['Skeleton', 'slices', "aggregates"]
+        })
+
+        this.answers = await this.prompt(prompts);
     }
 
     setDefaults() {

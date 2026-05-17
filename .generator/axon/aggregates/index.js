@@ -45,7 +45,7 @@ module.exports = class extends Generator {
     async prompting() {
         this.answers = await this.prompt([
             {
-                type: 'select',
+                type: 'list',
                 name: 'aggregate',
                 message: 'Which Aggregate should be generated?',
                 choices: config?.aggregates?.map((item, idx) => item.title).sort()

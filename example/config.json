@@ -3347,7 +3347,7 @@
               "example": "",
               "mapping": "",
               "optional": false,
-              "generated": false,
+              "generated": true,
               "cardinality": "Single",
               "idAttribute": true,
               "excludeFromApi": false
@@ -3643,8 +3643,9 @@
   "context": "Quiz",
   "codeGen": {
     "application": "Quiz",
-    "domain": "",
-    "rootPackage": "de.nebulit.quiz"
+    "domain": "quiz",
+    "rootPackage": "de.nebulit.quiz",
+    "contextPackage": "quiz"
   },
   "boardId": "uXjVLDkT_FA="
 }

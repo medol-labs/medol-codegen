@@ -661,15 +661,30 @@ fun on(event: ${_eventTitle(it.title)}) {
 
     _generatePostRestCall(slice, command, variableAssignments, endpoint) {
         let commandTitle = _commandTitle(command.title)
+        let generatedIdField = command.fields?.find(field => field.idAttribute && field.generated)
+        let hasGeneratedIdField = !!generatedIdField
+        let baseEndpoint = endpoint ? `"${endpoint}"` : `"/${_sliceTitle(slice)}"`
+        let postMapping = hasGeneratedIdField
+            ? baseEndpoint
+            : endpoint ? `"${endpoint}/{id}"` : `"/${_sliceTitle(slice)}/{id}"`
+        let idParameter = hasGeneratedIdField
+            ? ""
+            : `@PathVariable("id") ${idField(command)}: ${idType(command)},
+        `
+        let generatedIdAssignment = hasGeneratedIdField
+            ? `val ${generatedIdField.name} = UUID.randomUUID()
+         `
+            : ""
+        let commandAssignments = hasGeneratedIdField
+            ? variableAssignments.replace(`${generatedIdField.name}=payload.${generatedIdField.name}`, `${generatedIdField.name}=${generatedIdField.name}`)
+            : variableAssignments
         return `
        @CrossOrigin
-       @PostMapping(${endpoint ? `"${endpoint}/{id}"`
-            : `"/${_sliceTitle(slice)}/{id}"`})
+       @PostMapping(${postMapping})
     fun processCommand(
-        @PathVariable("id") ${idField(command)}: ${idType(command)},
-        @RequestBody payload: ${_sliceSpecificClassTitle(slice, "Payload")}
+        ${idParameter}@RequestBody payload: ${_sliceSpecificClassTitle(slice, "Payload")}
     ):CompletableFuture<Any> {
-         return commandGateway.send(${commandTitle}(${variableAssignments}))
+         ${generatedIdAssignment}return commandGateway.send(${commandTitle}(${commandAssignments}))
         }
        `
     }

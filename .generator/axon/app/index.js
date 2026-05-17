@@ -129,6 +129,10 @@ module.exports = class extends Generator {
                 rootPackageName: this.answers.rootPackageName
             }
         )
+        this.fs.copy(
+            this.templatePath('.mvn'),
+            this.destinationPath('./.mvn')
+        )
 
     }
 

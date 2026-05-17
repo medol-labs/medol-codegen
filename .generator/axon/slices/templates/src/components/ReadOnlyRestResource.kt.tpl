@@ -6,6 +6,7 @@ import org.springframework.web.bind.annotation.CrossOrigin
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 import mu.KotlinLogging
 import org.axonframework.queryhandling.QueryGateway
@@ -17,6 +18,7 @@ import java.util.concurrent.CompletableFuture
 Boardlink: <%- link%>
 */
 @RestController
+@RequestMapping("/<%= _aggregate%>")
 class <%= _controller%>Resource(
     private var queryGateway: QueryGateway
     ) {

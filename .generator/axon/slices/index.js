@@ -363,6 +363,7 @@ module.exports = class extends Generator {
                 _name: slice,
                 _readModel: _readmodelTitle(readmodel.title),
                 _controller: capitalizeFirstCharacter(slice),
+                _aggregate: this._aggregatePath(readmodel, slice),
                 _typeImports: typeImports(readmodel.fields),
                 _endpoint: this._generateGetRestCall(slice, VariablesGenerator.generateRestParamInvocation(
                     readmodel.fields
@@ -462,6 +463,7 @@ module.exports = class extends Generator {
                 _name: sliceTitle,
                 _readModel: _readmodelTitle(readModel.title),
                 _controller: capitalizeFirstCharacter(sliceTitle),
+                _aggregate: this._aggregatePath(readModel, sliceTitle),
                 _typeImports: typeImports(readModel.fields),
                 _endpoint: this._generateGetRestCall(sliceTitle, VariablesGenerator.generateRestParamInvocation(
                     //only provide aggregateId (so that proper imports are generated)
@@ -481,6 +483,7 @@ module.exports = class extends Generator {
                 _name: sliceTitle,
                 _readModel: _readmodelTitle(readModel.title),
                 _controller: capitalizeFirstCharacter(sliceTitle),
+                _aggregate: this._aggregatePath(readModel, sliceTitle),
                 _typeImports: typeImports(readModel.fields),
                 _endpoint: this._generateGetRestCall(sliceTitle, VariablesGenerator.generateRestParamInvocation(
                     readModel.fields
@@ -570,6 +573,7 @@ module.exports = class extends Generator {
                 _name: sliceTitle,
                 _readModel: _readmodelTitle(readModel.title),
                 _controller: capitalizeFirstCharacter(sliceTitle),
+                _aggregate: this._aggregatePath(readModel, sliceTitle),
                 _typeImports: typeImports(readModel.fields),
                 _endpoint: this._generateGetRestCall(sliceTitle, VariablesGenerator.generateRestParamInvocation(
                     readModel.fields
@@ -626,6 +630,7 @@ fun on(event: ${_eventTitle(it.title)}) {
                     _name: title,
                     _command: _commandTitle(command.title),
                     _controller: _restResourceTitle(command.title),
+                    _aggregate: this._aggregatePath(command, title),
                     _typeImports: typeImports(command.fields),
                     _debugendpoint: this._generateDebugPostRestCall(title, VariablesGenerator.generateRestParamInvocation(
                         apiFields
@@ -648,6 +653,11 @@ fun on(event: ${_eventTitle(it.title)}) {
         } else {
             return `val data: ${_readmodelTitle(readModel.title)}Entity`
         }
+    }
+
+    _aggregatePath(element, fallback) {
+        const aggregate = element.aggregate ?? element.aggregateDependencies?.[0] ?? fallback
+        return _slicePackage(aggregate).toLowerCase()
     }
 
     _generateDebugPostRestCall(slice, restVariables, command, variables, endpoint) {

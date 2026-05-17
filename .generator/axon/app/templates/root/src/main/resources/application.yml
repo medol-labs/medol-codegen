@@ -1,16 +1,29 @@
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+      cors:
+        allowed-origins: "*"
+
 # DataSource Configuration
 spring:
+  docker:
+    compose:
+      lifecycle-management:  start_and_stop # NONE
 
   jpa:
     show-sql: false
     hibernate:
-      ddl-auto: none
+      ddl-auto: create
 
   datasource:
     url: jdbc:postgresql://localhost:5432/postgres
     username: postgres
     password: postgres
     driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 30
 
   # Flyway Configuration
   flyway:
@@ -18,6 +31,7 @@ spring:
     locations: classpath:db/migration
     user: postgres
     password: postgres
+    enabled: false
 
 axon:
   serializer:
@@ -25,6 +39,10 @@ axon:
     general: jackson
   axonserver:
     enabled: false
+  #eventhandling:
+  #  processors:
+  #    catalog:
+  #      mode: subscribing
 
 #axoniq:
 #  console:
@@ -35,3 +53,7 @@ axon:
 application:
   debug:
     enabled: true
+
+#createcatalogentry:
+#fakeevents:
+#    enabled: true

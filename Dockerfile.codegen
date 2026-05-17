@@ -2,10 +2,20 @@ FROM nebulit/codegen
 
 USER root
 
-RUN npm install -g yo@latest \
-    && mkdir -p /tmp/yo-home \
-    && chmod -R 777 /tmp/yo-home
+RUN npm install -g yo@5.1.0 \
+  && mkdir -p /tmp/yo-home \
+  && chmod -R 777 /tmp/yo-home
 
 ENV HOME=/tmp/yo-home
 
 WORKDIR /workspace
+
+COPY .generator /opt/codegen/.generator
+
+RUN cd /opt/codegen/.generator && npm install
+
+RUN GEN_PATH="$(command -v gen)" \
+  && mv "$GEN_PATH" /usr/local/bin/gen-original
+
+COPY gen.sh /usr/local/bin/gen
+RUN chmod +x /usr/local/bin/gen

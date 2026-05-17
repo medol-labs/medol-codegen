@@ -615,6 +615,7 @@ fun on(event: ${_eventTitle(it.title)}) {
 
 
         slice.commands?.filter((command) => command.title).forEach((command) => {
+            const apiFields = command.fields?.filter(field => !field.generated)
             this.fs.copyTpl(
                 this.templatePath(`src/components/RestResource.kt.tpl`),
                 this.destinationPath(`./src/main/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false)}/${title}/internal/${_restResourceTitle(command.title)}.kt`),
@@ -627,11 +628,11 @@ fun on(event: ${_eventTitle(it.title)}) {
                     _controller: _restResourceTitle(command.title),
                     _typeImports: typeImports(command.fields),
                     _debugendpoint: this._generateDebugPostRestCall(title, VariablesGenerator.generateRestParamInvocation(
-                        command.fields
-                    ), _commandTitle(command.title), VariablesGenerator.generateInvocation(
+                        apiFields
+                    ), command, VariablesGenerator.generateInvocation(
                         command.fields
                     ), command.apiEndpoint),
-                    _payload: ClassesGenerator.generateDataClass(_sliceSpecificClassTitle(sliceName, "Payload"), command.fields),
+                    _payload: ClassesGenerator.generateDataClass(_sliceSpecificClassTitle(sliceName, "Payload"), apiFields),
                     _endpoint: this._generatePostRestCall(slice.title, command,
                         variableAssignments(command.fields, "payload", command, ",\n", "="), command.apiEndpoint),
                     link: boardlLink(config.boardId, command.id),
@@ -650,11 +651,13 @@ fun on(event: ${_eventTitle(it.title)}) {
     }
 
     _generateDebugPostRestCall(slice, restVariables, command, variables, endpoint) {
+        let commandTitle = _commandTitle(command.title)
+        let generatedAssignments = this._generateGeneratedFieldAssignments(command)
         return `
     @CrossOrigin
     @PostMapping(${endpoint ? `\"/debug${endpoint?.startsWith("/") ? endpoint : "/" + endpoint}\"` : `\"/debug/${slice}\"`})
     fun processDebugCommand(${restVariables}):CompletableFuture<Any> {
-        return commandGateway.send(${command}(${variables}))
+        ${generatedAssignments}return commandGateway.send(${commandTitle}(${variables}))
     }
     `
     }
@@ -671,22 +674,53 @@ fun on(event: ${_eventTitle(it.title)}) {
             ? ""
             : `@PathVariable("id") ${idField(command)}: ${idType(command)},
         `
-        let generatedIdAssignment = hasGeneratedIdField
-            ? `val ${generatedIdField.name} = UUID.randomUUID()
-         `
-            : ""
-        let commandAssignments = hasGeneratedIdField
-            ? variableAssignments.replace(`${generatedIdField.name}=payload.${generatedIdField.name}`, `${generatedIdField.name}=${generatedIdField.name}`)
-            : variableAssignments
+        let generatedAssignments = this._generateGeneratedFieldAssignments(command)
+        let commandAssignments = this._applyGeneratedFieldAssignments(command, variableAssignments)
         return `
        @CrossOrigin
        @PostMapping(${postMapping})
     fun processCommand(
         ${idParameter}@RequestBody payload: ${_sliceSpecificClassTitle(slice, "Payload")}
     ):CompletableFuture<Any> {
-         ${generatedIdAssignment}return commandGateway.send(${commandTitle}(${commandAssignments}))
+         ${generatedAssignments}return commandGateway.send(${commandTitle}(${commandAssignments}))
         }
        `
+    }
+
+    _generateGeneratedFieldAssignments(command) {
+        return command.fields?.filter(field => field.generated).map(field => {
+            return `val ${field.name} = ${this._generatedFieldValue(field)}
+        `
+        }).join("") ?? ""
+    }
+
+    _applyGeneratedFieldAssignments(command, assignments) {
+        return command.fields?.filter(field => field.generated).reduce((result, field) => {
+            return result.replace(`${field.name}=payload.${field.name}`, `${field.name}=${field.name}`)
+        }, assignments) ?? assignments
+    }
+
+    _generatedFieldValue(field) {
+        switch (field.type?.toLowerCase()) {
+            case "uuid":
+                return "UUID.randomUUID()"
+            case "date":
+                return "LocalDate.now()"
+            case "datetime":
+                return "LocalDateTime.now()"
+            case "string":
+                return "\"\""
+            case "boolean":
+                return "false"
+            case "int":
+                return "0"
+            case "long":
+                return "0L"
+            case "double":
+                return "0.0"
+            default:
+                return "\"\""
+        }
     }
 
     _generateQuery(slice, readModel) {

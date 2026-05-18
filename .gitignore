@@ -41,3 +41,4 @@ node
 example/**
 !example/
 !example/config.json
+!example/clean-generated.sh

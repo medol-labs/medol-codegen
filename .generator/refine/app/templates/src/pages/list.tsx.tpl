@@ -1,0 +1,126 @@
+// Generated from config.json by the refine generator.
+import { useTable } from "@refinedev/react-table";
+import { createColumnHelper } from "@tanstack/react-table";
+import React from "react";
+
+import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
+import { CommandButton } from "@/components/refine-ui/buttons/command";
+import { EditButton } from "@/components/refine-ui/buttons/edit";
+import { ShowButton } from "@/components/refine-ui/buttons/show";
+import { RefineDataTable } from "@/components/refine-ui/data-table/refine-data-table";
+import {
+  ListToolbar,
+  ListView,
+  ListViewHeader
+} from "@/components/refine-ui/views/list-view";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { MoreHorizontal } from "lucide-react";
+
+type <%= resource.component %>Record = {
+<% resource.fields.forEach((field) => { -%>
+  <%= field.name %><%= field.optional ? "?" : "" %>: <%= field.tsType %>;
+<% }) -%>
+};
+
+export const <%= resource.component %>List = () => {
+  const columns = React.useMemo(() => {
+    const columnHelper = createColumnHelper<<%= resource.component %>Record>();
+    return [
+      columnHelper.display({
+        id: "select",
+        header: ({ table }) => (
+          <Checkbox
+            checked={table.getIsAllPageRowsSelected() || (table.getIsSomePageRowsSelected() && "indeterminate")}
+            onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
+            aria-label="Select all"
+          />
+        ),
+        cell: ({ row }) => (
+          <Checkbox
+            checked={row.getIsSelected()}
+            onCheckedChange={(value) => row.toggleSelected(!!value)}
+            aria-label="Select row"
+          />
+        ),
+        size: 32,
+        enableSorting: false,
+        enableHiding: false,
+      }),
+<% resource.fields.forEach((field) => { -%>
+      columnHelper.accessor("<%= field.name %>", {
+        id: "<%= field.name %>",
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} label="<%= field.label %>" />
+        ),
+        enableSorting: true,
+        enableColumnFilter: <%= field.filterable ? "true" : "false" %>,
+        cell: ({ getValue }) => <%- field.cellValue %>,
+      }),
+<% }) -%>
+      columnHelper.display({
+        id: "actions",
+        header: "Actions",
+        cell: ({ row }) => (
+          <div className="flex gap-2">
+<% if (resource.deleteCommand) { -%>
+            <CommandButton variant="ghost" command="<%= resource.deleteCommand.name %>" recordItemId={row.original.<%= resource.idField %>} size="sm" />
+<% } -%>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon">
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+<% if (resource.editCommand) { -%>
+                <DropdownMenuItem>
+                  <EditButton variant="ghost" recordItemId={row.original.<%= resource.idField %>} size="sm" />
+                </DropdownMenuItem>
+<% } -%>
+<% resource.itemCommands.forEach((command) => { -%>
+                <DropdownMenuItem>
+                  <CommandButton variant="ghost" command="<%= command.name %>" recordItemId={row.original.<%= resource.idField %>} size="sm" />
+                </DropdownMenuItem>
+<% }) -%>
+                <DropdownMenuItem>
+                  <ShowButton variant="ghost" recordItemId={row.original.<%= resource.idField %>} size="sm" />
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        ),
+        enableSorting: false,
+        size: 32,
+      }),
+    ];
+  }, []);
+
+  const table = useTable({
+    columns,
+    initialState: {
+      columnPinning: { right: ["actions"], left: ["select"] },
+    },
+    getRowId: (row) => String(row.<%= resource.idField %>),
+    refineCoreProps: {
+      syncWithLocation: true,
+      dataProviderName: "command",
+    },
+  });
+
+  return (
+    <ListView>
+      <ListViewHeader />
+      <RefineDataTable table={table} actionBar={
+<% if (resource.deleteCommand) { -%>
+        <CommandButton variant="ghost" command="<%= resource.deleteCommand.name %>" size="sm" />
+<% } else { -%>
+        null
+<% } -%>
+      }>
+        <ListToolbar table={table.reactTable} />
+      </RefineDataTable>
+    </ListView>
+  );
+};

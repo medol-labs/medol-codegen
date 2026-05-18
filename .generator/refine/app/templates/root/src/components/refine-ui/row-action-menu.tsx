@@ -1,0 +1,62 @@
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
+import { MoreHorizontal } from "lucide-react";
+import * as React from "react";
+
+type RowActionMenuProps = {
+  children: React.ReactNode;
+  align?: "start" | "center" | "end";
+};
+
+function normalizeAction(
+  element: React.ReactElement<any>
+) {
+  return React.cloneElement(element, {
+    variant: "ghost",
+    size: "sm",
+    className: cn(
+      "w-full justify-start gap-2 px-2 py-1.5",
+      element.props.className
+    ),
+  });
+}
+
+export function RowActionMenu({
+  children,
+  align = "end",
+}: RowActionMenuProps) {
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+        >
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+
+      <DropdownMenuContent
+        align={align}
+        sideOffset={6}
+      >
+        {React.Children.map(children, (child) => {
+          if (!React.isValidElement(child)) return null;
+
+          return (
+            <div className="px-1">
+              {normalizeAction(child)}
+            </div>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}

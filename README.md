@@ -71,6 +71,39 @@ Then select:
 - `slices` to generate slice-level commands, events, read models, REST resources, processors, and specifications
 - `aggregates` to generate Axon aggregate code
 
+The top-level generator now supports two targets:
+
+- `axon` for the Kotlin/Spring Boot backend
+- `refine` for the React refine frontend foundation
+
+For the frontend target, run `gen`, choose `refine`, then choose:
+
+- `Skeleton` to copy the React refine/shadcn frontend foundation into the current workspace
+- `all` to generate these config-driven files:
+- `src/providers/resources.tsx`
+- `src/providers/app-router.tsx`
+- `src/pages/<screen>/list.tsx`
+- `src/pages/<screen>/create.tsx`
+- `src/pages/<screen>/edit.tsx`
+- `src/pages/<screen>/show.tsx`
+- command pages for outbound screen commands
+
+The refine generator derives resources from `slices[].screens`. If a slice has no screens, it falls back to `slices[].readmodels`.
+
+The refine generator is template-based, mirroring the Axon generator layout:
+
+- `templates/src/providers/resources.tsx.tpl`
+- `templates/src/providers/app-router.tsx.tpl`
+- `templates/src/pages/list.tsx.tpl`
+- `templates/src/pages/form.tsx.tpl`
+- `templates/src/pages/command-form.tsx.tpl`
+- `templates/src/pages/show.tsx.tpl`
+- `templates/src/pages/index.ts.tpl`
+
+Create/edit/delete capabilities are generated only when matching event-modeling commands exist. Aggregate-creating commands generate the resource create form with `useCommandForm`; item commands generate command routes and `CommandButton` actions.
+
+When generating `all`, `resources`, `router`, or `pages`, the refine generator prompts for the commands to generate. Unselected commands are omitted from resource metadata, routes, list action buttons, and command form pages.
+
 You can still invoke other generators explicitly:
 
 ```bash

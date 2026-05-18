@@ -24,7 +24,7 @@ module.exports = class extends Generator {
                 type: 'list',
                 name: 'generator',
                 message: 'Which generator?',
-                choices: ["axon"],
+                choices: ["axon", "refine"],
                 default: "axon"
             }]);
         } else {

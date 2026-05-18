@@ -186,52 +186,35 @@ module.exports = class extends Generator {
 
 function buildFrontendModel(source, selectedCommandKeys) {
     const slices = source.slices ?? [];
-    const resourcesByName = new Map();
     const allReadModels = slices.flatMap((slice) => slice.readmodels ?? []);
-    const allCommands = slices.flatMap((slice) => slice.commands ?? []);
+    const allScreens = slices.flatMap((slice) => slice.screens ?? []);
     const selected = selectedCommandKeys ? new Set(selectedCommandKeys) : null;
+    const commandsByAggregate = new Map();
 
     slices.forEach((slice) => {
-        const screens = (slice.screens?.length ? slice.screens : slice.readmodels) ?? [];
-
-        screens
-            .filter((screen) => screen?.title)
-            .forEach((screen) => {
-                const inboundReadModels = findDependencies(screen, 'READMODEL', allReadModels);
-                const outboundCommands = findDependencies(screen, 'COMMAND', allCommands)
-                    .filter((command) => !selected || selected.has(commandKey(command)));
-                const primaryModel = inboundReadModels[0] ?? screen;
-                const resource = toResource(slice, screen, primaryModel, outboundCommands);
-
-                if (!resourcesByName.has(resource.name)) {
-                    resourcesByName.set(resource.name, resource);
-                } else {
-                    resourcesByName.set(resource.name, mergeResource(resourcesByName.get(resource.name), resource));
+        (slice.commands ?? [])
+            .filter((command) => command?.title)
+            .filter((command) => !selected || selected.has(commandKey(command)))
+            .forEach((command) => {
+                const aggregate = aggregateName(command, slice);
+                if (!commandsByAggregate.has(aggregate.key)) {
+                    commandsByAggregate.set(aggregate.key, {
+                        ...aggregate,
+                        slice,
+                        commands: []
+                    });
                 }
+                commandsByAggregate.get(aggregate.key).commands.push(command);
             });
     });
 
+    const resources = Array.from(commandsByAggregate.values())
+        .map((group) => toAggregateResource(group, allScreens, allReadModels))
+        .filter(Boolean);
+
     return {
         appName: source.codeGen?.application ?? 'Event Sourcing App',
-        resources: Array.from(resourcesByName.values()).sort((a, b) => a.route.localeCompare(b.route))
-    };
-}
-
-function mergeResource(current, next) {
-    const createCommand = current.createCommand ?? next.createCommand;
-    const editCommand = current.editCommand ?? next.editCommand;
-    const deleteCommand = current.deleteCommand ?? next.deleteCommand;
-    const itemCommands = uniqueCommands([...current.itemCommands, ...next.itemCommands])
-        .filter((command) => ![createCommand, editCommand, deleteCommand].filter(Boolean).some((reserved) => reserved.name === command.name));
-
-    return {
-        ...current,
-        fields: current.fields.length ? current.fields : next.fields,
-        createCommand,
-        editCommand,
-        deleteCommand,
-        routedCommands: uniqueCommands([deleteCommand, ...itemCommands].filter(Boolean)),
-        itemCommands
+        resources: resources.sort((a, b) => a.route.localeCompare(b.route))
     };
 }
 
@@ -254,17 +237,28 @@ function findDependencies(element, elementType, source) {
     return (source ?? []).filter((item) => ids.includes(item.id));
 }
 
-function toResource(slice, screen, primaryModel, commands) {
-    const title = cleanTitle(screen.title);
+function toAggregateResource(group, allScreens, allReadModels) {
+    const title = cleanTitle(group.title);
     const route = kebab(title);
     const name = snake(title);
     const component = pascal(title);
-    const fields = normalizeFields(primaryModel.fields?.length ? primaryModel.fields : screen.fields);
+    const relatedScreens = uniqueElements(group.commands.flatMap((command) => findDependencies(command, 'SCREEN', allScreens)));
+    const relatedReadModels = uniqueElements([
+        ...relatedScreens.flatMap((screen) => findDependencies(screen, 'READMODEL', allReadModels)),
+        ...group.commands.flatMap((command) => findDependencies(command, 'READMODEL', allReadModels))
+    ]);
+    const modelFields = uniqueFields([
+        ...relatedReadModels.flatMap((readModel) => readModel.fields ?? []),
+        ...relatedScreens.flatMap((screen) => screen.fields ?? []),
+        ...group.commands.flatMap((command) => command.fields ?? [])
+    ]);
+    const fields = normalizeFields(modelFields);
     const idField = fields.find((field) => field.idAttribute) ?? fields.find((field) => field.name === 'id') ?? fields[0];
-    const normalizedCommands = commands
+    const normalizedCommands = group.commands
         .filter((command) => command?.title)
         .map((command) => toCommand(command, route, component));
-    const createCommand = normalizedCommands.find((command) => command.createsAggregate);
+    const createCommand = normalizedCommands.find((command) => command.createsAggregate && isCreateCommand(command))
+        ?? normalizedCommands.find((command) => command.createsAggregate);
     const editCommand = normalizedCommands.find((command) => isEditCommand(command));
     const deleteCommand = normalizedCommands.find((command) => isDeleteCommand(command));
     const reservedCommandNames = [createCommand, editCommand, deleteCommand].filter(Boolean).map((command) => command.name);
@@ -306,26 +300,20 @@ function toCommand(command, resourceRoute, resourceComponent) {
 
 function buildCommandChoices(source) {
     const slices = source.slices ?? [];
-    const allCommands = slices.flatMap((slice) => slice.commands ?? []);
     const choicesByKey = new Map();
 
     slices.forEach((slice) => {
-        const screens = (slice.screens?.length ? slice.screens : slice.readmodels) ?? [];
-        screens
-            .filter((screen) => screen?.title)
-            .forEach((screen) => {
-                findDependencies(screen, 'COMMAND', allCommands)
-                    .filter((command) => command?.title)
-                    .forEach((command) => {
-                        const key = commandKey(command);
-                        if (!choicesByKey.has(key)) {
-                            choicesByKey.set(key, {
-                                name: `${cleanTitle(screen.title)} -> ${cleanTitle(command.title)}`,
-                                value: key,
-                                checked: true
-                            });
-                        }
+        (slice.commands ?? [])
+            .filter((command) => command?.title)
+            .forEach((command) => {
+                const key = commandKey(command);
+                if (!choicesByKey.has(key)) {
+                    choicesByKey.set(key, {
+                        name: `${aggregateName(command, slice).title} -> ${cleanTitle(command.title)}`,
+                        value: key,
+                        checked: true
                     });
+                }
             });
     });
 
@@ -349,9 +337,39 @@ function commandKey(command) {
     return String(command.id ?? command.title);
 }
 
+function aggregateName(command, slice) {
+    const title = cleanTitle(command.aggregateName ?? command.aggregate ?? slice?.title ?? 'app');
+    return {
+        key: kebab(title),
+        title
+    };
+}
+
+function uniqueElements(elements) {
+    const byId = new Map();
+    elements.filter(Boolean).forEach((element) => {
+        const key = element.id ?? element.title;
+        if (!byId.has(key)) {
+            byId.set(key, element);
+        }
+    });
+    return Array.from(byId.values());
+}
+
+function uniqueFields(fields) {
+    const byName = new Map();
+    fields.filter((field) => field?.name).forEach((field) => {
+        const existing = byName.get(field.name);
+        if (!existing || (existing.generated && !field.generated)) {
+            byName.set(field.name, field);
+        }
+    });
+    return Array.from(byName.values());
+}
+
 function normalizeFields(fields = []) {
     return fields
-        .filter((field) => field?.name && !field.excludeFromApi)
+        .filter((field) => field?.name && !field.excludeFromApi && !field.generated)
         .map((field) => decorateField({
             name: field.name,
             label: titleCase(field.name),
@@ -382,6 +400,10 @@ function decorateField(field) {
 
 function isEditCommand(command) {
     return /^(edit|update|change|modify)/i.test(command.name);
+}
+
+function isCreateCommand(command) {
+    return /^(create|register|submit|add|new)/i.test(command.name);
 }
 
 function isDeleteCommand(command) {

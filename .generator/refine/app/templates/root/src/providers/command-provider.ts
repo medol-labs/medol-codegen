@@ -20,7 +20,7 @@ export const commandDataProvider = (
       const res = await fetch(
         `${baseUrl}/api/${resource}${
           meta.aggregateId ? "/" + meta.aggregateId : ""
-        }/${command}`,
+        }/${command.toLowerCase()}`,
         {
           method: "POST",
           body: JSON.stringify(variables),

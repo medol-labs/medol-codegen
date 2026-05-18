@@ -186,6 +186,8 @@ module.exports = class extends Generator {
 
 function buildFrontendModel(source, selectedCommandKeys) {
     const slices = source.slices ?? [];
+    const allAggregates = source.aggregates ?? [];
+    const allChapters = source.chapters ?? source.chapter ?? [];
     const allReadModels = slices.flatMap((slice) => slice.readmodels ?? []);
     const allScreens = slices.flatMap((slice) => slice.screens ?? []);
     const selected = selectedCommandKeys ? new Set(selectedCommandKeys) : null;
@@ -196,7 +198,7 @@ function buildFrontendModel(source, selectedCommandKeys) {
             .filter((command) => command?.title)
             .filter((command) => !selected || selected.has(commandKey(command)))
             .forEach((command) => {
-                const aggregate = aggregateName(command, slice);
+                const aggregate = aggregateName(command, slice, allAggregates, allChapters);
                 if (!commandsByAggregate.has(aggregate.key)) {
                     commandsByAggregate.set(aggregate.key, {
                         ...aggregate,
@@ -209,11 +211,13 @@ function buildFrontendModel(source, selectedCommandKeys) {
     });
 
     const resources = Array.from(commandsByAggregate.values())
-        .map((group) => toAggregateResource(group, allScreens, allReadModels))
+        .map((group) => toAggregateResource(group, slices, allScreens, allReadModels))
         .filter(Boolean);
+    const chapters = uniqueChapters(resources.map((resource) => resource.chapter).filter(Boolean));
 
     return {
         appName: source.codeGen?.application ?? 'Event Sourcing App',
+        chapters,
         resources: resources.sort((a, b) => a.route.localeCompare(b.route))
     };
 }
@@ -237,13 +241,17 @@ function findDependencies(element, elementType, source) {
     return (source ?? []).filter((item) => ids.includes(item.id));
 }
 
-function toAggregateResource(group, allScreens, allReadModels) {
+function toAggregateResource(group, slices, allScreens, allReadModels) {
     const title = cleanTitle(group.title);
     const route = kebab(title);
     const name = snake(title);
     const component = pascal(title);
     const relatedScreens = uniqueElements(group.commands.flatMap((command) => findDependencies(command, 'SCREEN', allScreens)));
+    const aggregateReadModels = slices
+        .filter((slice) => sliceHasAggregate(slice, title))
+        .flatMap((slice) => slice.readmodels ?? []);
     const relatedReadModels = uniqueElements([
+        ...aggregateReadModels,
         ...relatedScreens.flatMap((screen) => findDependencies(screen, 'READMODEL', allReadModels)),
         ...group.commands.flatMap((command) => findDependencies(command, 'READMODEL', allReadModels))
     ]);
@@ -271,6 +279,7 @@ function toAggregateResource(group, allScreens, allReadModels) {
         name,
         tableName: tableName(primaryReadModel, title),
         component,
+        chapter: group.chapter,
         idField: idField?.name ?? 'id',
         dataProviderName: 'COMMAND_DATA_PROVIDER_NAME',
         fields,
@@ -312,7 +321,7 @@ function buildCommandChoices(source) {
                 const key = commandKey(command);
                 if (!choicesByKey.has(key)) {
                     choicesByKey.set(key, {
-                        name: `${aggregateName(command, slice).title} -> ${cleanTitle(command.title)}`,
+                        name: `${aggregateName(command, slice, source.aggregates ?? [], source.chapters ?? source.chapter ?? []).title} -> ${cleanTitle(command.title)}`,
                         value: key,
                         checked: true
                     });
@@ -340,12 +349,87 @@ function commandKey(command) {
     return String(command.id ?? command.title);
 }
 
-function aggregateName(command, slice) {
+function aggregateName(command, slice, aggregates = [], chapters = []) {
     const title = cleanTitle(command.aggregateName ?? command.aggregate ?? slice?.title ?? 'app');
+    const aggregate = findAggregate(command, title, aggregates);
+    const chapter = chapterName(
+        command.chapter
+        ?? command.chapterName
+        ?? aggregate?.chapter
+        ?? aggregate?.chapterName
+        ?? findChapterForAggregate(title, chapters)
+        ?? slice?.chapter
+        ?? slice?.chapterName
+    );
+
     return {
         key: kebab(title),
-        title
+        title,
+        chapter
     };
+}
+
+function findChapterForAggregate(aggregateTitle, chapters) {
+    const normalizedAggregateTitle = cleanTitle(aggregateTitle).toLowerCase();
+    return normalizeArray(chapters).find((chapter) => {
+        return normalizeArray(chapter?.aggregates)
+            .map((aggregate) => cleanTitle(typeof aggregate === 'string' ? aggregate : aggregate.title ?? aggregate.name).toLowerCase())
+            .includes(normalizedAggregateTitle);
+    });
+}
+
+function normalizeArray(value) {
+    if (!value) {
+        return [];
+    }
+    return Array.isArray(value) ? value : [value];
+}
+
+function sliceHasAggregate(slice, aggregateTitle) {
+    const normalizedAggregateTitle = cleanTitle(aggregateTitle).toLowerCase();
+    return normalizeArray(slice?.aggregates)
+        .map((aggregate) => cleanTitle(typeof aggregate === 'string' ? aggregate : aggregate.title ?? aggregate.name).toLowerCase())
+        .includes(normalizedAggregateTitle);
+}
+
+function findAggregate(command, title, aggregates) {
+    const candidates = [
+        command.aggregate,
+        command.aggregateName,
+        ...(command.aggregateDependencies ?? []),
+        title
+    ].filter(Boolean).map((value) => cleanTitle(value).toLowerCase());
+
+    return aggregates.find((aggregate) => {
+        const aggregateTitle = cleanTitle(aggregate.title ?? aggregate.name).toLowerCase();
+        return candidates.includes(aggregateTitle);
+    });
+}
+
+function chapterName(value) {
+    if (!value) {
+        return null;
+    }
+
+    const title = cleanTitle(typeof value === 'string' ? value : value.title ?? value.name ?? value.label);
+    if (!title) {
+        return null;
+    }
+
+    return {
+        name: kebab(title),
+        label: titleCase(title)
+    };
+}
+
+function uniqueChapters(chapters) {
+    const byName = new Map();
+    chapters.filter(Boolean).forEach((chapter) => {
+        if (!byName.has(chapter.name)) {
+            byName.set(chapter.name, chapter);
+        }
+    });
+    return Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function uniqueElements(elements) {

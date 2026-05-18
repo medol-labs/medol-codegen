@@ -1,6 +1,6 @@
 // Generated from config.json by the refine generator.
 import { IResourceItem } from "@refinedev/core";
-import { LayoutDashboard, Package } from "lucide-react";
+import { FlaskConical, LayoutDashboard, Package } from "lucide-react";
 
 import { COMMAND_DATA_PROVIDER_NAME } from "./constants";
 
@@ -13,6 +13,15 @@ export const resources: IResourceItem[] = [
       icon: <LayoutDashboard />,
     },
   },
+<% chapters.forEach((chapter) => { -%>
+  {
+    name: "<%= chapter.name %>",
+    meta: {
+      label: "<%= chapter.label %>",
+      icon: <FlaskConical />,
+    },
+  },
+<% }) -%>
 <% resources.forEach((resource) => { -%>
   {
     name: "<%= resource.name %>",
@@ -25,6 +34,9 @@ export const resources: IResourceItem[] = [
 <% } -%>
     show: "/<%= resource.route %>/show/:id",
     meta: {
+<% if (resource.chapter) { -%>
+      parent: "<%= resource.chapter.name %>",
+<% } -%>
       label: "<%= resource.label %>",
       icon: <Package />,
       tableName: "<%= resource.tableName %>",

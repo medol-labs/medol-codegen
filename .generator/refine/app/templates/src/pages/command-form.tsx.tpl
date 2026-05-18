@@ -1,6 +1,6 @@
 // Generated from config.json by the refine generator.
 import { useParsed } from "@refinedev/core";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 
 import {
   CreateView,
@@ -21,17 +21,30 @@ import { useCommandForm } from "@/hooks/command/useCommandForm";
 
 export const <%= command.pageComponent %> = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { id } = useParsed();
+  const defaultValues = {
+<% command.prefillFields.forEach((field) => { -%>
+    <%= field.name %>: searchParams.get("<%= field.name %>") ?? undefined,
+<% }) -%>
+  };
 
   const { refineCore: { onFinish }, ...form } = useCommandForm({
     resource: "<%= resource.name %>",
     command: "<%= command.name %>",
     aggregateId: id?.toString(),
     redirect: false,
+    meta: {
+      tableName: "<%= resource.tableName %>",
+    },
+    formProps: {
+      defaultValues,
+    },
   });
 
   function onSubmit(values: Record<string, unknown>) {
     onFinish({
+      ...defaultValues,
       ...values,
     });
   }

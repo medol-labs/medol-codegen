@@ -256,16 +256,20 @@ function toAggregateResource(group, slices, allScreens, allReadModels) {
         ...group.commands.flatMap((command) => findDependencies(command, 'READMODEL', allReadModels))
     ]);
     const primaryReadModel = relatedReadModels[0];
+    const queryModelFields = uniqueFields([
+        ...relatedReadModels.flatMap((readModel) => readModel.fields ?? [])
+    ]);
     const modelFields = uniqueFields([
-        ...relatedReadModels.flatMap((readModel) => readModel.fields ?? []),
-        ...relatedScreens.flatMap((screen) => screen.fields ?? []),
+        ...queryModelFields,
         ...group.commands.flatMap((command) => command.fields ?? [])
     ]);
+    const queryFields = normalizeFields(queryModelFields);
     const fields = normalizeFields(modelFields);
     const idField = fields.find((field) => field.idAttribute) ?? fields.find((field) => field.name === 'id') ?? fields[0];
-    const normalizedCommands = group.commands
+    let normalizedCommands = group.commands
         .filter((command) => command?.title)
         .map((command) => toCommand(command, route, component));
+    normalizedCommands = withPrefillFields(normalizedCommands, queryFields);
     const createCommand = normalizedCommands.find((command) => command.createsAggregate && isCreateCommand(command))
         ?? normalizedCommands.find((command) => command.createsAggregate);
     const editCommand = normalizedCommands.find((command) => isEditCommand(command));
@@ -308,6 +312,14 @@ function toCommand(command, resourceRoute, resourceComponent) {
         createsAggregate: !!command.createsAggregate,
         fields: normalizeFields(command.fields).filter((field) => !field.generated)
     };
+}
+
+function withPrefillFields(commands, resourceFields) {
+    const resourceFieldNames = new Set(resourceFields.map((field) => field.name));
+    return commands.map((command) => ({
+        ...command,
+        prefillFields: command.fields.filter((field) => resourceFieldNames.has(field.name))
+    }));
 }
 
 function buildCommandChoices(source) {

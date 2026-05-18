@@ -65,7 +65,19 @@ export const <%= resource.component %>List = () => {
         cell: ({ row }) => (
           <div className="flex gap-2">
 <% if (resource.deleteCommand) { -%>
-            <CommandButton variant="ghost" command="<%= resource.deleteCommand.name %>" recordItemId={row.original.<%= resource.idField %>} size="sm" />
+            <CommandButton
+              variant="ghost"
+              command="<%= resource.deleteCommand.name %>"
+              recordItemId={row.original.<%= resource.idField %>}
+              size="sm"
+<% if (resource.deleteCommand.prefillFields.length > 0) { -%>
+              query={{
+<% resource.deleteCommand.prefillFields.forEach((field) => { -%>
+                <%= field.name %>: row.original.<%= field.name %>,
+<% }) -%>
+              }}
+<% } -%>
+            />
 <% } -%>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -81,7 +93,19 @@ export const <%= resource.component %>List = () => {
 <% } -%>
 <% resource.itemCommands.forEach((command) => { -%>
                 <DropdownMenuItem>
-                  <CommandButton variant="ghost" command="<%= command.name %>" recordItemId={row.original.<%= resource.idField %>} size="sm" />
+                  <CommandButton
+                    variant="ghost"
+                    command="<%= command.name %>"
+                    recordItemId={row.original.<%= resource.idField %>}
+                    size="sm"
+<% if (command.prefillFields.length > 0) { -%>
+                    query={{
+<% command.prefillFields.forEach((field) => { -%>
+                      <%= field.name %>: row.original.<%= field.name %>,
+<% }) -%>
+                    }}
+<% } -%>
+                  />
                 </DropdownMenuItem>
 <% }) -%>
                 <DropdownMenuItem>

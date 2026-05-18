@@ -70,6 +70,7 @@ export const useCommandNavigation = () => {
 export type UseCommandButtonProps = {
   command: string;
   id?: string | number;
+  query?: Record<string, any>;
   resource?: string;
   meta?: Record<string, unknown>;
   accessControl?: {
@@ -91,6 +92,7 @@ export const useCommandButton = ({
   command,
   resource,
   id,
+  query,
   accessControl,
   meta,
 }: UseCommandButtonProps): CommandButtonResult => {
@@ -115,6 +117,7 @@ export const useCommandButton = ({
       resource: resourceItem?.name,
       id: id ?? paramId,
       command,
+      query,
     }),
     label: commandMeta?.label ?? command,
     hidden: hidden,

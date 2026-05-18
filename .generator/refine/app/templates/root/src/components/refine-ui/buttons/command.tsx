@@ -15,6 +15,7 @@ type CommandButtonProps = {
    * @default Reads `:id` from the URL
    */
   recordItemId?: BaseKey;
+  query?: Record<string, any>;
   /**
    * Access Control configuration for the button
    * @default `{ enabled: true, hideIfUnauthorized: false }`
@@ -34,13 +35,14 @@ export const CommandButton = React.forwardRef<
   CommandButtonProps
 >(
   (
-    { resource, command, recordItemId, accessControl, meta, children, onClick, ...rest },
+    { resource, command, recordItemId, query, accessControl, meta, children, onClick, ...rest },
     ref
   ) => {
     const { to, label, hidden, disabled } = useCommandButton({
       resource,
       command,
       id: recordItemId,
+      query,
     });
 
     const isDisabled = disabled || rest.disabled;

@@ -52,7 +52,7 @@ export const AppRouter = () => {
         <Route path="/<%= resource.route %>">
           <Route index element={<<%= resource.component %>List />} />
 <% if (resource.createCommand) { -%>
-          <Route path="create" element={<<%= resource.createCommand.pageComponent %> />} />
+          <Route path="command/<%= resource.createCommand.route %>" element={<<%= resource.createCommand.pageComponent %> />} />
 <% } -%>
 <% if (resource.editCommand) { -%>
           <Route path="edit/:id" element={<<%= resource.editCommand.pageComponent %> />} />

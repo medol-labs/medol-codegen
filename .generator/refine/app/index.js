@@ -275,6 +275,7 @@ function toAggregateResource(group, allScreens, allReadModels) {
         createCommand,
         editCommand,
         deleteCommand,
+        commands: [createCommand, deleteCommand, ...normalizedCommands.filter((command) => !reservedCommandNames.includes(command.name))].filter(Boolean),
         routedCommands: [deleteCommand, ...normalizedCommands.filter((command) => !reservedCommandNames.includes(command.name))].filter(Boolean),
         itemCommands: normalizedCommands.filter((command) => !reservedCommandNames.includes(command.name))
     };

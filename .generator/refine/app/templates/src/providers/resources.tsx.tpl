@@ -18,7 +18,7 @@ export const resources: IResourceItem[] = [
     name: "<%= resource.name %>",
     list: "/<%= resource.route %>",
 <% if (resource.createCommand) { -%>
-    create: "/<%= resource.route %>/create",
+    create: "/<%= resource.route %>/command/<%= resource.createCommand.route %>",
 <% } -%>
 <% if (resource.editCommand) { -%>
     edit: "/<%= resource.route %>/edit/:id",
@@ -27,11 +27,14 @@ export const resources: IResourceItem[] = [
     meta: {
       label: "<%= resource.label %>",
       icon: <Package />,
-<% if (resource.routedCommands.length > 0) { -%>
+<% if (resource.commands.length > 0) { -%>
       commandRoute: "/<%= resource.route %>/:id/command/:command",
       commands: {
+<% if (resource.createCommand) { -%>
+        <%= resource.createCommand.name %>: { label: "<%= resource.createCommand.label %>", route: "/<%= resource.route %>/command/<%= resource.createCommand.route %>" },
+<% } -%>
 <% resource.routedCommands.forEach((command) => { -%>
-        <%= command.name %>: { label: "<%= command.label %>" },
+        <%= command.name %>: { label: "<%= command.label %>", route: "/<%= resource.route %>/:id/command/<%= command.route %>" },
 <% }) -%>
       },
 <% } -%>

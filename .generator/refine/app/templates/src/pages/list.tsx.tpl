@@ -111,7 +111,11 @@ export const <%= resource.component %>List = () => {
 
   return (
     <ListView>
-      <ListViewHeader />
+      <ListViewHeader canCreate={false}>
+<% if (resource.createCommand) { -%>
+        <CommandButton variant="ghost" command="<%= resource.createCommand.name %>" size="sm" />
+<% } -%>
+      </ListViewHeader>
       <RefineDataTable table={table} actionBar={
 <% if (resource.deleteCommand) { -%>
         <CommandButton variant="ghost" command="<%= resource.deleteCommand.name %>" size="sm" />

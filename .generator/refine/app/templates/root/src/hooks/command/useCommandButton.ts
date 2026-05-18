@@ -28,7 +28,9 @@ export const useCommandNavigation = () => {
     id?: string | number,
   ) => {
     const template =
-      resource.meta?.commandRoute ?? "/:resource/:id/command/:command";
+      resource.meta?.commands?.[command]?.route ??
+      resource.meta?.commandRoute ??
+      "/:resource/:id/command/:command";
 
     return template
       .replace(":resource", resource.name)

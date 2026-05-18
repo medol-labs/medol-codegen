@@ -105,7 +105,9 @@ export const <%= resource.component %>List = () => {
     getRowId: (row) => String(row.<%= resource.idField %>),
     refineCoreProps: {
       syncWithLocation: true,
-      dataProviderName: "command",
+      meta: {
+        tableName: "<%= resource.tableName %>",
+      },
     },
   });
 

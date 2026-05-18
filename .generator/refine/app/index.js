@@ -247,6 +247,7 @@ function toAggregateResource(group, allScreens, allReadModels) {
         ...relatedScreens.flatMap((screen) => findDependencies(screen, 'READMODEL', allReadModels)),
         ...group.commands.flatMap((command) => findDependencies(command, 'READMODEL', allReadModels))
     ]);
+    const primaryReadModel = relatedReadModels[0];
     const modelFields = uniqueFields([
         ...relatedReadModels.flatMap((readModel) => readModel.fields ?? []),
         ...relatedScreens.flatMap((screen) => screen.fields ?? []),
@@ -268,6 +269,7 @@ function toAggregateResource(group, allScreens, allReadModels) {
         label: titleCase(title),
         route,
         name,
+        tableName: tableName(primaryReadModel, title),
         component,
         idField: idField?.name ?? 'id',
         dataProviderName: 'COMMAND_DATA_PROVIDER_NAME',
@@ -366,6 +368,21 @@ function uniqueFields(fields) {
         }
     });
     return Array.from(byName.values());
+}
+
+function tableName(readModel, fallbackTitle) {
+    if (readModel?.tableName) {
+        return readModel.tableName;
+    }
+    if (readModel?.dbName) {
+        return readModel.dbName;
+    }
+    if (readModel?.databaseName) {
+        return readModel.databaseName;
+    }
+
+    const entityName = `${pascal(readModel?.title ?? fallbackTitle)}ReadModelEntity`;
+    return snakeCase(entityName);
 }
 
 function normalizeFields(fields = []) {
@@ -470,6 +487,14 @@ function kebab(value) {
 
 function snake(value) {
     return kebab(value).replace(/-/g, '_');
+}
+
+function snakeCase(value) {
+    return String(value ?? '')
+        .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+        .replace(/[\s-]+/g, '_')
+        .replace(/__+/g, '_')
+        .toLowerCase();
 }
 
 function camel(value) {

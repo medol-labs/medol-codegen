@@ -27,6 +27,7 @@ export const resources: IResourceItem[] = [
     meta: {
       label: "<%= resource.label %>",
       icon: <Package />,
+      tableName: "<%= resource.tableName %>",
 <% if (resource.commands.length > 0) { -%>
       commandRoute: "/<%= resource.route %>/:id/command/:command",
       commands: {

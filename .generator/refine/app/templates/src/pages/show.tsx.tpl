@@ -17,7 +17,11 @@ const formatValue = (value: unknown) => {
 };
 
 export const <%= resource.component %>Show = () => {
-  const { result: record } = useShow();
+  const { result: record } = useShow({
+    meta: {
+      tableName: "<%= resource.tableName %>",
+    },
+  });
 
   return (
     <ShowView>

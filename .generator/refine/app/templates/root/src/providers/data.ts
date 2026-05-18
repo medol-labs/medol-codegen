@@ -14,6 +14,21 @@ import { supabaseClient } from "./supabase-client";
 
 const provider = supabaseDataProvider(supabaseClient) as Required<DataProvider>;
 
+const withTableName = <TParams extends { resource: string; meta?: Record<string, any> }>(
+  params: TParams,
+): TParams => {
+  const tableName = params.meta?.tableName;
+
+  if (!tableName || typeof tableName !== "string") {
+    return params;
+  }
+
+  return {
+    ...params,
+    resource: tableName,
+  };
+};
+
 const camelcaseData = async <T extends { data?: unknown }>(
   promise: Promise<T>,
 ): Promise<T> => {
@@ -36,13 +51,13 @@ export const dataProvider: Required<DataProvider> = {
   getList: <TData extends BaseRecord = BaseRecord>(
     params: GetListParams,
   ): Promise<GetListResponse<TData>> =>
-    camelcaseData(provider.getList<TData>(params)),
+    camelcaseData(provider.getList<TData>(withTableName(params))),
   getMany: <TData extends BaseRecord = BaseRecord>(
     params: GetManyParams,
   ): Promise<GetManyResponse<TData>> =>
-    camelcaseData(provider.getMany<TData>(params)),
+    camelcaseData(provider.getMany<TData>(withTableName(params))),
   getOne: <TData extends BaseRecord = BaseRecord>(
     params: GetOneParams,
   ): Promise<GetOneResponse<TData>> =>
-    camelcaseData(provider.getOne<TData>(params)),
+    camelcaseData(provider.getOne<TData>(withTableName(params))),
 };

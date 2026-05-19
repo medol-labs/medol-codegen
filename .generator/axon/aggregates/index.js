@@ -48,6 +48,8 @@ module.exports = class extends Generator {
                 type: 'list',
                 name: 'aggregate',
                 message: 'Which Aggregate should be generated?',
+                loop: false,
+                pageSize: config?.aggregates?.length,
                 choices: config?.aggregates?.map((item, idx) => item.title).sort()
             },
             {
@@ -69,9 +71,10 @@ module.exports = class extends Generator {
     }
 
     _writeAggregates(aggregate) {
-        var fields = aggregate?.fields?.filter(it => it.name !== "aggregateId").filter(it => !it.idAttribute)
-        var idFields = idField(aggregate)
-        var idFieldType = idType(aggregate)
+        var aggregateIdField = this._aggregateIdField(aggregate)
+        var fields = aggregate?.fields?.filter(it => it.name !== aggregateIdField.name).filter(it => !it.idAttribute)
+        var idFields = aggregateIdField.name
+        var idFieldType = typeMapping(aggregateIdField.type, aggregateIdField.cardinality, aggregateIdField.optional, aggregateIdField.mutable)
 
 
         const fileExists = fileExistsByGlob(
@@ -95,20 +98,36 @@ module.exports = class extends Generator {
                 _idField: idFields,
                 _idType: idFieldType,
                 _typeImports: typeImports(fields),
-                _commandHandlers: this._renderCommandHandlers(aggregate),
+                _commandHandlers: this._renderCommandHandlers(aggregate, aggregateIdField),
                 _elementImports: this._generateImports(aggregate, this.givenAnswers.rootPackageName, config.codeGen?.contextPackage)
 
             }
         )
     }
 
-    _renderCommandHandlers(aggregate) {
-
-
-        var commands = config.slices
+    _aggregateCommands(aggregate) {
+        return config.slices
             .filter(slice => this.answers.aggregate_slices?.includes(slice.title))
             .flatMap(it => it.commands)
             .filter(it => it.aggregateDependencies?.includes(aggregate.title));
+    }
+
+    _aggregateIdField(aggregate) {
+        var aggregateField = aggregate.fields?.find(it => it.idAttribute)
+        if (aggregateField) {
+            return aggregateField
+        }
+
+        var commandFields = this._aggregateCommands(aggregate).flatMap(command => command.fields ?? [])
+        return commandFields.find(field => field.idAttribute && field.generated)
+            ?? commandFields.find(field => field.idAttribute)
+            ?? {name: "aggregateId", type: "UUID", cardinality: "Single", optional: false}
+    }
+
+    _renderCommandHandlers(aggregate, aggregateIdField) {
+
+
+        var commands = this._aggregateCommands(aggregate);
 
         var handlers = commands.map((command) => {
             var eventDeps = uniqBy(command.dependencies.filter(it => it.type === "OUTBOUND")
@@ -137,13 +156,33 @@ module.exports = class extends Generator {
         @EventSourcingHandler
         fun on(event: ${_eventTitle(event.title)}){
         // handle event
-            ${variableAssignments(aggregate.fields, "event", event, ",\n", "=")}
+            ${this._renderEventSourcingAssignments(aggregate, event, aggregateIdField, command.createsAggregate)}
         }`).join("\n")}
         `
         })
 
         return handlers.join("\n")
 
+    }
+
+    _renderEventSourcingAssignments(aggregate, event, aggregateIdField, assignAggregateId) {
+        var assignments = []
+        if (assignAggregateId && event.fields?.some(field => field.name === aggregateIdField.name)) {
+            assignments.push(`${aggregateIdField.name}=event.${aggregateIdField.name}`)
+        }
+
+        var aggregateAssignments = variableAssignments(
+            aggregate.fields?.filter(field => field.name !== aggregateIdField.name).filter(field => !field.idAttribute),
+            "event",
+            event,
+            ",\n",
+            "="
+        )
+        if (aggregateAssignments) {
+            assignments.push(aggregateAssignments)
+        }
+
+        return assignments.join(",\n")
     }
 
     _generateImports(aggregate, rootPackageName, contextPackage) {

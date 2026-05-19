@@ -55,13 +55,13 @@ module.exports = class extends Generator {
 
         slice.specifications?.filter(it => !it?.vertical).forEach((specification) => {
 
-            var given = specification.given.sort((a, b) => a.index - b.index)
-            var when = specification.when?.[0]
-            var then = specification.then.sort((a, b) => a.index - b.index)
+            var given = this._specGiven(specification)
+            var when = this._specWhen(specification)
+            var then = this._specThen(specification)
             var comment = specification?.comments?.map(it => it.description)?.join("\n")
 
             var allElements = given.concat(when).concat(then).filter(item => item);
-            var allFields = allElements.flatMap((item) => item.fields)
+            var allFields = allElements.flatMap((item) => item.fields ?? [])
             var _elementImports = generateImports(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, title, allElements)
             var _typeImports = typeImports(allFields)
             var aggregateId = uuidv4()
@@ -103,7 +103,7 @@ module.exports = class extends Generator {
                         _given: this._renderReadModelGiven(commands),
                         _then: this._renderProcessorThen(then),
                         // take first aggregate
-                        _aggregate: _aggregateTitle((slice.aggregates || [])[0]),
+                        _aggregate: this._aggregateClassName(slice),
                         _aggregateId: aggregateId,
                         link: boardlLink(config.boardId, specification.id)
 
@@ -137,7 +137,7 @@ module.exports = class extends Generator {
                         _given: this._renderReadModelGiven(commands),
                         _then: this._renderReadModelThen(commands, then, defaults),
                         // take first aggregate
-                        _aggregate: _aggregateTitle((slice.aggregates || [])[0]),
+                        _aggregate: this._aggregateClassName(slice),
                         _aggregateId: aggregateId,
                         link: boardlLink(config.boardId, specification.id)
 
@@ -170,7 +170,7 @@ module.exports = class extends Generator {
                         _then: renderThen(when, then, defaults),
                         _thenExpectations: renderThenExpectation(when, then, defaults),
                         // take first aggregate
-                        _aggregate: _aggregateTitle((slice.aggregates || [])[0]),
+                        _aggregate: this._aggregateClassName(slice),
                         _aggregateId: aggregateId,
                         link: boardlLink(config.boardId, specification.id)
 
@@ -179,6 +179,58 @@ module.exports = class extends Generator {
             }
         })
 
+    }
+
+    _specGiven(specification) {
+        if (specification.given) {
+            return specification.given.sort((a, b) => a.index - b.index)
+        }
+
+        return (specification.dependencies ?? [])
+            .filter(it => it.type === "INBOUND" && it.elementType === "EVENT")
+            .map(it => this._dependencyElement(it))
+            .filter(it => it)
+    }
+
+    _specWhen(specification) {
+        if (specification.when?.[0]) {
+            return specification.when[0]
+        }
+
+        return (specification.dependencies ?? [])
+            .filter(it => it.type === "INBOUND" && it.elementType === "COMMAND")
+            .map(it => this._dependencyElement(it))
+            .find(it => it)
+    }
+
+    _specThen(specification) {
+        if (specification.then) {
+            return specification.then.sort((a, b) => a.index - b.index)
+        }
+
+        return (specification.dependencies ?? [])
+            .filter(it => it.type === "OUTBOUND")
+            .map(it => this._dependencyElement(it))
+            .filter(it => it)
+    }
+
+    _aggregateClassName(slice) {
+        var aggregate = (slice.aggregates ?? [])[0]
+        var aggregateTitle = aggregate?.title ?? aggregate?.name ?? aggregate
+        return _aggregateTitle(aggregateTitle ?? "Aggregate")
+    }
+
+    _dependencyElement(dependency) {
+        var element = this._findElementById(dependency.id)
+        var elementType = dependency.elementType ?? element?.type
+        var specType = elementType?.startsWith("SPEC_") ? elementType : `SPEC_${elementType}`
+
+        return element ? {
+            ...element,
+            type: specType,
+            linkedId: dependency.id,
+            index: dependency.index ?? 0
+        } : undefined
     }
 
     _commandImports(rootPackage, contextPackage, commands) {
@@ -281,6 +333,18 @@ module.exports = class extends Generator {
         return config.slices.filter(it => it.commands.some(item => item.id === id))[0]
     }
 
+    _findCommandById(id) {
+        return config.slices.flatMap(item => item.commands ?? []).find(item => item.id === id)
+    }
+
+    _findElementById(id) {
+        return config.slices.flatMap(item => [
+            ...(item.events ?? []),
+            ...(item.readmodels ?? []),
+            ...(item.commands ?? [])
+        ]).find(item => item.id === id)
+    }
+
 
 };
 
@@ -289,13 +353,16 @@ const generateImports = (rootPackageName, contextPackage, sliceName, elements) =
     var imports = elements?.map((element) => {
         switch (element.type?.toLowerCase()) {
             case "spec_event":
+            case "event":
                 return `import ${_packageName(rootPackageName, null, false)}.events.${_eventTitle(element.title)}`
             case "spec_command":
+            case "command":
                 return `import ${_packageName(rootPackageName, contextPackage, false)}.domain.commands.${sliceName}.${_commandTitle(element.title)}`
             case "spec_readmodel":
+            case "readmodel":
                 return `import ${_packageName(rootPackageName, contextPackage, false)}.${sliceName}.${_readmodelTitle(element.title)}`
             default:
-                console.log("Could not determine imports")
+                console.log(`Could not determine imports for ${element?.title ?? "unknown element"} (${element?.type ?? "unknown type"})`)
                 return ""
         }
     })
@@ -326,14 +393,32 @@ const typeImports = (fields) => {
 }
 
 const defaultValue = (type, cardinality = "single", name, defaults) => {
-    if (cardinality?.toLowerCase() !== "list" && defaults[name]) {
+    const isList = cardinality?.toLowerCase() === "list"
+    if (!type) {
+        return "null"
+    }
+    if (!isList && defaults[name]) {
         return renderVariable(defaults[name], type, name, defaults)
     }
     switch (type.toLowerCase()) {
         case "string":
-            return cardinality.toLowerCase() === "list" ? "[]" : "\"\"";
+            return isList ? "[]" : "\"\"";
         case "boolean":
-            return cardinality.toLowerCase() === "list" ? "[]" : "false";
+            return isList ? "[]" : "false";
+        case "uuid":
+            return isList ? "[]" : "UUID.randomUUID()";
+        case "date":
+            return isList ? "[]" : "LocalDate.now()";
+        case "datetime":
+            return isList ? "[]" : "LocalDateTime.now()";
+        case "int":
+            return isList ? "[]" : "0";
+        case "long":
+            return isList ? "[]" : "0L";
+        case "double":
+            return isList ? "[]" : "0.0";
+        default:
+            return isList ? "[]" : "null";
     }
 }
 
@@ -414,6 +499,9 @@ function renderGiven(givenList, paramDefaults) {
 }
 
 function renderVariable(variableValue, variableType, variableName, defaults) {
+    if (!variableType) {
+        return "null"
+    }
 
     var value = variableValue
     if (!variableValue && defaults[variableName]) {

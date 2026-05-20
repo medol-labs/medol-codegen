@@ -72,7 +72,11 @@ module.exports = class extends Generator {
 
     _writeAggregates(aggregate) {
         var aggregateIdField = this._aggregateIdField(aggregate)
-        var fields = aggregate?.fields?.filter(it => it.name !== aggregateIdField.name).filter(it => !it.idAttribute)
+        var fields = aggregate?.fields?.filter(it => it.name !== aggregateIdField.name).filter(it => !it.idAttribute) ?? []
+        var stateField = this._aggregateStateField(aggregate, fields)
+        if (stateField) {
+            fields = fields.concat(stateField)
+        }
         var idFields = aggregateIdField.name
         var idFieldType = typeMapping(aggregateIdField.type, aggregateIdField.cardinality, aggregateIdField.optional, aggregateIdField.mutable)
 
@@ -122,6 +126,19 @@ module.exports = class extends Generator {
         return commandFields.find(field => field.idAttribute && field.generated)
             ?? commandFields.find(field => field.idAttribute)
             ?? {name: "aggregateId", type: "UUID", cardinality: "Single", optional: false}
+    }
+
+    _aggregateStateField(aggregate, fields) {
+        if (!aggregate.states?.length || fields.some(field => field.name === "state")) {
+            return undefined
+        }
+
+        return {
+            name: "state",
+            type: "String",
+            cardinality: "Single",
+            optional: true
+        }
     }
 
     _renderCommandHandlers(aggregate, aggregateIdField) {
@@ -175,14 +192,25 @@ module.exports = class extends Generator {
             aggregate.fields?.filter(field => field.name !== aggregateIdField.name).filter(field => !field.idAttribute),
             "event",
             event,
-            ",\n",
+            "\n",
             "="
         )
         if (aggregateAssignments) {
             assignments.push(aggregateAssignments)
         }
 
-        return assignments.join(",\n")
+        var stateChange = this._stateChangeForEvent(event)
+        if (stateChange) {
+            assignments.push(`state="${constantCase(stateChange.to)}"`)
+        }
+
+        return assignments.join("\n")
+    }
+
+    _stateChangeForEvent(event) {
+        return config.slices
+            .map(slice => slice.stateChange)
+            .find(stateChange => stateChange?.eventId === event.id)
     }
 
     _generateImports(aggregate, rootPackageName, contextPackage) {
@@ -299,4 +327,12 @@ const typeImports = (fields) => {
     })
     return imports?.flat().join(";\n")
 
+}
+
+const constantCase = (value) => {
+    return `${value}`
+        .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+        .replace(/[\s-]+/g, "_")
+        .replace(/_+/g, "_")
+        .toUpperCase()
 }

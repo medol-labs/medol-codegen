@@ -593,7 +593,7 @@ fun on(event: ${_eventTitle(it.title)}) {
     //throws exception if not available (adjust logic)
     val entity = this.repository.findById(${readModelTitle}Key(${VariablesGenerator.generateInvocation(readModelIdFields, "event")})).orElse(${_readmodelTitle(readModel.title)}Entity())
     entity.apply {
-        ${variableAssignments(readModel.fields, "event", it, "\n")}
+        ${readModelAssignments(readModel, it, "\n")}
     }.also { this.repository.save(it) }
 }`
         }).join("\n")
@@ -607,7 +607,7 @@ fun on(event: ${_eventTitle(it.title)}) {
     //throws exception if not available (adjust logic)
     val entity = this.repository.findById(event.${idField(readModel)}).orElse(${_readmodelTitle(readModel.title)}Entity())
     entity.apply {
-        ${variableAssignments(readModel.fields, "event", it, "\n")}
+        ${readModelAssignments(readModel, it, "\n")}
     }.also { this.repository.save(it) }
 }`
         }).join("\n")
@@ -955,7 +955,7 @@ _renderReadModelSwitchCase = (readModel, events) => {
              ${events.map(event => {
             return `
                     is ${_eventTitle(event.title)} -> {
-                                ${variableAssignments(readModel.fields, "event", event, "\n")}                        
+                                ${readModelAssignments(readModel, event, "\n")}                        
                     }   
                  `
         }).join("\n")}
@@ -970,7 +970,7 @@ _renderReadModelSwitchCase = (readModel, events) => {
              ${events.map(event => {
             return `
                     is ${_eventTitle(event.title)} -> {
-                                this.data.add(Item(${variableAssignments(readModel.fields, "event", event, ",\n")}))
+                                this.data.add(Item(${readModelAssignments(readModel, event, ",\n")}))
                                                            
                     }   
                  `
@@ -980,6 +980,32 @@ _renderReadModelSwitchCase = (readModel, events) => {
             
         `
     }
+}
+
+const readModelAssignments = (readModel, event, separator = "\n") => {
+    var assignments = variableAssignments(readModel.fields, "event", event, separator)
+    var stateChange = stateChangeForEvent(event)
+
+    if (stateChange && readModel.fields?.some(field => field.name === "state") && !event.fields?.some(field => field.name === "state")) {
+        var stateAssignment = `\t\t\tstate="${constantCase(stateChange.to)}"`
+        assignments = assignments ? [assignments, stateAssignment].join(separator) : stateAssignment
+    }
+
+    return assignments
+}
+
+const stateChangeForEvent = (event) => {
+    return config.slices
+        .map(slice => slice.stateChange)
+        .find(stateChange => stateChange?.eventId === event.id)
+}
+
+const constantCase = (value) => {
+    return `${value}`
+        .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+        .replace(/[\s-]+/g, "_")
+        .replace(/_+/g, "_")
+        .toUpperCase()
 }
 
 

@@ -983,10 +983,12 @@ _renderReadModelSwitchCase = (readModel, events) => {
 }
 
 const readModelAssignments = (readModel, event, separator = "\n") => {
-    var assignments = variableAssignments(readModel.fields, "event", event, separator)
     var stateChange = stateChangeForEvent(event)
+    var shouldAssignState = stateChange && readModel.fields?.some(field => field.name === "state") && !event.fields?.some(field => field.name === "state")
+    var fields = shouldAssignState ? readModel.fields?.filter(field => field.name !== "state") : readModel.fields
+    var assignments = variableAssignments(fields, "event", event, separator, "=", {includeUnmapped: true})
 
-    if (stateChange && readModel.fields?.some(field => field.name === "state") && !event.fields?.some(field => field.name === "state")) {
+    if (shouldAssignState) {
         var stateAssignment = `\t\t\tstate="${constantCase(stateChange.to)}"`
         assignments = assignments ? [assignments, stateAssignment].join(separator) : stateAssignment
     }

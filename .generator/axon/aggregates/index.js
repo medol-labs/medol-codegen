@@ -164,7 +164,7 @@ module.exports = class extends Generator {
         fun handle(command: ${_commandTitle(command.title)}) {
            ${events.map(event => {
                 return `
-               AggregateLifecycle.apply(${_eventTitle(event.title)}(${variableAssignments(command.fields, "command", event, ",\n", "=")}))
+               AggregateLifecycle.apply(${_eventTitle(event.title)}(${variableAssignments(event.fields, "command", command, ",\n", "=", {includeUnmapped: true})}))
                `
             }).join("\n")}
         }

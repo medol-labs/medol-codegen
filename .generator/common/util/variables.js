@@ -12,12 +12,15 @@ const variables = (elements, separator = "\n") => {
     return fields
 }
 
-const variableAssignments = (elementFields, sourceName, source, separator, assignmentOperator) => {
+const variableAssignments = (elementFields, sourceName, source, separator, assignmentOperator, options = {}) => {
 
     var fields = elementFields?.map(field => {
         var sourceMapping = processSourceMapping(field, sourceName, source, assignmentOperator)
         if (sourceMapping) {
             return `\t\t\t${sourceMapping}`
+        }
+        if (options.includeUnmapped) {
+            return `\t\t\t${fallbackAssignment(field, assignmentOperator)}`
         }
     }).filter(it => it).join(separator ? separator : ",\n")
     return fields
@@ -50,6 +53,39 @@ const processSourceMapping = (targetField, sourceName, source, assigmentOperator
     }
     //return `${targetField.name}${assigmentOperator}${sourceName}.${targetField.name}`
     return ``
+}
+
+const fallbackAssignment = (field, assigmentOperator = "=") => {
+    return `${field.name}${assigmentOperator}${fallbackValue(field)} /* TODO fill ${field.name} */`
+}
+
+const fallbackValue = (field) => {
+    if (field.optional) {
+        return "null"
+    }
+    if (field.cardinality?.toLowerCase() === "list") {
+        return "emptyList()"
+    }
+
+    switch (field.type?.toLowerCase()) {
+        case "boolean":
+            return "false"
+        case "uuid":
+            return "java.util.UUID.randomUUID()"
+        case "date":
+            return "java.time.LocalDate.now()"
+        case "datetime":
+            return "java.time.LocalDateTime.now()"
+        case "int":
+            return "0"
+        case "long":
+            return "0L"
+        case "double":
+            return "0.0"
+        case "string":
+        default:
+            return "\"\""
+    }
 }
 
 module.exports = {variables, variableAssignments, processSourceMapping}

@@ -19,6 +19,9 @@ const variableAssignments = (elementFields, sourceName, source, separator, assig
         if (sourceMapping) {
             return `\t\t\t${sourceMapping}`
         }
+        if (options.fallbacks?.[field.name]) {
+            return `\t\t\t${field.name}${assignmentOperator}${options.fallbacks[field.name]}`
+        }
         if (options.includeUnmapped) {
             return `\t\t\t${fallbackAssignment(field, assignmentOperator)}`
         }

@@ -587,13 +587,15 @@ module.exports = class extends Generator {
         var readModelTitle = _readmodelTitle(readModel.title)
         var readModelIdFields = readModel.fields.filter(it => it.idAttribute)
         return events.map(it => {
+            var lookup = this._readModelLookup(readModel, it)
             return `
 @EventHandler
 fun on(event: ${_eventTitle(it.title)}) {
     //throws exception if not available (adjust logic)
-    val entity = this.repository.findById(${readModelTitle}Key(${VariablesGenerator.generateInvocation(readModelIdFields, "event")})).orElse(${_readmodelTitle(readModel.title)}Entity())
+    ${lookup.declarations}
+    val entity = this.repository.findById(${readModelTitle}Key(${lookup.expressions.join(", ")})).orElse(${_readmodelTitle(readModel.title)}Entity())
     entity.apply {
-        ${readModelAssignments(readModel, it, "\n")}
+        ${readModelAssignments(readModel, it, "\n", lookup.fallbacks)}
     }.also { this.repository.save(it) }
 }`
         }).join("\n")
@@ -601,16 +603,40 @@ fun on(event: ${_eventTitle(it.title)}) {
 
     _renderEventHandlers(readModel, events) {
         return events.map(it => {
+            var lookup = this._readModelLookup(readModel, it)
             return `
 @EventHandler
 fun on(event: ${_eventTitle(it.title)}) {
     //throws exception if not available (adjust logic)
-    val entity = this.repository.findById(event.${idField(readModel)}).orElse(${_readmodelTitle(readModel.title)}Entity())
+    ${lookup.declarations}
+    val entity = this.repository.findById(${lookup.expressions[0]}).orElse(${_readmodelTitle(readModel.title)}Entity())
     entity.apply {
-        ${readModelAssignments(readModel, it, "\n")}
+        ${readModelAssignments(readModel, it, "\n", lookup.fallbacks)}
     }.also { this.repository.save(it) }
 }`
         }).join("\n")
+    }
+
+    _readModelLookup(readModel, event) {
+        var idFields = readModel.fields.filter(field => field.idAttribute)
+        var fallbacks = {}
+        var declarations = []
+        var expressions = idFields.map(field => {
+            if (event.fields?.some(eventField => eventField.name === field.name)) {
+                return `event.${field.name}`
+            }
+
+            var fallbackName = `${field.name}ForLookup`
+            fallbacks[field.name] = fallbackName
+            declarations.push(`val ${fallbackName} = ${fallbackValue(field)} /* TODO resolve ${field.name} for ${_eventTitle(event.title)} */`)
+            return fallbackName
+        })
+
+        return {
+            declarations: declarations.join("\n    "),
+            expressions,
+            fallbacks
+        }
     }
 
     _writeRestControllers(sliceName) {
@@ -982,11 +1008,11 @@ _renderReadModelSwitchCase = (readModel, events) => {
     }
 }
 
-const readModelAssignments = (readModel, event, separator = "\n") => {
+const readModelAssignments = (readModel, event, separator = "\n", fallbacks = {}) => {
     var stateChange = stateChangeForEvent(event)
     var shouldAssignState = stateChange && readModel.fields?.some(field => field.name === "state") && !event.fields?.some(field => field.name === "state")
     var fields = shouldAssignState ? readModel.fields?.filter(field => field.name !== "state") : readModel.fields
-    var assignments = variableAssignments(fields, "event", event, separator, "=", {includeUnmapped: true})
+    var assignments = variableAssignments(fields, "event", event, separator, "=", {includeUnmapped: true, fallbacks})
 
     if (shouldAssignState) {
         var stateAssignment = `\t\t\tstate="${constantCase(stateChange.to)}"`
@@ -1008,6 +1034,35 @@ const constantCase = (value) => {
         .replace(/[\s-]+/g, "_")
         .replace(/_+/g, "_")
         .toUpperCase()
+}
+
+const fallbackValue = (field) => {
+    if (field.optional) {
+        return "null"
+    }
+    if (field.cardinality?.toLowerCase() === "list") {
+        return "emptyList()"
+    }
+
+    switch (field.type?.toLowerCase()) {
+        case "boolean":
+            return "false"
+        case "uuid":
+            return "java.util.UUID.randomUUID()"
+        case "date":
+            return "java.time.LocalDate.now()"
+        case "datetime":
+            return "java.time.LocalDateTime.now()"
+        case "int":
+            return "0"
+        case "long":
+            return "0L"
+        case "double":
+            return "0.0"
+        case "string":
+        default:
+            return "\"\""
+    }
 }
 
 

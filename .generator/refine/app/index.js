@@ -187,7 +187,7 @@ module.exports = class extends Generator {
 function buildFrontendModel(source, selectedCommandKeys) {
     const slices = source.slices ?? [];
     const allAggregates = source.aggregates ?? [];
-    const allChapters = source.chapters ?? source.chapter ?? [];
+    const allContexts = source.contexts ?? source.context ?? [];
     const allReadModels = slices.flatMap((slice) => slice.readmodels ?? []);
     const allScreens = slices.flatMap((slice) => slice.screens ?? []);
     const selected = selectedCommandKeys ? new Set(selectedCommandKeys) : null;
@@ -198,7 +198,7 @@ function buildFrontendModel(source, selectedCommandKeys) {
             .filter((command) => command?.title)
             .filter((command) => !selected || selected.has(commandKey(command)))
             .forEach((command) => {
-                const aggregate = aggregateName(command, slice, allAggregates, allChapters);
+                const aggregate = aggregateName(command, slice, allAggregates, allContexts);
                 if (!commandsByAggregate.has(aggregate.key)) {
                     commandsByAggregate.set(aggregate.key, {
                         ...aggregate,
@@ -333,7 +333,7 @@ function buildCommandChoices(source) {
                 const key = commandKey(command);
                 if (!choicesByKey.has(key)) {
                     choicesByKey.set(key, {
-                        name: `${aggregateName(command, slice, source.aggregates ?? [], source.chapters ?? source.chapter ?? []).title} -> ${cleanTitle(command.title)}`,
+                        name: `${aggregateName(command, slice, source.aggregates ?? [], source.contexts ?? source.context ?? []).title} -> ${cleanTitle(command.title)}`,
                         value: key,
                         checked: true
                     });
@@ -361,30 +361,28 @@ function commandKey(command) {
     return String(command.id ?? command.title);
 }
 
-function aggregateName(command, slice, aggregates = [], chapters = []) {
+function aggregateName(command, slice, aggregates = [], contexts = []) {
     const title = cleanTitle(command.aggregateName ?? command.aggregate ?? slice?.title ?? 'app');
     const aggregate = findAggregate(command, title, aggregates);
-    const chapter = chapterName(
-        command.chapter
-        ?? command.chapterName
-        ?? aggregate?.chapter
-        ?? aggregate?.chapterName
-        ?? findChapterForAggregate(title, chapters)
-        ?? slice?.chapter
-        ?? slice?.chapterName
+    const context = contextName(
+        command.modelContext
+        ?? aggregate?.modelContext
+        ?? findContextForAggregate(title, contexts)
+        ?? slice?.context
+        ?? slice?.modelContext
     );
 
     return {
         key: kebab(title),
         title,
-        chapter
+        chapter: context
     };
 }
 
-function findChapterForAggregate(aggregateTitle, chapters) {
+function findContextForAggregate(aggregateTitle, contexts) {
     const normalizedAggregateTitle = cleanTitle(aggregateTitle).toLowerCase();
-    return normalizeArray(chapters).find((chapter) => {
-        return normalizeArray(chapter?.aggregates)
+    return normalizeArray(contexts).find((context) => {
+        return normalizeArray(context?.aggregates)
             .map((aggregate) => cleanTitle(typeof aggregate === 'string' ? aggregate : aggregate.title ?? aggregate.name).toLowerCase())
             .includes(normalizedAggregateTitle);
     });
@@ -418,7 +416,7 @@ function findAggregate(command, title, aggregates) {
     });
 }
 
-function chapterName(value) {
+function contextName(value) {
     if (!value) {
         return null;
     }

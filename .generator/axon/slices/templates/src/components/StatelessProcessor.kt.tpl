@@ -1,7 +1,7 @@
 package <%= _packageName%>.<%=_slice%>.internal
 
-import <%= _packageName%>.<%=_readModelSlice%>.<%- _readModel %>
-import <%= _packageName%>.<%=_readModelSlice%>.<%- _readModel %>Query
+import <%= _readModelPackageName%>.<%=_readModelSlice%>.<%- _readModel %>
+import <%= _readModelPackageName%>.<%=_readModelSlice%>.<%- _readModel %>Query
 import <%= _rootPackageName%>.common.Processor
 import org.axonframework.commandhandling.gateway.CommandGateway
 import org.axonframework.queryhandling.QueryGateway
@@ -28,4 +28,3 @@ class <%= _name%>: Processor {
 <%- _triggers%>
 
 }
-

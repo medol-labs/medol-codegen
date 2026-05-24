@@ -11,7 +11,8 @@ const {
     _commandTitle,
     _eventTitle,
     _readmodelTitle,
-    _sliceTitle
+    _sliceTitle,
+    _packageFolderName
 } = require("../../common/util/naming")
 const {variableAssignments, processSourceMapping} = require("../../common/util/variables");
 const {idField, uniqBy} = require("../../common/util/util");
@@ -20,6 +21,7 @@ const {analyzeSpecs} = require("../../common/util/specs");
 const {fileExistsByGlob} = require("../../common/util/files");
 
 let config = {}
+const ALL_AGGREGATES = "All Aggregates"
 
 module.exports = class extends Generator {
 
@@ -49,14 +51,15 @@ module.exports = class extends Generator {
                 name: 'aggregate',
                 message: 'Which Aggregate should be generated?',
                 loop: false,
-                pageSize: config?.aggregates?.length,
-                choices: config?.aggregates?.map((item, idx) => item.title).sort()
+                pageSize: (config?.aggregates?.length ?? 0) + 1,
+                choices: [ALL_AGGREGATES].concat(config?.aggregates?.map((item, idx) => item.title).sort() ?? [])
             },
             {
                 type: 'checkbox',
                 name: 'aggregate_slices',
                 loop: false,
                 message: 'Choose for which Slices to generate Commands- and Eventsourcing Handlers. (generates to .tmp file)',
+                when: (items) => items.aggregate !== ALL_AGGREGATES,
                 choices: (items) => config.slices.filter((slice) => !items.context || items.context?.length === 0 || items.context?.includes(slice.context))
                     .filter(slice => {
                         return slice.commands?.some(command => command.aggregateDependencies?.includes(items.aggregate))
@@ -67,6 +70,14 @@ module.exports = class extends Generator {
     }
 
     writeAggregates() {
+        if (this.answers.aggregate === ALL_AGGREGATES) {
+            config.aggregates.forEach(aggregate => {
+                this.answers.aggregate_slices = this._aggregateSliceTitles(aggregate)
+                this._writeAggregates(aggregate)
+            })
+            return
+        }
+
         this._writeAggregates(config.aggregates.find(item => item.title === this.answers.aggregate))
     }
 
@@ -79,10 +90,11 @@ module.exports = class extends Generator {
         }
         var idFields = aggregateIdField.name
         var idFieldType = typeMapping(aggregateIdField.type, aggregateIdField.cardinality, aggregateIdField.optional, aggregateIdField.mutable)
+        var contextPackageName = this._aggregateContextPackage(aggregate)
 
 
         const fileExists = fileExistsByGlob(
-            `./src/main/kotlin/${this.givenAnswers.rootPackageName.split(".").join("/")}/domain`,
+            `./src/main/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, contextPackageName, false)}/domain`,
             `${_aggregateTitle(aggregate.title)}.kt`,
             false
         );
@@ -90,10 +102,10 @@ module.exports = class extends Generator {
 
         this.fs.copyTpl(
             this.templatePath(`src/components/Aggregate.kt.tpl`),
-            this.destinationPath(`./src/main/kotlin/${this.givenAnswers.rootPackageName.split(".").join("/")}/domain/${aggregateFile}`),
+            this.destinationPath(`./src/main/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, contextPackageName, false)}/domain/${aggregateFile}`),
             {
                 _rootPackageName: this.givenAnswers.rootPackageName,
-                _packageName: _packageName(this.givenAnswers.rootPackageName, config?.codeGen?.contextPackage, false),
+                _packageName: _packageName(this.givenAnswers.rootPackageName, contextPackageName, false),
                 _name: _aggregateTitle(aggregate.title),
                 _fields: VariablesGenerator.generateVariables(
                     //aggregate Id is rendered anyways. for this case just filter it
@@ -103,7 +115,7 @@ module.exports = class extends Generator {
                 _idType: idFieldType,
                 _typeImports: typeImports(fields),
                 _commandHandlers: this._renderCommandHandlers(aggregate, aggregateIdField),
-                _elementImports: this._generateImports(aggregate, this.givenAnswers.rootPackageName, config.codeGen?.contextPackage)
+                _elementImports: this._generateImports(aggregate, this.givenAnswers.rootPackageName)
 
             }
         )
@@ -114,6 +126,12 @@ module.exports = class extends Generator {
             .filter(slice => this.answers.aggregate_slices?.includes(slice.title))
             .flatMap(it => it.commands)
             .filter(it => it.aggregateDependencies?.includes(aggregate.title));
+    }
+
+    _aggregateSliceTitles(aggregate) {
+        return config.slices
+            .filter(slice => slice.commands?.some(command => command.aggregateDependencies?.includes(aggregate.title)))
+            .map(slice => slice.title)
     }
 
     _aggregateIdField(aggregate) {
@@ -213,19 +231,32 @@ module.exports = class extends Generator {
             .find(stateChange => stateChange?.eventId === event.id)
     }
 
-    _generateImports(aggregate, rootPackageName, contextPackage) {
+    _aggregateContextPackage(aggregate) {
+        var slice = config.slices.find(slice =>
+            this.answers.aggregate_slices?.includes(slice.title)
+            && slice.commands?.some(command => command.aggregateDependencies?.includes(aggregate.title))
+        )
+        return contextPackage(slice?.context)
+    }
+
+    _sliceContextPackage(sliceName) {
+        return contextPackage(config.slices.find(slice => slice.title === sliceName)?.context)
+    }
+
+    _generateImports(aggregate, rootPackageName) {
 
         var commands = config.slices
             .filter(slice => this.answers.aggregate_slices?.includes(slice.title))
             .flatMap(it => it.commands)
             .filter(it => it.aggregateDependencies?.includes(aggregate.title));
 
-        var events = commands.flatMap(command => command.dependencies.filter(it => it.type === "OUTBOUND")
-            .filter(it => it.elementType === "EVENT"))
+        var eventDeps = commands.flatMap(command => command.dependencies.filter(it => it.type === "OUTBOUND")
+            .filter(it => it.elementType === "EVENT").map(it => it.id))
+        var events = config.slices.flatMap(slice => slice.events ?? []).filter(event => eventDeps.includes(event.id))
         var commandImports = commands?.map((command) =>
-            `import ${_packageName(rootPackageName, contextPackage, false)}.domain.commands.${_sliceTitle(command.slice)}.${_commandTitle(command.title)}`) ?? []
+            `import ${_packageName(rootPackageName, this._sliceContextPackage(command.slice), false)}.domain.commands.${_sliceTitle(command.slice)}.${_commandTitle(command.title)}`) ?? []
         var eventImports = events?.map((event) =>
-            `import ${_packageName(rootPackageName, null, false)}.events.${_eventTitle(event.title)}`) ?? []
+            `import ${_packageName(rootPackageName, this._sliceContextPackage(event.slice), false)}.events.${_eventTitle(event.title)}`) ?? []
 
         return commandImports.concat(eventImports).join("\n")
     }
@@ -335,4 +366,8 @@ const constantCase = (value) => {
         .replace(/[\s-]+/g, "_")
         .replace(/_+/g, "_")
         .toUpperCase()
+}
+
+function contextPackage(context) {
+    return context ? slugify(`${context}`).replaceAll("-", "").replaceAll("_", "").toLowerCase() : undefined
 }

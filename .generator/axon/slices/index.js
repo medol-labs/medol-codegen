@@ -133,11 +133,32 @@ module.exports = class extends Generator {
 
     }
 
+    _contextPackage(slice) {
+        return contextPackage(slice?.context)
+    }
+
+    _contextPackageForSliceName(sliceName) {
+        return this._contextPackage(this._findSlice(sliceName))
+    }
+
+    _contextPackageForElement(element) {
+        return this._contextPackageForSliceName(element?.slice)
+    }
+
+    _packageNameForContext(contextPackageName) {
+        return _packageName(this.givenAnswers.rootPackageName, contextPackageName, false)
+    }
+
+    _packageFolderForContext(contextPackageName) {
+        return _packageFolderName(this.givenAnswers.rootPackageName, contextPackageName, false)
+    }
+
     _writeSliceDescription(sliceName) {
         var slice = this._findSlice(sliceName)
+        var contextPackageName = this._contextPackage(slice)
         this.fs.copyTpl(
             this.templatePath(`.slice.json.tpl`),
-            this.destinationPath(`./src/main/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false)}/${_sliceTitle(sliceName)}/.slice.json`),
+            this.destinationPath(`./src/main/kotlin/${this._packageFolderForContext(contextPackageName)}/${_sliceTitle(sliceName)}/.slice.json`),
             {
                 title: sliceName,
                 id: slice.id,
@@ -150,11 +171,12 @@ module.exports = class extends Generator {
     _writeReadme(sliceName) {
         var slice = this._findSlice(sliceName)
         var title = _slicePackage(slice.title).toLowerCase()
+        var contextPackageName = this._contextPackage(slice)
 
 
         this.fs.copyTpl(
             this.templatePath(`src/components/README.md.tpl`),
-            this.destinationPath(`./src/main/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false)}/${title}/README.md`),
+            this.destinationPath(`./src/main/kotlin/${this._packageFolderForContext(contextPackageName)}/${title}/README.md`),
             {
                 _name: slice.title,
                 _link: boardlLink(config.boardId, slice.id)
@@ -166,17 +188,18 @@ module.exports = class extends Generator {
     _writeCommands(sliceName) {
         var slice = this._findSlice(sliceName)
         var title = _slicePackage(slice.title).toLowerCase()
+        var contextPackageName = this._contextPackage(slice)
 
 
         slice.commands?.filter((command) => command.title).forEach((command) => {
 
             this.fs.copyTpl(
                 this.templatePath(`src/components/package-info.java.tpl`),
-                this.destinationPath(`./src/main/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false)}/domain/commands/${title}/package-info.java`),
+                this.destinationPath(`./src/main/kotlin/${this._packageFolderForContext(contextPackageName)}/domain/commands/${title}/package-info.java`),
                 {
                     _slice: title,
                     _rootPackageName: this.givenAnswers.rootPackageName,
-                    _packageName: _packageName(this.givenAnswers.rootPackageName, config?.codeGen?.contextPackage, false),
+                    _packageName: this._packageNameForContext(contextPackageName),
                     link: boardlLink(config.boardId, command.id)
                 }
             )
@@ -184,11 +207,11 @@ module.exports = class extends Generator {
 
             this.fs.copyTpl(
                 this.templatePath(`src/components/Command.kt.tpl`),
-                this.destinationPath(`./src/main/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, config?.codeGen?.contextPackage, false)}/domain/commands/${title}/${_commandTitle(command.title)}.kt`),
+                this.destinationPath(`./src/main/kotlin/${this._packageFolderForContext(contextPackageName)}/domain/commands/${title}/${_commandTitle(command.title)}.kt`),
                 {
                     _slice: title,
                     _rootPackageName: this.givenAnswers.rootPackageName,
-                    _packageName: _packageName(this.givenAnswers.rootPackageName, config?.codeGen?.contextPackage, false),
+                    _packageName: this._packageNameForContext(contextPackageName),
                     _name: _commandTitle(command.title),
                     _fields: ConstructorGenerator.generateCommandConstructorVariables(
                         command.fields,
@@ -210,6 +233,7 @@ module.exports = class extends Generator {
 
         var slice = this._findSlice(sliceName)
         var title = _slicePackage(slice?.title).toLowerCase()
+        var contextPackageName = this._contextPackage(slice)
 
         slice.events?.filter((event) => event.title)
             .filter((event) => {
@@ -220,11 +244,11 @@ module.exports = class extends Generator {
 
                 this.fs.copyTpl(
                     this.templatePath(`src/components/Event.kt.tpl`),
-                    this.destinationPath(`./src/main/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, null, false)}/events/${_eventTitle(event.title)}.kt`),
+                    this.destinationPath(`./src/main/kotlin/${this._packageFolderForContext(contextPackageName)}/events/${_eventTitle(event.title)}.kt`),
                     {
                         _slice: title,
                         _rootPackageName: this.givenAnswers.rootPackageName,
-                        _packageName: _packageName(this.givenAnswers.rootPackageName, null, false),
+                        _packageName: this._packageNameForContext(contextPackageName),
                         _name: _eventTitle(event.title),
                         _fields: ConstructorGenerator.generateConstructorVariables(
                             event.fields
@@ -290,15 +314,16 @@ module.exports = class extends Generator {
     _writeLiveReportReadModel(slice, readmodel, inboundEvents) {
         const idAttribute = readmodel.fields.find(it => it.idAttribute)?.name
         const idTypeVar = idType(readmodel)
+        const contextPackageName = this._contextPackageForElement(readmodel)
         if (readmodel.listElement) {
 
             this.fs.copyTpl(
                 this.templatePath(`src/components/LiveReportListReadModel.kt.tpl`),
-                this.destinationPath(`./src/main/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false)}/${slice}/${_readmodelTitle(readmodel.title)}.kt`),
+                this.destinationPath(`./src/main/kotlin/${this._packageFolderForContext(contextPackageName)}/${slice}/${_readmodelTitle(readmodel.title)}.kt`),
                 {
                     _slice: slice,
                     _rootPackageName: this.givenAnswers.rootPackageName,
-                    _packageName: _packageName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false),
+                    _packageName: this._packageNameForContext(contextPackageName),
                     _name: _readmodelTitle(readmodel.title),
                     _fields: ConstructorGenerator.generateConstructorVariables(
                         readmodel.fields
@@ -317,11 +342,11 @@ module.exports = class extends Generator {
 
             this.fs.copyTpl(
                 this.templatePath(`src/components/LiveReportReadModel.kt.tpl`),
-                this.destinationPath(`./src/main/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false)}/${slice}/${_readmodelTitle(readmodel.title)}.kt`),
+                this.destinationPath(`./src/main/kotlin/${this._packageFolderForContext(contextPackageName)}/${slice}/${_readmodelTitle(readmodel.title)}.kt`),
                 {
                     _slice: slice,
                     _rootPackageName: this.givenAnswers.rootPackageName,
-                    _packageName: _packageName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false),
+                    _packageName: this._packageNameForContext(contextPackageName),
                     _name: _readmodelTitle(readmodel.title),
                     _fields: VariablesGenerator.generateLiveReportVariables(
                         readmodel.fields
@@ -340,11 +365,11 @@ module.exports = class extends Generator {
 
         this.fs.copyTpl(
             this.templatePath(`src/components/LiveReportQueryHandler.kt.tpl`),
-            this.destinationPath(`./src/main/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false)}/${slice}/internal/${_readmodelTitle(readmodel.title)}QueryHandler.kt`),
+            this.destinationPath(`./src/main/kotlin/${this._packageFolderForContext(contextPackageName)}/${slice}/internal/${_readmodelTitle(readmodel.title)}QueryHandler.kt`),
             {
                 _slice: slice,
                 _rootPackageName: this.givenAnswers.rootPackageName,
-                _packageName: _packageName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false),
+                _packageName: this._packageNameForContext(contextPackageName),
                 _name: _readmodelTitle(readmodel.title),
                 _typeImports: typeImports(readmodel.fields),
                 link: boardlLink(config.boardId, readmodel.id),
@@ -355,11 +380,11 @@ module.exports = class extends Generator {
 
         this.fs.copyTpl(
             this.templatePath(`src/components/ReadOnlyRestResource.kt.tpl`),
-            this.destinationPath(`./src/main/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false)}/${slice}/internal/ReadOnly${_restResourceTitle(readmodel.title)}.kt`),
+            this.destinationPath(`./src/main/kotlin/${this._packageFolderForContext(contextPackageName)}/${slice}/internal/ReadOnly${_restResourceTitle(readmodel.title)}.kt`),
             {
                 _slice: slice,
                 _rootPackageName: this.givenAnswers.rootPackageName,
-                _packageName: _packageName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false),
+                _packageName: this._packageNameForContext(contextPackageName),
                 _name: slice,
                 _readModel: _readmodelTitle(readmodel.title),
                 _controller: capitalizeFirstCharacter(slice),
@@ -394,16 +419,17 @@ module.exports = class extends Generator {
         var aiComment = specs?.length > 0 ? `/*
          // AI-TODO:
          ${specs.join(`\n`)} */` : ""
+        var contextPackageName = this._contextPackage(slice)
 
 
         this.fs.copyTpl(
             this.templatePath(`src/components/QueryableMultiKeyReadModelProjector.kt.tpl`),
-            this.destinationPath(`./src/main/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false)}/${sliceTitle}/internal/${_readmodelTitle(readModel.title)}Projector.kt`),
+            this.destinationPath(`./src/main/kotlin/${this._packageFolderForContext(contextPackageName)}/${sliceTitle}/internal/${_readmodelTitle(readModel.title)}Projector.kt`),
             {
                 _slice: sliceTitle,
                 _aiComment: aiComment,
                 _rootPackageName: this.givenAnswers.rootPackageName,
-                _packageName: _packageName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false),
+                _packageName: this._packageNameForContext(contextPackageName),
                 _name: _readmodelTitle(readModel.title),
                 _fields: VariablesGenerator.generateVariables(
                     readModel.fields
@@ -419,11 +445,11 @@ module.exports = class extends Generator {
 
         this.fs.copyTpl(
             this.templatePath(`src/components/QueryableMultiKeyReadModelQueryHandler.kt.tpl`),
-            this.destinationPath(`./src/main/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false)}/${sliceTitle}/internal/${_readmodelTitle(readModel.title)}QueryHandler.kt`),
+            this.destinationPath(`./src/main/kotlin/${this._packageFolderForContext(contextPackageName)}/${sliceTitle}/internal/${_readmodelTitle(readModel.title)}QueryHandler.kt`),
             {
                 _slice: sliceTitle,
                 _rootPackageName: this.givenAnswers.rootPackageName,
-                _packageName: _packageName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false),
+                _packageName: this._packageNameForContext(contextPackageName),
                 _name: _readmodelTitle(readModel.title),
                 _query: this._repositoryQuery(readModel),
                 _typeImports: typeImports(readModel.fields),
@@ -434,10 +460,10 @@ module.exports = class extends Generator {
 
         this.fs.copyTpl(
             this.templatePath(`src/components/QueryableMultiKeyReadModel.kt.tpl`),
-            this.destinationPath(`./src/main/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false)}/${sliceTitle}/${_readmodelTitle(readModel.title)}.kt`),
+            this.destinationPath(`./src/main/kotlin/${this._packageFolderForContext(contextPackageName)}/${sliceTitle}/${_readmodelTitle(readModel.title)}.kt`),
             {
                 _slice: sliceTitle,
-                _packageName: _packageName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false),
+                _packageName: this._packageNameForContext(contextPackageName),
                 _rootPackageName: this.givenAnswers.rootPackageName,
                 _typeImports: typeImports(readModel.fields),
                 _name: _readmodelTitle(readModel.title),
@@ -455,11 +481,11 @@ module.exports = class extends Generator {
 
         this.fs.copyTpl(
             this.templatePath(`src/components/ReadOnlyRestResource.kt.tpl`),
-            this.destinationPath(`./src/main/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false)}/${sliceTitle}/internal/ReadOnly${_restResourceTitle(readModel.title)}.kt`),
+            this.destinationPath(`./src/main/kotlin/${this._packageFolderForContext(contextPackageName)}/${sliceTitle}/internal/ReadOnly${_restResourceTitle(readModel.title)}.kt`),
             {
                 _slice: sliceTitle,
                 _rootPackageName: this.givenAnswers.rootPackageName,
-                _packageName: _packageName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false),
+                _packageName: this._packageNameForContext(contextPackageName),
                 _name: sliceTitle,
                 _readModel: _readmodelTitle(readModel.title),
                 _controller: capitalizeFirstCharacter(sliceTitle),
@@ -475,11 +501,11 @@ module.exports = class extends Generator {
 
         this.fs.copyTpl(
             this.templatePath(`src/components/ReadOnlyRestResource.kt.tpl`),
-            this.destinationPath(`./src/main/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false)}/${sliceTitle}/internal/ReadOnly${_restResourceTitle(readModel.title)}.kt`),
+            this.destinationPath(`./src/main/kotlin/${this._packageFolderForContext(contextPackageName)}/${sliceTitle}/internal/ReadOnly${_restResourceTitle(readModel.title)}.kt`),
             {
                 _slice: sliceTitle,
                 _rootPackageName: this.givenAnswers.rootPackageName,
-                _packageName: _packageName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false),
+                _packageName: this._packageNameForContext(contextPackageName),
                 _name: sliceTitle,
                 _readModel: _readmodelTitle(readModel.title),
                 _controller: capitalizeFirstCharacter(sliceTitle),
@@ -503,16 +529,17 @@ module.exports = class extends Generator {
         var aiComment = specs?.length > 0 ? `/* 
         // AI-TODO:
         ${specs.join(`\n`)} */` : ""
+        var contextPackageName = this._contextPackage(slice)
 
         this.fs.copyTpl(
             this.templatePath(`src/components/QueryableReadModelProjector.kt.tpl`),
-            this.destinationPath(`./src/main/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false)}/${sliceTitle}/internal/${_readmodelTitle(readModel.title)}Projector.kt`),
+            this.destinationPath(`./src/main/kotlin/${this._packageFolderForContext(contextPackageName)}/${sliceTitle}/internal/${_readmodelTitle(readModel.title)}Projector.kt`),
             {
                 _slice: sliceTitle,
                 _aiComment: aiComment,
                 _idType: idType(readModel),
                 _rootPackageName: this.givenAnswers.rootPackageName,
-                _packageName: _packageName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false),
+                _packageName: this._packageNameForContext(contextPackageName),
                 _name: _readmodelTitle(readModel.title),
                 _fields: VariablesGenerator.generateVariables(
                     readModel.fields
@@ -528,11 +555,11 @@ module.exports = class extends Generator {
 
         this.fs.copyTpl(
             this.templatePath(`src/components/QueryableReadModelQueryHandler.kt.tpl`),
-            this.destinationPath(`./src/main/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false)}/${sliceTitle}/internal/${_readmodelTitle(readModel.title)}QueryHandler.kt`),
+            this.destinationPath(`./src/main/kotlin/${this._packageFolderForContext(contextPackageName)}/${sliceTitle}/internal/${_readmodelTitle(readModel.title)}QueryHandler.kt`),
             {
                 _slice: sliceTitle,
                 _rootPackageName: this.givenAnswers.rootPackageName,
-                _packageName: _packageName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false),
+                _packageName: this._packageNameForContext(contextPackageName),
                 _name: _readmodelTitle(readModel.title),
                 //for now take first aggregate
                 _query: this._repositoryQuery(readModel),
@@ -544,13 +571,13 @@ module.exports = class extends Generator {
 
         this.fs.copyTpl(
             this.templatePath(`src/components/QueryableReadModel.kt.tpl`),
-            this.destinationPath(`./src/main/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false)}/${sliceTitle}/${_readmodelTitle(readModel.title)}.kt`),
+            this.destinationPath(`./src/main/kotlin/${this._packageFolderForContext(contextPackageName)}/${sliceTitle}/${_readmodelTitle(readModel.title)}.kt`),
             {
                 _slice: sliceTitle,
                 _data: this._readModelData(readModel),
                 _queryElement: this._readModelQueryElement(readModel),
                 _rootPackageName: this.givenAnswers.rootPackageName,
-                _packageName: _packageName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false),
+                _packageName: this._packageNameForContext(contextPackageName),
                 _name: _readmodelTitle(readModel.title),
                 //for now take first aggregate
                 _entityFields: VariablesGenerator.generateEntityVariables(
@@ -565,11 +592,11 @@ module.exports = class extends Generator {
 
         this.fs.copyTpl(
             this.templatePath(`src/components/ReadOnlyRestResource.kt.tpl`),
-            this.destinationPath(`./src/main/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false)}/${sliceTitle}/internal/ReadOnly${_restResourceTitle(readModel.title)}.kt`),
+            this.destinationPath(`./src/main/kotlin/${this._packageFolderForContext(contextPackageName)}/${sliceTitle}/internal/ReadOnly${_restResourceTitle(readModel.title)}.kt`),
             {
                 _slice: sliceTitle,
                 _rootPackageName: this.givenAnswers.rootPackageName,
-                _packageName: _packageName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false),
+                _packageName: this._packageNameForContext(contextPackageName),
                 _name: sliceTitle,
                 _readModel: _readmodelTitle(readModel.title),
                 _controller: capitalizeFirstCharacter(sliceTitle),
@@ -642,17 +669,18 @@ fun on(event: ${_eventTitle(it.title)}) {
     _writeRestControllers(sliceName) {
         var slice = this._findSlice(sliceName)
         var title = _slicePackage(slice.title).toLowerCase()
+        var contextPackageName = this._contextPackage(slice)
 
 
         slice.commands?.filter((command) => command.title).forEach((command) => {
             const apiFields = command.fields?.filter(field => !field.generated)
             this.fs.copyTpl(
                 this.templatePath(`src/components/RestResource.kt.tpl`),
-                this.destinationPath(`./src/main/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false)}/${title}/internal/${_restResourceTitle(command.title)}.kt`),
+                this.destinationPath(`./src/main/kotlin/${this._packageFolderForContext(contextPackageName)}/${title}/internal/${_restResourceTitle(command.title)}.kt`),
                 {
                     _slice: title,
                     _rootPackageName: this.givenAnswers.rootPackageName,
-                    _packageName: _packageName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false),
+                    _packageName: this._packageNameForContext(contextPackageName),
                     _name: title,
                     _command: _commandTitle(command.title),
                     _controller: _restResourceTitle(command.title),
@@ -805,6 +833,7 @@ fun on(event: ${_eventTitle(it.title)}) {
         var slice = this._findSlice(sliceName)
         var title = _slicePackage(slice.title).toLowerCase()
         var command = slice.commands.length > 0 ? slice.commands[0] : null
+        var contextPackageName = this._contextPackage(slice)
 
         slice.processors?.filter((processor) => processor.title).forEach((processor) => {
 
@@ -820,14 +849,15 @@ fun on(event: ${_eventTitle(it.title)}) {
             if (readModel) {
                 this.fs.copyTpl(
                     this.templatePath(`src/components/StatelessProcessor.kt.tpl`),
-                    this.destinationPath(`./src/main/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false)}/${title}/internal/${_processorTitle(processor.title)}.kt`),
+                    this.destinationPath(`./src/main/kotlin/${this._packageFolderForContext(contextPackageName)}/${title}/internal/${_processorTitle(processor.title)}.kt`),
                     {
                         _slice: title,
                         _readModelSlice: _sliceTitle(readModel.slice),
                         _readModel: _readmodelTitle(readModel.title),
                         _typeImports: typeImports(readModel.fields),
                         _rootPackageName: this.givenAnswers.rootPackageName,
-                        _packageName: _packageName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false),
+                        _packageName: this._packageNameForContext(contextPackageName),
+                        _readModelPackageName: this._packageNameForContext(this._contextPackageForElement(readModel)),
                         _name: _processorTitle(processor.title),
                         _eventsImports: this._eventsImports(this.answers.processTriggers),
                         _fields: VariablesGenerator.generateVariables(
@@ -841,11 +871,11 @@ fun on(event: ${_eventTitle(it.title)}) {
             } else {
                 this.fs.copyTpl(
                     this.templatePath(`src/components/StatelessStandaloneProcessor.kt.tpl`),
-                    this.destinationPath(`./src/main/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false)}/${title}/internal/${_processorTitle(processor.title)}.kt`),
+                    this.destinationPath(`./src/main/kotlin/${this._packageFolderForContext(contextPackageName)}/${title}/internal/${_processorTitle(processor.title)}.kt`),
                     {
                         _slice: title,
                         _rootPackageName: this.givenAnswers.rootPackageName,
-                        _packageName: _packageName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false),
+                        _packageName: this._packageNameForContext(contextPackageName),
                         _name: _processorTitle(processor.title),
                         _eventsImports: this._eventsImports(this.answers.processTriggers),
                         _triggers: this._renderStatelessProcessorTriggers(readModel, this.answers.processTriggers || [], events, command),
@@ -861,8 +891,13 @@ fun on(event: ${_eventTitle(it.title)}) {
 
     _eventsImports(triggers) {
         return triggers?.map((trigger) => {
-            return `import ${this.givenAnswers.rootPackageName}.events.${_eventTitle(trigger)}`
+            return `import ${this._eventPackageNameByTitle(trigger)}.events.${_eventTitle(trigger)}`
         }).join("\n")
+    }
+
+    _eventPackageNameByTitle(eventTitle) {
+        var event = config.slices.flatMap(slice => slice.events ?? []).find(event => event.title === eventTitle)
+        return this._packageNameForContext(this._contextPackageForElement(event))
     }
 
     _renderStatelessProcessorTriggers(readModel, triggers, events, command) {
@@ -1077,6 +1112,10 @@ const defaultValue = (type, cardinality = "single") => {
 
 function _slicePackage(title) {
     return `${slugify(title.replaceAll("slice:", "")).replaceAll("-", "").replaceAll("_", "")}`
+}
+
+function contextPackage(context) {
+    return context ? _slicePackage(context).toLowerCase() : undefined
 }
 
 function toCamelCase(prefix, variableName) {

@@ -22,6 +22,10 @@ function _sliceTitle(title) {
     return slugify(title.replace("slice:", ""), "").replaceAll("-", "").toLowerCase()
 }
 
+function contextPackage(context) {
+    return context ? slugify(`${context}`).replaceAll("-", "").replaceAll("_", "").toLowerCase() : undefined
+}
+
 var config = {}
 
 module.exports = class extends Generator {
@@ -52,6 +56,7 @@ module.exports = class extends Generator {
     _writeSpecifications() {
         var slice = this._findSlice(this.givenAnswers.slice)
         var title = _sliceTitle(slice.title).toLowerCase()
+        var contextPackageName = this._contextPackage(slice)
 
         slice.specifications?.filter(it => !it?.vertical).forEach((specification) => {
 
@@ -62,7 +67,7 @@ module.exports = class extends Generator {
 
             var allElements = given.concat(when).concat(then).filter(item => item);
             var allFields = allElements.flatMap((item) => item.fields ?? [])
-            var _elementImports = generateImports(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, title, allElements)
+            var _elementImports = this._generateImports(this.givenAnswers.rootPackageName, title, allElements)
             var _typeImports = typeImports(allFields)
             var aggregateId = uuidv4()
             var defaults = {
@@ -77,24 +82,24 @@ module.exports = class extends Generator {
                 .filter(it => it?.elementType === "COMMAND")
                 .map(it => config.slices.flatMap(item => item.commands).find(item => item.id === it.id)).filter(it => it), it => it.title);
 
-            var _commandImports = this._commandImports(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, commands);
+            var _commandImports = this._commandImports(this.givenAnswers.rootPackageName, commands);
 
 
             if (slice.processors?.length > 0) {
 
                 let specificationName = _specificationTitle(capitalizeFirstCharacter(slugify(specification.title, "")),)
 
-                var elementImports = generateImports(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, title, then)
+                var elementImports = this._generateImports(this.givenAnswers.rootPackageName, title, then)
 
                 //for now only result events supported
                 this.fs.copyTpl(
                     this.templatePath(`src/components/ProcessorSpecification.kt.tpl`),
-                    this.destinationPath(`./src/test/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false)}/${title}/integration/${specificationName}.kt`),
+                    this.destinationPath(`./src/test/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, contextPackageName, false)}/${title}/integration/${specificationName}.kt`),
                     {
                         _slice: title,
                         _comment: comment,
                         _rootPackageName: this.givenAnswers.rootPackageName,
-                        _packageName: _packageName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false),
+                        _packageName: _packageName(this.givenAnswers.rootPackageName, contextPackageName, false),
                         _name: specificationName,
                         _testname: splitByCamelCase(specificationName),
                         _elementImports: elementImports,
@@ -116,17 +121,17 @@ module.exports = class extends Generator {
                 let specificationName = _specificationTitle(capitalizeFirstCharacter(slugify(specification.title, "")), "ReadModel")
                 var readModel = then.find(it => it.type === "SPEC_READMODEL");
 
-                var _queryImports = this._queryImports(title, this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, _readmodelTitle(readModel.title));
+                var _queryImports = this._queryImports(this.givenAnswers.rootPackageName, readModel);
 
                 //for now only result events supported
                 this.fs.copyTpl(
                     this.templatePath(`src/components/ReadModelSpecification.kt.tpl`),
-                    this.destinationPath(`./src/test/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false)}/${title}/integration/${specificationName}.kt`),
+                    this.destinationPath(`./src/test/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, contextPackageName, false)}/${title}/integration/${specificationName}.kt`),
                     {
                         _slice: title,
                         _comment: comment,
                         _rootPackageName: this.givenAnswers.rootPackageName,
-                        _packageName: _packageName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false),
+                        _packageName: _packageName(this.givenAnswers.rootPackageName, contextPackageName, false),
                         _name: specificationName,
                         _testname: splitByCamelCase(specificationName),
                         _elementImports: _elementImports,
@@ -153,14 +158,15 @@ module.exports = class extends Generator {
 
                 this.fs.copyTpl(
                     this.templatePath(`src/components/Specification.kt.tpl`),
-                    this.destinationPath(`./src/test/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false)}/${title}/${specificationName}.kt`),
+                    this.destinationPath(`./src/test/kotlin/${_packageFolderName(this.givenAnswers.rootPackageName, contextPackageName, false)}/${title}/${specificationName}.kt`),
                     {
                         _idAttribute: idFieldString,
                         _slice: title,
                         _comment: comment,
                         _command: specification.command,
                         _rootPackageName: this.givenAnswers.rootPackageName,
-                        _packageName: _packageName(this.givenAnswers.rootPackageName, config.codeGen?.contextPackage, false),
+                        _packageName: _packageName(this.givenAnswers.rootPackageName, contextPackageName, false),
+                        _aggregatePackageName: _packageName(this.givenAnswers.rootPackageName, contextPackageName, false),
                         _name: specificationName,
                         _testname: splitByCamelCase(specificationName),
                         _elementImports: _elementImports,
@@ -233,13 +239,40 @@ module.exports = class extends Generator {
         } : undefined
     }
 
-    _commandImports(rootPackage, contextPackage, commands) {
-        return commands.map(it => `import ${_packageName(rootPackage, contextPackage, false)}.domain.commands.${_sliceTitle(this._findSliceByCommandId(it.id)?.title)}.${_commandTitle(it.title)}`).join("\n")
+    _contextPackage(slice) {
+        return contextPackage(slice?.context)
     }
 
-    _queryImports(slice, rootPackageName, contextPackage, readModel) {
-        return `import ${_packageName(rootPackageName, contextPackage, false)}.${slice}.${readModel}Query
- import ${_packageName(rootPackageName, contextPackage, false)}.${slice}.${readModel}`
+    _contextPackageForSliceName(sliceName) {
+        return this._contextPackage(this._findSlice(sliceName))
+    }
+
+    _contextPackageForElement(element) {
+        var linkedElement = element?.slice ? undefined : this._findElementById(element?.linkedId)
+        return this._contextPackageForSliceName(element?.slice ?? linkedElement?.slice)
+    }
+
+    _commandImports(rootPackage, commands) {
+        return commands.map(it => {
+            var slice = this._findSliceByCommandId(it.id)
+            return `import ${_packageName(rootPackage, this._contextPackage(slice), false)}.domain.commands.${_sliceTitle(slice?.title)}.${_commandTitle(it.title)}`
+        }).join("\n")
+    }
+
+    _queryImports(rootPackageName, readModelSpec) {
+        var readModel = this._findReadModelById(readModelSpec.linkedId ?? readModelSpec.id)
+        var slice = this._findSlice(readModel?.slice)
+        var slicePackage = _sliceTitle(readModel?.slice ?? readModelSpec.slice)
+        var readModelTitle = _readmodelTitle(readModel?.title ?? readModelSpec.title)
+        var packageName = _packageName(rootPackageName, this._contextPackage(slice), false)
+        return `import ${packageName}.${slicePackage}.${readModelTitle}Query
+ import ${packageName}.${slicePackage}.${readModelTitle}`
+    }
+
+    _generateImports(rootPackageName, sliceName, elements) {
+        return generateImports(rootPackageName, sliceName, elements, (element) =>
+            this._contextPackageForElement(element) ?? this._contextPackageForSliceName(this.givenAnswers.slice)
+        )
     }
 
     _renderProcessorThen(then) {
@@ -337,6 +370,10 @@ module.exports = class extends Generator {
         return config.slices.flatMap(item => item.commands ?? []).find(item => item.id === id)
     }
 
+    _findReadModelById(id) {
+        return config.slices.flatMap(item => item.readmodels ?? []).find(item => item.id === id)
+    }
+
     _findElementById(id) {
         return config.slices.flatMap(item => [
             ...(item.events ?? []),
@@ -349,18 +386,20 @@ module.exports = class extends Generator {
 };
 
 
-const generateImports = (rootPackageName, contextPackage, sliceName, elements) => {
+const generateImports = (rootPackageName, sliceName, elements, contextPackageForElement) => {
     var imports = elements?.map((element) => {
+        var contextPackage = contextPackageForElement(element)
+        var elementSliceName = _sliceTitle(element?.slice ?? sliceName)
         switch (element.type?.toLowerCase()) {
             case "spec_event":
             case "event":
-                return `import ${_packageName(rootPackageName, null, false)}.events.${_eventTitle(element.title)}`
+                return `import ${_packageName(rootPackageName, contextPackage, false)}.events.${_eventTitle(element.title)}`
             case "spec_command":
             case "command":
-                return `import ${_packageName(rootPackageName, contextPackage, false)}.domain.commands.${sliceName}.${_commandTitle(element.title)}`
+                return `import ${_packageName(rootPackageName, contextPackage, false)}.domain.commands.${elementSliceName}.${_commandTitle(element.title)}`
             case "spec_readmodel":
             case "readmodel":
-                return `import ${_packageName(rootPackageName, contextPackage, false)}.${sliceName}.${_readmodelTitle(element.title)}`
+                return `import ${_packageName(rootPackageName, contextPackage, false)}.${elementSliceName}.${_readmodelTitle(element.title)}`
             default:
                 console.log(`Could not determine imports for ${element?.title ?? "unknown element"} (${element?.type ?? "unknown type"})`)
                 return ""

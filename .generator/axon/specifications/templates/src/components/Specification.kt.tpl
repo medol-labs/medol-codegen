@@ -2,7 +2,7 @@ package <%= _packageName%>.<%=_slice%>
 
 import <%= _rootPackageName%>.common.Event
 import <%= _rootPackageName%>.common.support.RandomData
-import <%= _rootPackageName%>.domain.<%=_aggregate%>
+import <%= _aggregatePackageName%>.domain.<%=_aggregate%>
 import <%= _rootPackageName%>.common.CommandException
 import org.axonframework.test.aggregate.AggregateTestFixture
 import org.axonframework.test.aggregate.FixtureConfiguration

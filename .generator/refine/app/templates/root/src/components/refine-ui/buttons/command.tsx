@@ -1,8 +1,10 @@
 import { Button } from "@/components/ui/button";
 import { useCommandButton } from "@/hooks/command/useCommandButton";
-import { BaseKey, Link } from "@refinedev/core";
+import { cn } from "@/lib/utils";
+import { BaseKey } from "@refinedev/core";
 import { Check } from "lucide-react";
 import React from "react";
+import { useNavigate } from "react-router";
 
 type CommandButtonProps = {
   /**
@@ -35,9 +37,10 @@ export const CommandButton = React.forwardRef<
   CommandButtonProps
 >(
   (
-    { resource, command, recordItemId, query, accessControl, meta, children, onClick, ...rest },
+    { resource, command, recordItemId, query, accessControl, meta, children, onClick, variant = "secondary", size = "sm", className, ...rest },
     ref
   ) => {
+    const navigate = useNavigate();
     const { to, label, hidden, disabled } = useCommandButton({
       resource,
       command,
@@ -51,28 +54,37 @@ export const CommandButton = React.forwardRef<
     if (isHidden) return null;
 
     return (
-      <Button {...rest} ref={ref} disabled={isDisabled} asChild>
-        <Link
-          to={to}
-          replace={false}
-          onClick={(e: React.PointerEvent<HTMLButtonElement>) => {
-            if (isDisabled) {
-              e.preventDefault();
+      <Button
+        {...rest}
+        ref={ref}
+        disabled={isDisabled}
+        variant={variant}
+        size={size}
+        className={cn(
+          "border border-border bg-secondary text-secondary-foreground shadow-xs hover:bg-secondary/80 hover:text-secondary-foreground",
+          "focus-visible:ring-ring/50 focus-visible:ring-[3px]",
+          className,
+        )}
+        onClick={(e) => {
+          if (isDisabled) {
+            e.preventDefault();
+            return;
+          }
+          if (onClick) {
+            onClick(e);
+            if (e.defaultPrevented) {
               return;
             }
-            if (onClick) {
-              e.preventDefault();
-              onClick(e);
-            }
-          }}
-        >
-          {children ?? (
-            <div className="flex items-center gap-2 font-semibold">
-              <Check className="h-4 w-4" />
-              <span>{label}</span>
-            </div>
-          )}
-        </Link>
+          }
+          navigate(to);
+        }}
+      >
+        {children ?? (
+          <>
+            <Check className="h-4 w-4" />
+            <span>{label}</span>
+          </>
+        )}
       </Button>
     );
   }

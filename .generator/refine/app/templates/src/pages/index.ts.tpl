@@ -2,7 +2,7 @@
 export * from "./list";
 export * from "./show";
 <% if (resource.createCommand) { -%>
-export * from "./create";
+export * from "./<%= resource.createCommand.file %>";
 <% } -%>
 <% if (resource.editCommand) { -%>
 export * from "./edit";

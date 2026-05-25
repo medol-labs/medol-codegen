@@ -133,8 +133,8 @@ module.exports = class extends Generator {
 
         if (resource.createCommand) {
             this.fs.copyTpl(
-                this.templatePath('src/pages/form.tsx.tpl'),
-                this.destinationPath(`${basePath}/create.tsx`),
+                this.templatePath('src/pages/command-form.tsx.tpl'),
+                this.destinationPath(`${basePath}/${resource.createCommand.file}.tsx`),
                 { resource, command: resource.createCommand }
             );
         }

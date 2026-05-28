@@ -109,11 +109,7 @@ const onePath = (resource: string, id: BaseKey, meta?: AxonMeta): string => {
 };
 
 const unwrapAxonReadModel = (payload: unknown): unknown => {
-  if (
-    payload &&
-    typeof payload === "object" &&
-    "data" in payload
-  ) {
+  if (payload && typeof payload === "object" && "data" in payload) {
     return (payload as { data: unknown }).data;
   }
 
@@ -282,7 +278,9 @@ export const commandDataProvider = (
       );
 
       if (!record) {
-        throw new Error(`Axon query failed: ${resource}.${String(id)} not found`);
+        throw new Error(
+          `Axon query failed: ${resource}.${String(id)} not found`,
+        );
       }
 
       return { data: record };
@@ -296,7 +294,7 @@ export const commandDataProvider = (
       }
 
       const res = await fetch(
-        `${baseUrl}/api/${aggregatePath(resource, meta)}/${command.toLowerCase()}`,
+        `${baseUrl}/${aggregatePath(resource, meta)}/${command.toLowerCase()}`,
         {
           method: "POST",
           body: JSON.stringify(variables),

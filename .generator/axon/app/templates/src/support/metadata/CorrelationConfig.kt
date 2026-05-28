@@ -9,7 +9,7 @@ import org.springframework.context.annotation.Configuration
 
 const val SESSION_ID_HEADER = "X-Session-Id"
 
-@Configuration
+// @Configuration
 class CorrelationConfig {
 
   @Bean

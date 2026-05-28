@@ -5,7 +5,7 @@ import org.axonframework.commandhandling.CommandMessage
 import org.axonframework.messaging.MessageDispatchInterceptor
 import org.springframework.stereotype.Component
 
-@Component
+// @Component
 class MetaDataCommandInterceptor : MessageDispatchInterceptor<CommandMessage<Any>> {
     override fun handle(
         messages: List<CommandMessage<Any>>

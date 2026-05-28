@@ -131,6 +131,10 @@ export const <%= resource.component %>List = () => {
       syncWithLocation: true,
       meta: {
         tableName: "<%= resource.tableName %>",
+        idField: "<%= resource.idField %>",
+        label: "<%= resource.label %>",
+        aggregateRoute: "<%= resource.aggregateRoute %>",
+        queryRoute: "<%= resource.queryRoute %>",
       },
     },
   });

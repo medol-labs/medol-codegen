@@ -1,5 +1,7 @@
 // Generated from config.json by the refine generator.
+<% if (resource.canList) { -%>
 export * from "./list";
+<% } -%>
 export * from "./show";
 <% if (resource.createCommand) { -%>
 export * from "./<%= resource.createCommand.file %>";

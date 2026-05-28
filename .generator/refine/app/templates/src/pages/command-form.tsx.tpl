@@ -36,6 +36,10 @@ export const <%= command.pageComponent %> = () => {
     redirect: false,
     meta: {
       tableName: "<%= resource.tableName %>",
+      idField: "<%= resource.idField %>",
+      label: "<%= resource.label %>",
+      aggregateRoute: "<%= resource.aggregateRoute %>",
+      queryRoute: "<%= resource.queryRoute %>",
     },
     formProps: {
       defaultValues,

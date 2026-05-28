@@ -120,11 +120,13 @@ module.exports = class extends Generator {
             this.destinationPath(`${basePath}/index.ts`),
             { resource }
         );
-        this.fs.copyTpl(
-            this.templatePath('src/pages/list.tsx.tpl'),
-            this.destinationPath(`${basePath}/list.tsx`),
-            { resource }
-        );
+        if (resource.canList) {
+            this.fs.copyTpl(
+                this.templatePath('src/pages/list.tsx.tpl'),
+                this.destinationPath(`${basePath}/list.tsx`),
+                { resource }
+            );
+        }
         this.fs.copyTpl(
             this.templatePath('src/pages/show.tsx.tpl'),
             this.destinationPath(`${basePath}/show.tsx`),
@@ -208,11 +210,24 @@ function buildFrontendModel(source, selectedCommandKeys) {
                 }
                 commandsByAggregate.get(aggregate.key).commands.push(command);
             });
+
+        (slice.readmodels ?? [])
+            .filter((readModel) => readModel?.title)
+            .forEach((readModel) => {
+                const aggregate = aggregateName(readModel, slice, allAggregates, allContexts);
+                if (!commandsByAggregate.has(aggregate.key)) {
+                    commandsByAggregate.set(aggregate.key, {
+                        ...aggregate,
+                        slice,
+                        commands: []
+                    });
+                }
+            });
     });
 
-    const resources = Array.from(commandsByAggregate.values())
-        .map((group) => toAggregateResource(group, slices, allScreens, allReadModels))
-        .filter(Boolean);
+    const resources = uniqueResourceNames(Array.from(commandsByAggregate.values())
+        .flatMap((group) => toAggregateResources(group, slices, allScreens, allReadModels))
+        .filter(Boolean));
     const chapters = uniqueChapters(resources.map((resource) => resource.chapter).filter(Boolean));
 
     return {
@@ -241,30 +256,36 @@ function findDependencies(element, elementType, source) {
     return (source ?? []).filter((item) => ids.includes(item.id));
 }
 
-function toAggregateResource(group, slices, allScreens, allReadModels) {
+function toAggregateResources(group, slices, allScreens, allReadModels) {
     const title = cleanTitle(group.title);
-    const route = kebab(title);
-    const name = snake(title);
-    const component = pascal(title);
     const relatedScreens = uniqueElements(group.commands.flatMap((command) => findDependencies(command, 'SCREEN', allScreens)));
     const aggregateReadModels = slices
         .filter((slice) => sliceHasAggregate(slice, title))
         .flatMap((slice) => slice.readmodels ?? []);
     const relatedReadModels = uniqueElements([
         ...aggregateReadModels,
+        ...allReadModels.filter((readModel) => elementHasAggregate(readModel, title)),
         ...relatedScreens.flatMap((screen) => findDependencies(screen, 'READMODEL', allReadModels)),
         ...group.commands.flatMap((command) => findDependencies(command, 'READMODEL', allReadModels))
     ]);
-    const primaryReadModel = relatedReadModels[0];
-    const queryModelFields = uniqueFields([
-        ...relatedReadModels.flatMap((readModel) => readModel.fields ?? [])
-    ]);
-    const modelFields = uniqueFields([
-        ...queryModelFields,
-        ...group.commands.flatMap((command) => command.fields ?? [])
-    ]);
-    const queryFields = normalizeFields(queryModelFields);
-    const fields = normalizeFields(modelFields);
+
+    if (relatedReadModels.length === 0) {
+        return [toReadModelResource(group, null)];
+    }
+
+    return relatedReadModels.map((readModel) => toReadModelResource(group, readModel));
+}
+
+function toReadModelResource(group, readModel) {
+    const aggregateTitle = cleanTitle(group.title);
+    const queryTitle = cleanTitle(readModel?.title ?? aggregateTitle);
+    const route = kebab(queryTitle);
+    const name = snake(queryTitle);
+    const component = pascal(queryTitle);
+    const queryFields = normalizeFields(readModel?.fields ?? []);
+    const fields = queryFields.length > 0
+        ? queryFields
+        : normalizeFields(group.commands.flatMap((command) => command.fields ?? []));
     const idField = fields.find((field) => field.idAttribute) ?? fields.find((field) => field.name === 'id') ?? fields[0];
     let normalizedCommands = group.commands
         .filter((command) => command?.title)
@@ -277,14 +298,19 @@ function toAggregateResource(group, slices, allScreens, allReadModels) {
     const reservedCommandNames = [createCommand, editCommand, deleteCommand].filter(Boolean).map((command) => command.name);
 
     return {
-        title,
-        label: titleCase(title),
+        title: queryTitle,
+        aggregateTitle,
+        label: queryTitle,
+        aggregateRoute: axonRoute(aggregateTitle),
+        queryRoute: axonRoute(queryTitle),
         route,
         name,
-        tableName: tableName(primaryReadModel, title),
+        tableName: tableName(readModel, queryTitle),
         component,
         chapter: group.chapter,
         idField: idField?.name ?? 'id',
+        readModelId: readModel?.id,
+        canList: readModel ? !!readModel.listElement : true,
         dataProviderName: 'COMMAND_DATA_PROVIDER_NAME',
         fields,
         createCommand,
@@ -293,6 +319,42 @@ function toAggregateResource(group, slices, allScreens, allReadModels) {
         commands: [createCommand, deleteCommand, ...normalizedCommands.filter((command) => !reservedCommandNames.includes(command.name))].filter(Boolean),
         routedCommands: [deleteCommand, ...normalizedCommands.filter((command) => !reservedCommandNames.includes(command.name))].filter(Boolean),
         itemCommands: normalizedCommands.filter((command) => !reservedCommandNames.includes(command.name))
+    };
+}
+
+function uniqueResourceNames(resources) {
+    const seenNames = new Map();
+    return resources.map((resource) => {
+        const count = seenNames.get(resource.name) ?? 0;
+        seenNames.set(resource.name, count + 1);
+
+        if (count === 0) {
+            return resource;
+        }
+
+        return {
+            ...resource,
+            name: `${resource.name}_${resource.aggregateRoute}`,
+            route: `${resource.route}-${resource.aggregateRoute}`,
+            component: `${resource.component}${pascal(resource.aggregateTitle)}`,
+            createCommand: withResourceComponent(resource.createCommand, `${resource.component}${pascal(resource.aggregateTitle)}`),
+            editCommand: withResourceComponent(resource.editCommand, `${resource.component}${pascal(resource.aggregateTitle)}`),
+            deleteCommand: withResourceComponent(resource.deleteCommand, `${resource.component}${pascal(resource.aggregateTitle)}`),
+            commands: resource.commands.map((command) => withResourceComponent(command, `${resource.component}${pascal(resource.aggregateTitle)}`)),
+            routedCommands: resource.routedCommands.map((command) => withResourceComponent(command, `${resource.component}${pascal(resource.aggregateTitle)}`)),
+            itemCommands: resource.itemCommands.map((command) => withResourceComponent(command, `${resource.component}${pascal(resource.aggregateTitle)}`))
+        };
+    });
+}
+
+function withResourceComponent(command, resourceComponent) {
+    if (!command) {
+        return command;
+    }
+
+    return {
+        ...command,
+        pageComponent: `${resourceComponent}${command.component}`
     };
 }
 
@@ -399,6 +461,18 @@ function sliceHasAggregate(slice, aggregateTitle) {
     const normalizedAggregateTitle = cleanTitle(aggregateTitle).toLowerCase();
     return normalizeArray(slice?.aggregates)
         .map((aggregate) => cleanTitle(typeof aggregate === 'string' ? aggregate : aggregate.title ?? aggregate.name).toLowerCase())
+        .includes(normalizedAggregateTitle);
+}
+
+function elementHasAggregate(element, aggregateTitle) {
+    const normalizedAggregateTitle = cleanTitle(aggregateTitle).toLowerCase();
+    return [
+        element?.aggregate,
+        element?.aggregateName,
+        ...(element?.aggregateDependencies ?? [])
+    ]
+        .filter(Boolean)
+        .map((value) => cleanTitle(typeof value === 'string' ? value : value.title ?? value.name).toLowerCase())
         .includes(normalizedAggregateTitle);
 }
 
@@ -589,6 +663,10 @@ function snakeCase(value) {
         .replace(/[\s-]+/g, '_')
         .replace(/__+/g, '_')
         .toLowerCase();
+}
+
+function axonRoute(value) {
+    return cleanTitle(value).replace(/[\s_-]+/g, '').toLowerCase();
 }
 
 function camel(value) {

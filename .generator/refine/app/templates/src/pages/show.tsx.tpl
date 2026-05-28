@@ -20,6 +20,10 @@ export const <%= resource.component %>Show = () => {
   const { result: record } = useShow({
     meta: {
       tableName: "<%= resource.tableName %>",
+      idField: "<%= resource.idField %>",
+      label: "<%= resource.label %>",
+      aggregateRoute: "<%= resource.aggregateRoute %>",
+      queryRoute: "<%= resource.queryRoute %>",
     },
   });
 

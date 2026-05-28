@@ -25,7 +25,9 @@ export const resources: IResourceItem[] = [
 <% resources.forEach((resource) => { -%>
   {
     name: "<%= resource.name %>",
+<% if (resource.canList) { -%>
     list: "/<%= resource.route %>",
+<% } -%>
 <% if (resource.createCommand) { -%>
     create: "/<%= resource.route %>/command/<%= resource.createCommand.route %>",
 <% } -%>
@@ -40,6 +42,9 @@ export const resources: IResourceItem[] = [
       label: "<%= resource.label %>",
       icon: <Package />,
       tableName: "<%= resource.tableName %>",
+      idField: "<%= resource.idField %>",
+      aggregateRoute: "<%= resource.aggregateRoute %>",
+      queryRoute: "<%= resource.queryRoute %>",
 <% if (resource.commands.length > 0) { -%>
       commandRoute: "/<%= resource.route %>/:id/command/:command",
       commands: {

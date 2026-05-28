@@ -15,7 +15,9 @@ import { Login } from "../pages/login";
 import { Register } from "../pages/register";
 <% resources.forEach((resource) => { -%>
 import {
+<% if (resource.canList) { -%>
   <%= resource.component %>List,
+<% } -%>
   <%= resource.component %>Show,
 <% if (resource.createCommand) { -%>
   <%= resource.createCommand.pageComponent %>,
@@ -50,7 +52,9 @@ export const AppRouter = () => {
         <Route path="/dashboard" element={<Dashboard />} />
 <% resources.forEach((resource) => { -%>
         <Route path="/<%= resource.route %>">
+<% if (resource.canList) { -%>
           <Route index element={<<%= resource.component %>List />} />
+<% } -%>
 <% if (resource.createCommand) { -%>
           <Route path="command/<%= resource.createCommand.route %>" element={<<%= resource.createCommand.pageComponent %> />} />
 <% } -%>

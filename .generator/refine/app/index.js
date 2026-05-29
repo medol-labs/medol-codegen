@@ -192,7 +192,9 @@ function buildFrontendModel(source, selectedCommandKeys) {
     const allContexts = source.contexts ?? source.context ?? [];
     const allReadModels = slices.flatMap((slice) => slice.readmodels ?? []);
     const allScreens = slices.flatMap((slice) => slice.screens ?? []);
+    const allEvents = slices.flatMap((slice) => slice.events ?? []);
     const selected = selectedCommandKeys ? new Set(selectedCommandKeys) : null;
+    const workflow = buildWorkflowModel(slices, allAggregates, allContexts, selected);
     const commandsByAggregate = new Map();
 
     slices.forEach((slice) => {
@@ -226,7 +228,7 @@ function buildFrontendModel(source, selectedCommandKeys) {
     });
 
     const resources = uniqueResourceNames(Array.from(commandsByAggregate.values())
-        .flatMap((group) => toAggregateResources(group, slices, allScreens, allReadModels))
+        .flatMap((group) => toAggregateResources(group, slices, allScreens, allReadModels, allEvents, workflow))
         .filter(Boolean));
     const chapters = uniqueChapters(resources.map((resource) => resource.chapter).filter(Boolean));
 
@@ -256,7 +258,105 @@ function findDependencies(element, elementType, source) {
     return (source ?? []).filter((item) => ids.includes(item.id));
 }
 
-function toAggregateResources(group, slices, allScreens, allReadModels) {
+function buildWorkflowModel(slices, aggregates, contexts, selectedCommands) {
+    const selectableReadModels = new Map();
+    const commandsById = new Map();
+    const eventsById = new Map();
+    const nextCommandsByReadModelId = new Map();
+
+    slices.flatMap((slice) => slice.commands ?? [])
+        .filter((command) => command?.title)
+        .filter((command) => !selectedCommands || selectedCommands.has(commandKey(command)))
+        .forEach((command) => {
+            commandsById.set(commandKey(command), command);
+            if (command.id) {
+                commandsById.set(command.id, command);
+            }
+        });
+
+    slices.flatMap((slice) => slice.events ?? [])
+        .filter((event) => event?.title)
+        .forEach((event) => {
+            eventsById.set(String(event.title), event);
+            if (event.id) {
+                eventsById.set(event.id, event);
+            }
+        });
+
+    slices.flatMap((slice) => slice.readmodels ?? [])
+        .filter((readModel) => readModel?.title && readModel.listElement)
+        .forEach((readModel) => {
+            const id = idFieldName(readModel);
+            if (!id || selectableReadModels.has(id)) {
+                return;
+            }
+
+            const aggregate = aggregateName(readModel, { title: readModel.slice }, aggregates, contexts);
+            const optionLabel = optionLabelField(readModel);
+            selectableReadModels.set(id, {
+                resource: snake(cleanTitle(readModel.title)),
+                optionValue: id,
+                optionLabel,
+                meta: {
+                    idField: id,
+                    label: cleanTitle(readModel.title),
+                    aggregateRoute: axonRoute(aggregate.title),
+                    queryRoute: axonRoute(readModel.title)
+                }
+            });
+        });
+
+    slices.flatMap((slice) => slice.readmodels ?? [])
+        .filter((readModel) => readModel?.title)
+        .forEach((readModel) => {
+            const inboundEventIds = (readModel.dependencies ?? [])
+                .filter((dependency) => dependency.type === 'INBOUND' && dependency.elementType === 'EVENT')
+                .map((dependency) => dependency.id ?? String(dependency.title ?? ''));
+            const nextCommands = uniqueElements(inboundEventIds
+                .map((eventId) => eventsById.get(eventId))
+                .filter(Boolean)
+                .flatMap((event) => (event.dependencies ?? [])
+                    .filter((dependency) => dependency.type === 'OUTBOUND' && dependency.elementType === 'COMMAND')
+                    .map((dependency) => commandsById.get(dependency.id) ?? commandsById.get(String(dependency.title ?? '')))
+                    .filter(Boolean)));
+
+            if (nextCommands.length > 0) {
+                nextCommandsByReadModelId.set(readModel.id, nextCommands);
+            }
+        });
+
+    return { selectableReadModels, nextCommandsByReadModelId };
+}
+
+function commandWorkflowFields(command, readModel, allEvents, workflow) {
+    const inboundEventIds = (command.dependencies ?? [])
+        .filter((dependency) => dependency.type === 'INBOUND' && dependency.elementType === 'EVENT')
+        .map((dependency) => dependency.id ?? String(dependency.title ?? ''));
+    const inboundEvents = allEvents.filter((event) => inboundEventIds.includes(event.id) || inboundEventIds.includes(event.title));
+    const upstreamFieldNames = new Set([
+        ...(readModel?.fields ?? []).map((field) => field.name),
+        ...inboundEvents.flatMap((event) => event.fields ?? []).map((field) => field.name)
+    ]);
+    const prefill = new Set();
+    const selects = new Map();
+
+    normalizeFields(command.fields)
+        .filter((field) => !field.generated)
+        .forEach((field) => {
+            if (upstreamFieldNames.has(field.name)) {
+                prefill.add(field.name);
+            }
+
+            const select = workflow.selectableReadModels.get(field.name);
+            if (select && !field.idAttribute) {
+                selects.set(field.name, select);
+            }
+        });
+
+    return { prefill, selects };
+}
+
+function toAggregateResources(group, slices, allScreens, allReadModels, allEvents, workflow) {
     const title = cleanTitle(group.title);
     const relatedScreens = uniqueElements(group.commands.flatMap((command) => findDependencies(command, 'SCREEN', allScreens)));
     const aggregateReadModels = slices
@@ -270,13 +370,13 @@ function toAggregateResources(group, slices, allScreens, allReadModels) {
     ]);
 
     if (relatedReadModels.length === 0) {
-        return [toReadModelResource(group, null)];
+        return [toReadModelResource(group, null, allEvents, workflow)];
     }
 
-    return relatedReadModels.map((readModel) => toReadModelResource(group, readModel));
+    return relatedReadModels.map((readModel) => toReadModelResource(group, readModel, allEvents, workflow));
 }
 
-function toReadModelResource(group, readModel) {
+function toReadModelResource(group, readModel, allEvents, workflow) {
     const aggregateTitle = cleanTitle(group.title);
     const queryTitle = cleanTitle(readModel?.title ?? aggregateTitle);
     const route = kebab(queryTitle);
@@ -287,9 +387,13 @@ function toReadModelResource(group, readModel) {
         ? queryFields
         : normalizeFields(group.commands.flatMap((command) => command.fields ?? []));
     const idField = fields.find((field) => field.idAttribute) ?? fields.find((field) => field.name === 'id') ?? fields[0];
-    let normalizedCommands = group.commands
+    const resourceCommands = uniqueElements([
+        ...group.commands,
+        ...(readModel ? workflow.nextCommandsByReadModelId.get(readModel.id) ?? [] : [])
+    ]);
+    let normalizedCommands = resourceCommands
         .filter((command) => command?.title)
-        .map((command) => toCommand(command, route, component));
+        .map((command) => toCommand(command, route, component, readModel, allEvents, workflow));
     normalizedCommands = withPrefillFields(normalizedCommands, queryFields);
     const createCommand = normalizedCommands.find((command) => command.createsAggregate && isCreateCommand(command))
         ?? normalizedCommands.find((command) => command.createsAggregate);
@@ -357,9 +461,12 @@ function withResourceComponent(command, resourceComponent) {
     };
 }
 
-function toCommand(command, resourceRoute, resourceComponent) {
+function toCommand(command, resourceRoute, resourceComponent, readModel, allEvents, workflow) {
     const title = cleanTitle(command.title);
     const component = pascal(title);
+    const normalizedFields = normalizeFields(command.fields).filter((field) => !field.generated);
+    const workflowFields = commandWorkflowFields(command, readModel, allEvents, workflow);
+    const commandAggregateTitle = cleanTitle(command.aggregateName ?? command.aggregate ?? title);
     return {
         id: commandKey(command),
         title,
@@ -370,8 +477,14 @@ function toCommand(command, resourceRoute, resourceComponent) {
         component,
         pageComponent: `${resourceComponent}${component}`,
         resourceRoute,
+        aggregateRoute: axonRoute(commandAggregateTitle),
         createsAggregate: !!command.createsAggregate,
-        fields: normalizeFields(command.fields).filter((field) => !field.generated)
+        fields: normalizedFields.map((field) => ({
+            ...field,
+            select: workflowFields.selects.get(field.name) ?? null
+        })),
+        workflowPrefillFields: normalizedFields.filter((field) => workflowFields.prefill.has(field.name)),
+        hasSelectFields: workflowFields.selects.size > 0
     };
 }
 
@@ -379,7 +492,11 @@ function withPrefillFields(commands, resourceFields) {
     const resourceFieldNames = new Set(resourceFields.map((field) => field.name));
     return commands.map((command) => ({
         ...command,
-        prefillFields: command.fields.filter((field) => resourceFieldNames.has(field.name))
+        prefillFields: uniqueFields([
+            ...command.fields.filter((field) => resourceFieldNames.has(field.name)),
+            ...(command.workflowPrefillFields ?? [])
+        ]),
+        hasSelectFields: command.fields.some((field) => field.select)
     }));
 }
 
@@ -550,6 +667,20 @@ function tableName(readModel, fallbackTitle) {
 
     const entityName = `${pascal(readModel?.title ?? fallbackTitle)}ReadModelEntity`;
     return snakeCase(entityName);
+}
+
+function idFieldName(element) {
+    return element?.fields?.find((field) => field.idAttribute)?.name ?? element?.fields?.find((field) => field.name === 'id')?.name;
+}
+
+function optionLabelField(readModel) {
+    return readModel?.fields?.find((field) => {
+        const lower = field.name?.toLowerCase();
+        return field.type?.toLowerCase() === 'string'
+            && !field.idAttribute
+            && !['state', 'status', 'type'].includes(lower)
+            && !lower.endsWith('id');
+    })?.name ?? idFieldName(readModel);
 }
 
 function normalizeFields(fields = []) {

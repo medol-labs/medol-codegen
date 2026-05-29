@@ -18,6 +18,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useCommandForm } from "@/hooks/command/useCommandForm";
+<% if (command.hasSelectFields) { -%>
+import { ResourceSelect } from "@/components/refine-ui/form/resource-select";
+<% } -%>
 
 export const <%= command.pageComponent %> = () => {
   const navigate = useNavigate();
@@ -35,6 +38,13 @@ export const <%= command.pageComponent %> = () => {
     aggregateId: id?.toString(),
     redirect: false,
     meta: {
+      tableName: "<%= resource.tableName %>",
+      idField: "<%= resource.idField %>",
+      label: "<%= resource.label %>",
+      aggregateRoute: "<%= command.aggregateRoute %>",
+      queryRoute: "<%= resource.queryRoute %>",
+    },
+    queryMeta: {
       tableName: "<%= resource.tableName %>",
       idField: "<%= resource.idField %>",
       label: "<%= resource.label %>",
@@ -66,6 +76,24 @@ export const <%= command.pageComponent %> = () => {
             render={({ field }) => (
               <FormItem>
                 <FormLabel><%= field.label %></FormLabel>
+<% if (field.select) { -%>
+                <ResourceSelect
+                  withFormControl
+                  resource="<%= field.select.resource %>"
+                  dataProviderName="command"
+                  optionLabel="<%= field.select.optionLabel %>"
+                  optionValue="<%= field.select.optionValue %>"
+                  value={field.value || ""}
+                  onValueChange={field.onChange}
+                  placeholder="Select <%= field.label %>"
+                  meta={{
+                    idField: "<%= field.select.meta.idField %>",
+                    label: "<%= field.select.meta.label %>",
+                    aggregateRoute: "<%= field.select.meta.aggregateRoute %>",
+                    queryRoute: "<%= field.select.meta.queryRoute %>",
+                  }}
+                />
+<% } else { -%>
                 <FormControl>
                   <<%= field.inputComponent %>
 <% if (field.inputType) { -%>
@@ -79,6 +107,7 @@ export const <%= command.pageComponent %> = () => {
 <% } -%>
                   />
                 </FormControl>
+<% } -%>
                 <FormMessage />
               </FormItem>
             )}

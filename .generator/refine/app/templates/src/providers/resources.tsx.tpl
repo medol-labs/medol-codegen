@@ -2,8 +2,6 @@
 import { IResourceItem } from "@refinedev/core";
 import { FlaskConical, LayoutDashboard, Package } from "lucide-react";
 
-import { COMMAND_DATA_PROVIDER_NAME } from "./constants";
-
 export const resources: IResourceItem[] = [
   {
     name: "dashboard",
@@ -57,7 +55,6 @@ export const resources: IResourceItem[] = [
       },
 <% } -%>
       canDelete: <%= resource.deleteCommand ? "true" : "false" %>,
-      dataProviderName: COMMAND_DATA_PROVIDER_NAME,
     },
   },
 <% }) -%>

@@ -311,7 +311,6 @@ function toReadModelResource(group, readModel) {
         idField: idField?.name ?? 'id',
         readModelId: readModel?.id,
         canList: readModel ? !!readModel.listElement : true,
-        dataProviderName: 'COMMAND_DATA_PROVIDER_NAME',
         fields,
         createCommand,
         editCommand,

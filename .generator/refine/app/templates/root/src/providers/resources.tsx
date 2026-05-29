@@ -1,10 +1,6 @@
 import { IResourceItem } from "@refinedev/core";
 import { FlaskConical, LayoutDashboard, Package } from "lucide-react";
-
-import {
-  QUERY_DATA_PROVIDER_NAME,
-  COMMAND_DATA_PROVIDER_NAME,
-} from "./constants";
+import { COMMAND_DATA_PROVIDER_NAME } from "./constants";
 
 export const resources: IResourceItem[] = [
   {

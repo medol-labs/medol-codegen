@@ -18,10 +18,17 @@ class <%=_name%>QueryHandler(private val repository: <%=_name%>Repository) {
     fun handleQuery(query: <%=_name%>Query): <%=_name%>? {
 
         if (!repository.existsById(<%=_name%>Key(<%-_fields%>))) {
+            <% if (_listElement) { %>
+            return <%=_name%>(emptyList())
+            <% } else { %>
             return null
+            <% } %>
         }
+        <% if (_listElement) { %>
+        return <%=_name%>(listOf(repository.findById(<%=_name%>Key(<%-_fields%>)).get()))
+        <% } else { %>
         return <%=_name%>(repository.findById(<%=_name%>Key(<%-_fields%>)).get())
+        <% } %>
     }
 
 }
-

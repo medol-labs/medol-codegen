@@ -7,7 +7,9 @@ import mu.KotlinLogging
 import org.springframework.stereotype.Component
 import org.springframework.beans.factory.annotation.Autowired
 import org.axonframework.eventhandling.EventHandler
+<% if (_command) { %>
 import <%= _packageName%>.domain.commands.<%=_slice%>.<%- _command%>
+<% } %>
 <%= _eventsImports %>
 
 /*
@@ -25,4 +27,3 @@ class <%= _name%>: Processor {
 <%- _triggers%>
 
 }
-

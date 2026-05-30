@@ -16,5 +16,7 @@ fi
 
 find . -mindepth 1 -maxdepth 1 \
   ! -name 'config.json' \
+  ! -name 'codegen-model.json' \
   ! -name 'clean-generated.sh' \
+  ! -name 'test-codegen-model.sh' \
   -exec rm -rf -- {} +

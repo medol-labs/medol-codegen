@@ -5,9 +5,11 @@
 
 var Generator = require('yeoman-generator').default;
 var slugify = require('slugify')
+const {loadGeneratorModel} = require("../../common/core/config-loader");
 
 
 let config = {}
+let codegenModel = {}
 
 module.exports = class extends Generator {
 
@@ -15,20 +17,13 @@ module.exports = class extends Generator {
 
     constructor(args, opts) {
         super(args, opts);
+        this.opts = opts ?? {};
 
         this.argument('appname', { type: String, required: false });
 
-        const configPath = `${this.env.cwd}/config.json`;
-
-        try {
-            config = require(configPath);
-        } catch (err) {
-            if (err.code === 'MODULE_NOT_FOUND') {
-                throw new Error(`❌ No config.json found at ${configPath}. Please create one first.`);
-            } else {
-                throw err; // other errors (invalid JSON etc.)
-            }
-        }
+        const loaded = loadGeneratorModel(this.env.cwd);
+        config = loaded.config;
+        codegenModel = loaded.codegenModel;
     }
 
     // Async Await
@@ -51,14 +46,21 @@ module.exports = class extends Generator {
             })
         }
 
-        prompts.push({
-            type: 'list',
-            name: 'generatorType',
-            message: 'What should be generated?',
-            choices: ['Skeleton', 'slices', "aggregates"]
-        })
+        if (!this.opts.generatorType) {
+            prompts.push({
+                type: 'list',
+                name: 'generatorType',
+                message: 'What should be generated?',
+                choices: ['Skeleton', 'slices', "aggregates"]
+            })
+        }
 
-        this.answers = await this.prompt(prompts);
+        this.answers = {
+            generatorType: this.opts.generatorType,
+            allSlices: this.opts.allSlices,
+            allAggregates: this.opts.allAggregates,
+            ...(await this.prompt(prompts))
+        };
     }
 
     setDefaults() {
@@ -83,7 +85,8 @@ module.exports = class extends Generator {
                 path: generatorPath
             }, {
                 answers: this.answers,
-                appName: this.answers.appName ?? this.appName
+                appName: this.answers.appName ?? this.appName,
+                allSlices: this.opts.allSlices
             });
         } else if (this.answers.generatorType === 'aggregates') {
             this.log('starting aggregates generation')
@@ -94,7 +97,8 @@ module.exports = class extends Generator {
                 path: generatorPath
             }, {
                 answers: this.answers,
-                appName: this.answers.appName ?? this.appName
+                appName: this.answers.appName ?? this.appName,
+                allAggregates: this.opts.allAggregates
             });
         }
     }

@@ -5,8 +5,10 @@
 
 var Generator = require('yeoman-generator').default;
 var slugify = require('slugify');
+const {loadGeneratorModel} = require("../../common/core/config-loader");
 
 let config = {};
+let codegenModel = {};
 
 module.exports = class extends Generator {
 
@@ -15,23 +17,14 @@ module.exports = class extends Generator {
         this.opts = opts ?? {};
         this.argument('appname', { type: String, required: false });
 
-        const configPath = `${this.env.cwd}/config.json`;
-
-        try {
-            delete require.cache[require.resolve(configPath)];
-            config = require(configPath);
-        } catch (err) {
-            if (err.code === 'MODULE_NOT_FOUND') {
-                throw new Error(`❌ No config.json found at ${configPath}. Please create one first.`);
-            } else {
-                throw err;
-            }
-        }
+        const loaded = loadGeneratorModel(this.env.cwd);
+        config = loaded.config;
+        codegenModel = loaded.codegenModel;
     }
 
     async prompting() {
         const prompts = [];
-        const commandChoices = buildCommandChoices(config);
+        const commandChoices = buildCommandChoices(codegenModel);
 
         if (!this.opts.generatorType) {
             prompts.push({
@@ -81,7 +74,7 @@ module.exports = class extends Generator {
         const selectedCommandKeys = this.answers.allCommands
             ? undefined
             : normalizeSelectedCommands(this.answers.commands);
-        const model = buildFrontendModel(config, selectedCommandKeys);
+        const model = buildFrontendModel(codegenModel, selectedCommandKeys);
 
         if (this.answers.generatorType === 'all' || this.answers.generatorType === 'resources') {
             this._writeResources(model);
@@ -171,7 +164,7 @@ module.exports = class extends Generator {
             this.templatePath('root'),
             this.destinationPath('.'),
             {
-                appName: config?.codeGen?.application ?? 'frontend-foundation'
+                appName: codegenModel?.domain ?? 'frontend-foundation'
             }
         );
         ['.env-example', '.gitignore', '.npmrc'].forEach((file) => {
@@ -179,7 +172,7 @@ module.exports = class extends Generator {
                 this.templatePath(`root/${file}`),
                 this.destinationPath(file),
                 {
-                    appName: config?.codeGen?.application ?? 'frontend-foundation'
+                    appName: codegenModel?.domain ?? 'frontend-foundation'
                 }
             );
         });
@@ -233,7 +226,7 @@ function buildFrontendModel(source, selectedCommandKeys) {
     const chapters = uniqueChapters(resources.map((resource) => resource.chapter).filter(Boolean));
 
     return {
-        appName: source.codeGen?.application ?? 'Event Sourcing App',
+        appName: source.domain ?? 'Event Sourcing App',
         chapters,
         resources: resources.sort((a, b) => a.route.localeCompare(b.route))
     };

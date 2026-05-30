@@ -19,32 +19,34 @@ const {idField, uniqBy} = require("../../common/util/util");
 const {idType} = require("../../common/util/generator");
 const {analyzeSpecs} = require("../../common/util/specs");
 const {fileExistsByGlob} = require("../../common/util/files");
+const {loadGeneratorModel} = require("../../common/core/config-loader");
 
 let config = {}
+let codegenModel = {}
 const ALL_AGGREGATES = "All Aggregates"
 
 module.exports = class extends Generator {
 
     constructor(args, opts) {
         super(args, opts);
+        this.opts = opts ?? {};
         this.givenAnswers = opts.answers
 
         this.argument('appname', { type: String, required: false });
 
-        const configPath = `${this.env.cwd}/config.json`;
-
-        try {
-            config = require(configPath);
-        } catch (err) {
-            if (err.code === 'MODULE_NOT_FOUND') {
-                throw new Error(`❌ No config.json found at ${configPath}. Please create one first.`);
-            } else {
-                throw err; // other errors (invalid JSON etc.)
-            }
-        }
+        const loaded = loadGeneratorModel(this.env.cwd);
+        config = loaded.config;
+        codegenModel = loaded.codegenModel;
     }
 
     async prompting() {
+        if (this.opts.allAggregates || this.givenAnswers.allAggregates) {
+            this.answers = {
+                aggregate: ALL_AGGREGATES
+            };
+            return;
+        }
+
         this.answers = await this.prompt([
             {
                 type: 'list',

@@ -1,0 +1,310 @@
+/*
+ * Copyright (c) 2025 Nebulit GmbH
+ * Licensed under the MIT License.
+ */
+
+function fromConfig(config = {}) {
+    const contexts = normalizeContexts(config);
+    const aggregates = normalizeAggregates(config, contexts);
+    const actors = normalizeActors(config);
+    const slices = normalizeSlices(config, aggregates, contexts, actors);
+
+    return {
+        rootPackage: config.codeGen?.rootPackage ?? 'tech.medo',
+        ...(config.domain ? { domain: config.domain } : {}),
+        contexts,
+        aggregates,
+        actors,
+        slices,
+        source: {
+            kind: 'config',
+            boardId: config.boardId
+        }
+    };
+}
+
+function fromCodegenModel(model = {}) {
+    const contexts = normalizeContexts(model);
+    const aggregates = normalizeAggregates(model, contexts);
+    const actors = normalizeActors(model);
+    const slices = normalizeSlices(model, aggregates, contexts, actors);
+
+    return {
+        rootPackage: model.rootPackage ?? 'tech.medo',
+        ...(model.domain ? { domain: model.domain } : {}),
+        contexts,
+        aggregates,
+        actors,
+        slices,
+        source: {
+            kind: 'codegen-model'
+        }
+    };
+}
+
+function toGeneratorConfig(model, source = {}) {
+    return {
+        ...source,
+        slices: model.slices,
+        flows: source.flows ?? [],
+        aggregates: model.aggregates,
+        actors: model.actors,
+        ...(model.domain ? { domain: model.domain } : {}),
+        context: primaryContextName(model),
+        contexts: model.contexts,
+        codeGen: {
+            ...(source.codeGen ?? {}),
+            application: model.domain ?? source.codeGen?.application ?? '',
+            rootPackage: model.rootPackage,
+            contextPackage: primaryContextName(model)
+        }
+    };
+}
+
+function primaryContextName(model) {
+    return model.contexts[0]?.name ?? 'EventModel';
+}
+
+function normalizeContexts(config) {
+    if (Array.isArray(config.contexts) && config.contexts.length > 0) {
+        return config.contexts.map((context, index) => ({
+            id: context.id ?? stableId('context', context.name ?? context.title ?? index),
+            name: context.name ?? context.title ?? String(context),
+            title: context.title ?? humanize(context.name ?? context.title ?? String(context)),
+            notes: context.notes ?? [],
+            risks: context.risks ?? [],
+            decisions: context.decisions ?? [],
+            metrics: context.metrics ?? [],
+            aggregates: normalizeAggregateRefs(context.aggregates ?? [])
+        }));
+    }
+
+    const contextNames = unique([
+        ...(config.slices ?? []).map((slice) => slice.context ?? slice.chapter).filter(Boolean),
+        typeof config.context === 'string' ? config.context : undefined
+    ].filter(Boolean));
+    const names = contextNames.length > 0 ? contextNames : ['EventModel'];
+
+    return names.map((contextName) => ({
+        id: stableId('context', contextName),
+        name: contextName,
+        title: humanize(contextName),
+        notes: [],
+        risks: [],
+        decisions: [],
+        metrics: [],
+        aggregates: normalizeAggregateRefs(aggregatesForContext(config, contextName))
+    }));
+}
+
+function normalizeAggregates(config, contexts) {
+    return (config.aggregates ?? []).map((aggregate) => {
+        const name = aggregate.name ?? aggregate.title;
+        const title = aggregate.title ?? humanize(name);
+        return {
+            id: aggregate.id ?? stableId('aggregate', name ?? title),
+            name,
+            title,
+            context: aggregate.context ?? findContextForAggregate(title, contexts),
+            fields: normalizeFields(aggregate.fields ?? []),
+            states: aggregate.states ?? []
+        };
+    });
+}
+
+function normalizeActors(config) {
+    const byId = new Map();
+    for (const actor of config.actors ?? []) {
+        const name = actor.name ?? actor.title;
+        const item = {
+            id: actor.id ?? stableId('actor', name),
+            name,
+            title: actor.title ?? humanize(name)
+        };
+        byId.set(item.id, item);
+    }
+    for (const slice of config.slices ?? []) {
+        for (const actor of slice.actors ?? []) {
+            const name = actor.name ?? actor.title;
+            const item = {
+                id: actor.id ?? stableId('actor', name),
+                name,
+                title: actor.title ?? humanize(name)
+            };
+            byId.set(item.id, item);
+        }
+    }
+    return Array.from(byId.values());
+}
+
+function normalizeSlices(config, aggregates, contexts) {
+    return (config.slices ?? []).map((slice, index) => {
+        const context = slice.context ?? slice.chapter ?? config.context ?? primaryContextName({ contexts });
+        const aggregate = normalizeAggregateRef(slice.aggregates?.[0] ?? findAggregateForSlice(slice, aggregates));
+        return {
+            id: slice.id ?? stableId('slice', slice.title ?? index),
+            index: slice.index ?? index,
+            name: slice.name ?? toIdentifier(slice.title ?? `Slice${index + 1}`),
+            title: cleanTitle(slice.title ?? slice.name ?? `Slice ${index + 1}`),
+            chapter: slice.chapter ?? context,
+            context,
+            aggregate,
+            commands: normalizeElements(slice.commands, 'COMMAND', slice, aggregate),
+            events: normalizeElements(slice.events, 'EVENT', slice, aggregate),
+            readmodels: normalizeElements(slice.readmodels, 'READMODEL', slice, aggregate),
+            screens: normalizeElements(slice.screens, 'SCREEN', slice, aggregate),
+            processors: normalizeElements(slice.processors, 'PROCESSOR', slice, aggregate),
+            specifications: slice.specifications ?? [],
+            actors: slice.actors ?? [],
+            hotspots: slice.hotspots ?? [],
+            ...(slice.stateChange ? { stateChange: slice.stateChange } : {})
+        };
+    });
+}
+
+function normalizeElements(elements = [], type, slice, sliceAggregate) {
+    return elements.map((element) => {
+        const aggregate = normalizeAggregateRef(element.aggregate ?? element.aggregateName ?? element.aggregateDependencies?.[0] ?? sliceAggregate);
+        return {
+            ...element,
+            id: element.id ?? stableId(type.toLowerCase(), element.title ?? element.name),
+            name: element.name ?? toIdentifier(element.title),
+            title: cleanTitle(element.title ?? element.name),
+            type: element.type ?? type,
+            modelContext: element.modelContext ?? slice.context,
+            slice: element.slice ?? slice.title,
+            aggregate: aggregate?.name,
+            aggregateRef: aggregate,
+            aggregateDependencies: element.aggregateDependencies ?? (aggregate?.title ? [aggregate.title] : []),
+            fields: normalizeFields(element.fields ?? []),
+            dependencies: normalizeDependencies(element.dependencies ?? []),
+            createsAggregate: element.createsAggregate ?? false
+        };
+    });
+}
+
+function normalizeFields(fields) {
+    return fields.map((field) => ({
+        ...field,
+        name: field.name,
+        type: field.type ?? 'String',
+        cardinality: field.cardinality ?? 'Single',
+        optional: !!field.optional,
+        idAttribute: !!field.idAttribute,
+        generated: !!field.generated,
+        technicalAttribute: !!field.technicalAttribute,
+        query: !!field.query,
+        ...(field.mappings && !field.source ? { source: field.mappings[0] } : {})
+    }));
+}
+
+function normalizeDependencies(dependencies) {
+    return dependencies.map((dependency) => ({
+        ...dependency,
+        direction: dependency.direction ?? dependency.type,
+        type: dependency.type ?? dependency.direction,
+        elementType: dependency.elementType,
+        id: dependency.id,
+        title: dependency.title
+    }));
+}
+
+function normalizeAggregateRefs(aggregates) {
+    return aggregates.map(normalizeAggregateRef).filter(Boolean);
+}
+
+function normalizeAggregateRef(aggregate) {
+    if (!aggregate) {
+        return undefined;
+    }
+    if (typeof aggregate === 'string') {
+        return {
+            id: stableId('aggregate', aggregate),
+            name: aggregate,
+            title: cleanTitle(aggregate)
+        };
+    }
+    const name = aggregate.name ?? aggregate.title;
+    return {
+        id: aggregate.id ?? stableId('aggregate', name),
+        name,
+        title: aggregate.title ?? humanize(name)
+    };
+}
+
+function findAggregateForSlice(slice, aggregates) {
+    const candidates = [
+        slice.aggregate,
+        slice.aggregateName,
+        ...(slice.aggregates ?? []).map((aggregate) => aggregate.title ?? aggregate.name ?? aggregate)
+    ].filter(Boolean).map((value) => cleanTitle(value).toLowerCase());
+
+    return aggregates.find((aggregate) => {
+        return candidates.includes(cleanTitle(aggregate.title ?? aggregate.name).toLowerCase());
+    });
+}
+
+function findContextForAggregate(aggregateTitle, contexts) {
+    const normalizedTitle = cleanTitle(aggregateTitle).toLowerCase();
+    return contexts.find((context) => {
+        return normalizeAggregateRefs(context.aggregates ?? [])
+            .map((aggregate) => cleanTitle(aggregate.title ?? aggregate.name).toLowerCase())
+            .includes(normalizedTitle);
+    })?.name;
+}
+
+function aggregatesForContext(config, contextName) {
+    const titles = unique((config.slices ?? [])
+        .filter((slice) => (slice.context ?? slice.chapter) === contextName)
+        .flatMap((slice) => slice.aggregates ?? [])
+        .map((aggregate) => aggregate.title ?? aggregate.name ?? aggregate));
+
+    if (titles.length === 0) {
+        return config.aggregates ?? [];
+    }
+
+    return (config.aggregates ?? []).filter((aggregate) => {
+        const title = aggregate.title ?? aggregate.name;
+        return titles.includes(title) || titles.includes(aggregate.name);
+    });
+}
+
+function stableId(prefix, value) {
+    const input = String(value ?? prefix);
+    let hash = 0;
+    for (let index = 0; index < input.length; index += 1) {
+        hash = ((hash << 5) - hash + input.charCodeAt(index)) | 0;
+    }
+    return `${prefix}-${Math.abs(hash).toString(16)}`;
+}
+
+function humanize(value) {
+    return cleanTitle(value)
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .replace(/[-_]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function cleanTitle(value) {
+    return String(value ?? '')
+        .replace(/^(screen|slice|spec|command|readmodel|projection)\s*:\s*/i, '')
+        .trim();
+}
+
+function toIdentifier(value) {
+    const title = humanize(value).replace(/\s+/g, '');
+    return title ? title.charAt(0).toLowerCase() + title.slice(1) : 'item';
+}
+
+function unique(values) {
+    return Array.from(new Set(values));
+}
+
+module.exports = {
+    fromCodegenModel,
+    fromConfig,
+    toGeneratorConfig,
+    primaryContextName
+};

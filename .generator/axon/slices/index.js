@@ -21,31 +21,35 @@ const {_sliceSpecificClassTitle, _packageName, _packageFolderName} = require("..
 const {camelCaseToUnderscores, idField} = require("../../common/util/util");
 const {analyzeSpecs} = require("../../common/util/specs");
 const {buildLink} = require("../../common/util/config");
+const {loadGeneratorModel} = require("../../common/core/config-loader");
 
 let config = {}
+let codegenModel = {}
 
 module.exports = class extends Generator {
 
     constructor(args, opts) {
         super(args, opts);
+        this.opts = opts ?? {};
         this.givenAnswers = opts.answers
 
         this.argument('appname', { type: String, required: false });
 
-        const configPath = `${this.env.cwd}/config.json`;
-
-        try {
-            config = require(configPath);
-        } catch (err) {
-            if (err.code === 'MODULE_NOT_FOUND') {
-                throw new Error(`❌ No config.json found at ${configPath}. Please create one first.`);
-            } else {
-                throw err; // other errors (invalid JSON etc.)
-            }
-        }
+        const loaded = loadGeneratorModel(this.env.cwd);
+        config = loaded.config;
+        codegenModel = loaded.codegenModel;
     }
 
     async prompting() {
+        if (this.opts.allSlices || this.givenAnswers.allSlices) {
+            this.answers = {
+                slice: config.slices.map((slice) => slice.title),
+                liveReportModels: [],
+                processTriggers: []
+            };
+            return;
+        }
+
         this.answers = await this.prompt([
             {
                 type: 'checkbox',
@@ -299,8 +303,17 @@ module.exports = class extends Generator {
     }
 
     _repositoryQuery(readModel) {
-        var idField = readModel.fields?.find(it => it.idAttribute)?.name ?? "aggregateId"
+        var idAttributes = readModel.fields?.filter(it => it.idAttribute) ?? []
+        var idField = idAttributes[0]?.name ?? "aggregateId"
         if (readModel.listElement ?? false) {
+            if (idAttributes.length > 1) {
+                var key = `${_readmodelTitle(readModel.title)}Key(${VariablesGenerator.generateInvocation(idAttributes, "query")})`
+                return `
+            if(!repository.existsById(${key})) {
+                return ${_readmodelTitle(readModel.title)}(emptyList())
+            }
+            return ${_readmodelTitle(readModel.title)}(listOf(repository.findById(${key}).get()))`
+            }
             return `return ${_readmodelTitle(readModel.title)}(repository.findAll())`
         } else {
             return `
@@ -452,6 +465,7 @@ module.exports = class extends Generator {
                 _packageName: this._packageNameForContext(contextPackageName),
                 _name: _readmodelTitle(readModel.title),
                 _query: this._repositoryQuery(readModel),
+                _listElement: readModel.listElement,
                 _typeImports: typeImports(readModel.fields),
                 _fields: VariablesGenerator.generateInvocation(readModel.fields.filter(it => it.idAttribute), "query"),
                 link: boardlLink(config.boardId, readModel.id),
@@ -789,9 +803,12 @@ fun on(event: ${_eventTitle(it.title)}) {
 
     _generateQuery(slice, readModel) {
         var readModelTitle = _readmodelTitle(readModel.title)
-        var idAttributes = readModel.fields?.filter(it => it.idAttribute)
+        var idAttributes = readModel.fields?.filter(it => it.idAttribute) ?? []
 
         if (readModel.listElement ?? false) {
+            if (idAttributes.length > 1) {
+                return `queryGateway.query(${readModelTitle}Query(${VariablesGenerator.generateInvocation(idAttributes)}), ${readModelTitle}::class.java)`;
+            }
             return `queryGateway.query(${readModelTitle}Query(), ${readModelTitle}::class.java)`
         } else {
             if (idAttributes.length <= 1) {
@@ -806,6 +823,13 @@ fun on(event: ${_eventTitle(it.title)}) {
         var readModelTitle = _readmodelTitle(readModel.title)
         var readModelIdAttributes = readModel.fields.filter(it => it.idAttribute)
         if (readModel.listElement) {
+            if (readModelIdAttributes.length > 1) {
+                var requestParams = readModelIdAttributes.map(it => `@RequestParam("${it.name}") ${it.name}:${typeMapping(it.type, it.cardinality, it.optional, it.mutable)}`).join(",\n")
+                return `@GetMapping(${endpoint ? `"${endpoint}"` : `"/${slice}"`})
+                    fun findReadModel(${requestParams}):CompletableFuture<${readModelTitle}> {
+                         return ${this._generateQuery(slice, readModel)}
+                    }`
+            }
             return `@GetMapping(${endpoint ? `"${endpoint}"` : `"/${slice}"`})
                     fun findReadModel():CompletableFuture<${readModelTitle}> {
                          return ${this._generateQuery(slice, readModel)}  
@@ -902,6 +926,10 @@ fun on(event: ${_eventTitle(it.title)}) {
 
     _renderStatelessProcessorTriggers(readModel, triggers, events, command) {
         return triggers.map((event) => {
+            var commandComment = command ? `/*commandGateway.send<${_commandTitle(command.title)}>(
+                    ${_commandTitle(command.title)}(
+                      ${variableAssignments(command.fields, "it", readModel, "\n", "=")})
+                )*/` : "/* TODO dispatch command */"
 
             return readModel ? `
                 @EventHandler
@@ -910,16 +938,13 @@ fun on(event: ${_eventTitle(it.title)}) {
             ${_readmodelTitle(readModel.title)}Query(${!readModel?.listElement ? "event.aggregateId" : ""}),
             ${_readmodelTitle(readModel.title)}::class.java
         ).thenAccept {
-                /*commandGateway.send<${_commandTitle(command.title)}>(
-                    ${_commandTitle(command.title)}(
-                      ${variableAssignments(command.fields, "it", readModel, "\n", "=")})
-                )*/
+                ${commandComment}
         }
                 }` : `@EventHandler
             fun on(event: ${_eventTitle(event)}) {
-                    /*commandGateway.send<${_commandTitle(command.title)}>(
+                    ${command ? `/*commandGateway.send<${_commandTitle(command.title)}>(
                         ${_commandTitle(command.title)}(
-                    )*/
+                    )*/` : "/* TODO dispatch command */"}
                 }
             }`
         }).join("\n")

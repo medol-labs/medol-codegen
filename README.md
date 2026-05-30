@@ -113,10 +113,46 @@ gen /some/other/generator
 
 ## Configuration
 
-The generator reads:
+The preferred generator input is the `CodegenModel` exported by Event Modeling Toolkit:
+
+```text
+/workspace/codegen-model.json
+```
+
+For compatibility, the generator still falls back to:
 
 ```text
 /workspace/config.json
+```
+
+To test non-interactive Docker generation with `example/codegen-model.json`:
+
+```bash
+docker build -f Dockerfile.codegen -t es-codegen .
+cd example
+./test-codegen-model.sh
+```
+
+This generates Axon skeleton, Axon slices, Axon aggregates, Refine skeleton, and Refine config-driven pages without opening generator prompts.
+
+Generated files are separated by target:
+
+```text
+example/generated/axon
+example/generated/refine
+```
+
+To jump directly into a target:
+
+```bash
+./test-codegen-model.sh axon
+./test-codegen-model.sh refine
+```
+
+To open the original interactive container shell:
+
+```bash
+./test-codegen-model.sh shell
 ```
 
 Expected `codeGen` fields include:
@@ -130,7 +166,40 @@ Expected `codeGen` fields include:
 }
 ```
 
-If these fields exist, the generator uses them as defaults and only asks what should be generated.
+If only `config.json` exists and these fields are present, the generator uses them as defaults and only asks what should be generated.
+
+## Core Codegen Model
+
+The generator now uses the Event Modeling Toolkit `CodegenModel` as its core input:
+
+```text
+codegen-model.json -> common/core CodegenModel -> axon/refine generators
+```
+
+Legacy `config.json` is converted into the same core model only as a fallback.
+
+The core layer lives in:
+
+```text
+.generator/common/core/
+```
+
+It covers:
+
+- `config-loader.js`: reads `/workspace/codegen-model.json` first, falls back to `/workspace/config.json`, and returns the normalized `CodegenModel`.
+- `codegen-model.js`: normalizes Event Modeling Toolkit `CodegenModel` input and can convert Martin-style `config.json` into the same shape for compatibility.
+
+The `CodegenModel` keeps the domain model shape stable for code generation:
+
+- `domain`: business domain from the toolkit model
+- `rootPackage`: package root from the toolkit model
+- `contexts`: bounded contexts from the toolkit model
+- `aggregates`: aggregate identity, context, fields, and states
+- `slices`: commands, events, read models, screens, processors, specifications, actors, hotspots, and state changes
+- `dependencies`: normalized inbound/outbound element links while preserving the legacy `type` field for compatibility
+- `fields`: normalized field metadata, including id/generated/technical/query flags and source mapping metadata
+
+Axon currently consumes the backward-compatible config emitted by the core layer, so existing templates continue to work. Refine consumes the normalized `CodegenModel` directly for resource generation.
 
 ## Updating The Generator
 

@@ -16,6 +16,7 @@ const {
 } = require("../../common/util/naming");
 const {lowercaseFirstCharacter, uniqBy, splitByCamelCase, idField} = require("../../common/util/util");
 const {idType} = require("../../common/util/generator");
+const {loadGeneratorModel} = require("../../common/core/config-loader");
 
 
 function _sliceTitle(title) {
@@ -27,6 +28,7 @@ function contextPackage(context) {
 }
 
 var config = {}
+var codegenModel = {}
 
 module.exports = class extends Generator {
 
@@ -36,17 +38,9 @@ module.exports = class extends Generator {
 
         this.argument('appname', { type: String, required: false });
 
-        const configPath = `${this.env.cwd}/config.json`;
-
-        try {
-            config = require(configPath);
-        } catch (err) {
-            if (err.code === 'MODULE_NOT_FOUND') {
-                throw new Error(`❌ No config.json found at ${configPath}. Please create one first.`);
-            } else {
-                throw err; // other errors (invalid JSON etc.)
-            }
-        }
+        const loaded = loadGeneratorModel(this.env.cwd);
+        config = loaded.config;
+        codegenModel = loaded.codegenModel;
     }
 
     writeSpecifications() {

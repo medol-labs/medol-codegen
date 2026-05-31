@@ -351,9 +351,9 @@ function commandWorkflowFields(command, readModel, allEvents, workflow) {
 
 function toAggregateResources(group, slices, allScreens, allReadModels, allEvents, workflow) {
     const title = cleanTitle(group.title);
+    const aggregateSlices = slices.filter((slice) => sliceHasAggregate(slice, title));
     const relatedScreens = uniqueElements(group.commands.flatMap((command) => findDependencies(command, 'SCREEN', allScreens)));
-    const aggregateReadModels = slices
-        .filter((slice) => sliceHasAggregate(slice, title))
+    const aggregateReadModels = aggregateSlices
         .flatMap((slice) => slice.readmodels ?? []);
     const relatedReadModels = uniqueElements([
         ...aggregateReadModels,
@@ -366,7 +366,35 @@ function toAggregateResources(group, slices, allScreens, allReadModels, allEvent
         return [toReadModelResource(group, null, allEvents, workflow)];
     }
 
-    return relatedReadModels.map((readModel) => toReadModelResource(group, readModel, allEvents, workflow));
+    return relatedReadModels.map((readModel) => toReadModelResource({
+        ...group,
+        commands: commandsForReadModel(readModel, aggregateSlices, group.commands)
+    }, readModel, allEvents, workflow));
+}
+
+function commandsForReadModel(readModel, slices, aggregateCommands) {
+    if (!readModel) {
+        return aggregateCommands;
+    }
+
+    const ownerIndex = slices.findIndex((slice) =>
+        (slice.readmodels ?? []).some((item) => item.id === readModel.id)
+        || (
+            (slice.screens ?? []).some((screen) => screen.ui?.type === 'list' || screen.ui?.type === 'detail')
+            && (slice.readmodels ?? []).some((item) => cleanTitle(item.title) === cleanTitle(readModel.title))
+        )
+    );
+    if (ownerIndex < 0) {
+        return aggregateCommands;
+    }
+
+    const selectedCommandIds = new Set(aggregateCommands.map(commandKey));
+    const timelineCommands = uniqueElements(slices
+        .slice(0, ownerIndex)
+        .flatMap((slice) => slice.commands ?? [])
+        .filter((command) => selectedCommandIds.has(commandKey(command))));
+
+    return timelineCommands.length > 0 ? timelineCommands : aggregateCommands;
 }
 
 function toReadModelResource(group, readModel, allEvents, workflow) {
@@ -380,10 +408,7 @@ function toReadModelResource(group, readModel, allEvents, workflow) {
         ? queryFields
         : normalizeFields(group.commands.flatMap((command) => command.fields ?? []));
     const idField = fields.find((field) => field.idAttribute) ?? fields.find((field) => field.name === 'id') ?? fields[0];
-    const resourceCommands = uniqueElements([
-        ...group.commands,
-        ...(readModel ? workflow.nextCommandsByReadModelId.get(readModel.id) ?? [] : [])
-    ]);
+    const resourceCommands = uniqueElements(group.commands);
     let normalizedCommands = resourceCommands
         .filter((command) => command?.title)
         .map((command) => toCommand(command, route, component, readModel, allEvents, workflow));
@@ -568,9 +593,20 @@ function normalizeArray(value) {
 
 function sliceHasAggregate(slice, aggregateTitle) {
     const normalizedAggregateTitle = cleanTitle(aggregateTitle).toLowerCase();
-    return normalizeArray(slice?.aggregates)
+    const directMatch = normalizeArray(slice?.aggregates)
         .map((aggregate) => cleanTitle(typeof aggregate === 'string' ? aggregate : aggregate.title ?? aggregate.name).toLowerCase())
         .includes(normalizedAggregateTitle);
+    if (directMatch) {
+        return true;
+    }
+
+    return [
+        ...(slice?.commands ?? []),
+        ...(slice?.events ?? []),
+        ...(slice?.readmodels ?? []),
+        ...(slice?.screens ?? []),
+        ...(slice?.processors ?? [])
+    ].some((element) => elementHasAggregate(element, normalizedAggregateTitle));
 }
 
 function elementHasAggregate(element, aggregateTitle) {

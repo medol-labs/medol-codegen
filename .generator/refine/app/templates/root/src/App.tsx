@@ -12,7 +12,7 @@ import { Toaster } from "./components/refine-ui/notification/toaster";
 import { useNotificationProvider } from "./components/refine-ui/notification/use-notification-provider";
 import { ThemeProvider } from "./components/refine-ui/theme/theme-provider";
 import { AppRouter } from "./providers/app-router";
-import authProvider from "./providers/auth";
+import authProvider from "./providers/mock-auth";
 import { commandProvider } from "./providers/command-provider";
 import { dataProvider } from "./providers/data";
 import { resources } from "./providers/resources";

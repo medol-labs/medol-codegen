@@ -6,6 +6,8 @@
 var Generator = require('yeoman-generator').default;
 var slugify = require('slugify')
 const {loadGeneratorModel} = require("../../common/core/config-loader");
+const {configureValueTypes} = require('../../common/util/generator');
+const {contextPackage, resolvedBaseType, resolvedConstraints} = require('../../common/util/value-types');
 
 
 let config = {}
@@ -24,6 +26,7 @@ module.exports = class extends Generator {
         const loaded = loadGeneratorModel(this.env.cwd);
         config = loaded.config;
         codegenModel = loaded.codegenModel;
+        configureValueTypes(codegenModel.valueTypes, codegenModel.rootPackage);
     }
 
     // Async Await
@@ -137,9 +140,89 @@ module.exports = class extends Generator {
             this.templatePath('.mvn'),
             this.destinationPath('./.mvn')
         )
+        this._writeValueTypes();
 
+    }
+
+    _writeValueTypes() {
+        (codegenModel.valueTypes ?? []).forEach((valueType) => {
+            const baseType = kotlinPrimitive(resolvedBaseType(valueType));
+            const context = contextPackage(valueType.context);
+            this.fs.copyTpl(
+                this.templatePath('value-types/ValueType.kt.tpl'),
+                this.destinationPath(`./src/main/kotlin/${this.answers.rootPackageName.split('.').join('/')}/${context}/domain/types/${valueType.name}.kt`),
+                {
+                    packageName: `${this.answers.rootPackageName}.${context}.domain.types`,
+                    name: valueType.name,
+                    baseType,
+                    imports: kotlinImports(baseType),
+                    validations: renderValidations(valueType, baseType)
+                }
+            );
+        });
     }
 
     end() {
     }
 };
+
+function kotlinPrimitive(type) {
+    switch (String(type).toLowerCase()) {
+        case 'int':
+        case 'integer': return 'Int';
+        case 'long': return 'Long';
+        case 'double':
+        case 'number': return 'Double';
+        case 'float': return 'Float';
+        case 'decimal':
+        case 'bigdecimal': return 'BigDecimal';
+        case 'boolean': return 'Boolean';
+        case 'date': return 'LocalDate';
+        case 'datetime': return 'LocalDateTime';
+        case 'uuid': return 'UUID';
+        default: return 'String';
+    }
+}
+
+function kotlinImports(baseType) {
+    const imports = {
+        BigDecimal: 'import java.math.BigDecimal',
+        LocalDate: 'import java.time.LocalDate',
+        LocalDateTime: 'import java.time.LocalDateTime',
+        UUID: 'import java.util.UUID'
+    };
+    return imports[baseType] ?? '';
+}
+
+function renderValidations(valueType, baseType) {
+    return resolvedConstraints(valueType).map((constraint) => {
+        const label = `${valueType.name} violates ${constraint.kind} constraint`;
+        switch (constraint.kind) {
+            case 'format':
+                if (constraint.format === 'email') return `require(Regex("^[^\\\\s@]+@[^\\\\s@]+\\\\.[^\\\\s@]+$").matches(value)) { "${label}" }`;
+                return '';
+            case 'length':
+                return `require(value.length in ${constraint.min}..${constraint.max}) { "${label}" }`;
+            case 'range':
+                return `require(value >= ${kotlinLiteral(constraint.min, baseType)} && value <= ${kotlinLiteral(constraint.max, baseType)}) { "${label}" }`;
+            case 'matches':
+                return `require(Regex("${escapeKotlin(constraint.pattern)}").matches(value)) { "${label}" }`;
+            case 'oneOf':
+                return `require(value in setOf(${(constraint.values ?? []).map((value) => kotlinLiteral(value, baseType)).join(', ')})) { "${label}" }`;
+            default:
+                return '';
+        }
+    }).filter(Boolean).map((line) => `        ${line}`).join('\n');
+}
+
+function kotlinLiteral(value, baseType) {
+    if (baseType === 'String') return `"${escapeKotlin(value)}"`;
+    if (baseType === 'Long') return `${value}L`;
+    if (baseType === 'Float') return `${value}f`;
+    if (baseType === 'BigDecimal') return `BigDecimal("${value}")`;
+    return String(value);
+}
+
+function escapeKotlin(value) {
+    return String(value ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}

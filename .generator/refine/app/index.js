@@ -68,6 +68,7 @@ module.exports = class extends Generator {
 
         if (this.answers.generatorType === 'Skeleton') {
             this._writeSkeleton();
+            this._writeDomainModel(buildDomainModel(codegenModel));
             return;
         }
 
@@ -75,6 +76,7 @@ module.exports = class extends Generator {
             ? undefined
             : normalizeSelectedCommands(this.answers.commands);
         const model = buildFrontendModel(codegenModel, selectedCommandKeys);
+        this._writeDomainModel(buildDomainModel(codegenModel));
 
         if (this.answers.generatorType === 'all' || this.answers.generatorType === 'resources') {
             this._writeResources(model);
@@ -159,6 +161,19 @@ module.exports = class extends Generator {
         });
     }
 
+    _writeDomainModel(model) {
+        this.fs.copyTpl(
+            this.templatePath('src/domain/value-types.ts.tpl'),
+            this.destinationPath('./src/domain/value-types.ts'),
+            model
+        );
+        this.fs.copyTpl(
+            this.templatePath('src/domain/schemas.ts.tpl'),
+            this.destinationPath('./src/domain/schemas.ts'),
+            model
+        );
+    }
+
     _writeSkeleton() {
         this.fs.copyTpl(
             this.templatePath('root'),
@@ -230,6 +245,29 @@ function buildFrontendModel(source, selectedCommandKeys) {
         chapters,
         resources: resources.sort((a, b) => a.route.localeCompare(b.route))
     };
+}
+
+function buildDomainModel(source) {
+    const valueTypes = (source.valueTypes ?? []).map((valueType) => ({
+        ...valueType,
+        tsBaseType: tsPrimitive(valueType.resolvedBaseType ?? valueType.baseType),
+        schema: zodValueTypeExpression(valueType)
+    }));
+    const commands = uniqueCommands((source.slices ?? []).flatMap((slice) => slice.commands ?? []))
+        .filter((command) => command?.title)
+        .map((command) => {
+            const component = pascal(cleanTitle(command.title));
+            return {
+                name: component,
+                schemaName: `${component}CommandSchema`,
+                inputTypeName: `${component}CommandInput`,
+                fields: normalizeFields(command.fields).map((field) => ({
+                    ...field,
+                    schema: zodFieldExpression(field)
+                }))
+            };
+        });
+    return {valueTypes, commands};
 }
 
 function uniqueCommands(commands) {
@@ -434,6 +472,7 @@ function toReadModelResource(group, readModel, allEvents, workflow) {
         readModelId: readModel?.id,
         canList: readModel ? !!readModel.listElement : true,
         fields,
+        valueTypeImports: Array.from(new Set(fields.map((field) => field.valueType?.name).filter(Boolean))).sort(),
         createCommand,
         editCommand,
         deleteCommand,
@@ -493,6 +532,8 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
         route: kebab(title),
         file: kebab(title),
         component,
+        schemaName: `${component}CommandSchema`,
+        inputTypeName: `${component}CommandInput`,
         pageComponent: `${resourceComponent}${component}`,
         resourceRoute,
         aggregateRoute: axonRoute(commandAggregateTitle),
@@ -722,7 +763,8 @@ function normalizeFields(fields = []) {
             optional: !!field.optional,
             generated: !!field.generated,
             idAttribute: !!field.idAttribute,
-            cardinality: field.cardinality ?? 'Single'
+            cardinality: field.cardinality ?? 'Single',
+            valueType: field.valueType
         }));
 }
 
@@ -756,13 +798,75 @@ function isDeleteCommand(command) {
 }
 
 function tsType(field) {
+    if (field.valueType) {
+        const valueType = field.valueType.name;
+        return field.cardinality?.toLowerCase() === 'list' ? `${valueType}[]` : valueType;
+    }
     const lower = field.type?.toLowerCase();
     const base = ['int', 'long', 'double', 'number'].includes(lower) ? 'number' : lower === 'boolean' ? 'boolean' : 'string';
     return field.cardinality?.toLowerCase() === 'list' ? `${base}[]` : base;
 }
 
+function tsPrimitive(type) {
+    const lower = String(type ?? 'String').toLowerCase();
+    if (['int', 'integer', 'long', 'double', 'float', 'decimal', 'bigdecimal', 'number'].includes(lower)) return 'number';
+    if (lower === 'boolean') return 'boolean';
+    return 'string';
+}
+
+function zodValueTypeExpression(valueType) {
+    let expression = zodPrimitive(valueType.resolvedBaseType ?? valueType.baseType);
+    for (const constraint of valueType.resolvedConstraints ?? valueType.constraints ?? []) {
+        switch (constraint.kind) {
+            case 'format':
+                if (constraint.format === 'email') expression += '.email()';
+                else if (constraint.format === 'url') expression += '.url()';
+                else if (constraint.format === 'uuid') expression += '.uuid()';
+                break;
+            case 'length':
+                expression += `.min(${constraint.min}).max(${constraint.max})`;
+                break;
+            case 'range':
+                expression += `.min(${constraint.min}).max(${constraint.max})`;
+                break;
+            case 'matches':
+                expression += `.regex(new RegExp(${JSON.stringify(constraint.pattern)}))`;
+                break;
+            case 'oneOf':
+                expression += `.refine((value) => ${JSON.stringify(constraint.values ?? [])}.includes(value), { message: "Invalid value" })`;
+                break;
+        }
+    }
+    return expression;
+}
+
+function zodFieldExpression(field) {
+    let expression = field.valueType ? `${field.valueType.name}Schema` : zodPrimitive(field.type);
+    if (field.cardinality?.toLowerCase() === 'list') expression = `z.array(${expression})`;
+    if (field.optional) expression += '.optional().nullable()';
+    return expression;
+}
+
+function zodPrimitive(type) {
+    switch (String(type ?? 'String').toLowerCase()) {
+        case 'int':
+        case 'integer': return 'z.coerce.number().int()';
+        case 'long':
+        case 'double':
+        case 'float':
+        case 'decimal':
+        case 'bigdecimal':
+        case 'number': return 'z.coerce.number()';
+        case 'boolean': return 'z.boolean()';
+        case 'uuid': return 'z.string().uuid()';
+        case 'date': return 'z.string().date()';
+        case 'datetime': return 'z.string().datetime()';
+        default: return 'z.string()';
+    }
+}
+
 function inputType(field) {
-    const lower = field.type?.toLowerCase();
+    const lower = (field.valueType?.resolvedBaseType ?? field.type)?.toLowerCase();
     if (lower === 'boolean') {
         return 'boolean';
     }
@@ -779,7 +883,7 @@ function inputType(field) {
 }
 
 function cellValue(field) {
-    const lower = field.type?.toLowerCase();
+    const lower = (field.valueType?.resolvedBaseType ?? field.type)?.toLowerCase();
     if (lower === 'boolean') {
         return 'getValue() ? "Yes" : "No"';
     }
@@ -790,7 +894,7 @@ function cellValue(field) {
 }
 
 function isFilterable(field) {
-    return ['string', 'uuid'].includes(field.type?.toLowerCase());
+    return ['string', 'uuid'].includes((field.valueType?.resolvedBaseType ?? field.type)?.toLowerCase());
 }
 
 function cleanTitle(value) {

@@ -18,6 +18,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useCommandForm } from "@/hooks/command/useCommandForm";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { <%= command.schemaName %>, type <%= command.inputTypeName %> } from "@/domain/schemas";
 <% if (command.hasSelectFields) { -%>
 import { ResourceSelect } from "@/components/refine-ui/form/resource-select";
 <% } -%>
@@ -32,7 +34,7 @@ export const <%= command.pageComponent %> = () => {
 <% }) -%>
   };
 
-  const { refineCore: { onFinish }, ...form } = useCommandForm({
+  const { refineCore: { onFinish }, ...form } = useCommandForm<<%= command.inputTypeName %>, <%= command.inputTypeName %>>({
     resource: "<%= resource.name %>",
     command: "<%= command.name %>",
     aggregateId: id?.toString(),
@@ -53,10 +55,11 @@ export const <%= command.pageComponent %> = () => {
     },
     formProps: {
       defaultValues,
+      resolver: zodResolver(<%= command.schemaName %>),
     },
   });
 
-  function onSubmit(values: Record<string, unknown>) {
+  function onSubmit(values: <%= command.inputTypeName %>) {
     onFinish({
       ...defaultValues,
       ...values,

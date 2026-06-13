@@ -17,6 +17,9 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { MoreHorizontal } from "lucide-react";
+<% if (resource.valueTypeImports.length) { -%>
+import type { <%= resource.valueTypeImports.join(', ') %> } from "@/domain/value-types";
+<% } -%>
 
 type <%= resource.component %>Record = {
 <% resource.fields.forEach((field) => { -%>

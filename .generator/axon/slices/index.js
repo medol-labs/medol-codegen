@@ -16,7 +16,8 @@ const {
     _restResourceTitle
 } = require("../../common/util/naming");
 const {variableAssignments, processSourceMapping} = require("../../common/util/variables");
-const {ClassesGenerator, typeMapping, typeImports, idType} = require("../../common/util/generator");
+const {ClassesGenerator, configureValueTypes, typeMapping, typeImports, idType} = require("../../common/util/generator");
+const {findValueType, resolvedBaseType} = require('../../common/util/value-types');
 const {_sliceSpecificClassTitle, _packageName, _packageFolderName} = require("../../common/util/naming");
 const {camelCaseToUnderscores, idField} = require("../../common/util/util");
 const {analyzeSpecs} = require("../../common/util/specs");
@@ -38,6 +39,7 @@ module.exports = class extends Generator {
         const loaded = loadGeneratorModel(this.env.cwd);
         config = loaded.config;
         codegenModel = loaded.codegenModel;
+        configureValueTypes(codegenModel.valueTypes, codegenModel.rootPackage);
     }
 
     async prompting() {
@@ -1102,6 +1104,10 @@ const fallbackValue = (field) => {
     }
     if (field.cardinality?.toLowerCase() === "list") {
         return "emptyList()"
+    }
+    const valueType = findValueType(field.type)
+    if (valueType) {
+        return `${valueType.name}(${fallbackValue({...field, type: resolvedBaseType(valueType)} )})`
     }
 
     switch (field.type?.toLowerCase()) {

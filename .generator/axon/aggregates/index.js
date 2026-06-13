@@ -16,7 +16,7 @@ const {
 } = require("../../common/util/naming")
 const {variableAssignments, processSourceMapping} = require("../../common/util/variables");
 const {idField, uniqBy} = require("../../common/util/util");
-const {idType} = require("../../common/util/generator");
+const {configureValueTypes, idType, typeImports, typeMapping} = require("../../common/util/generator");
 const {analyzeSpecs} = require("../../common/util/specs");
 const {fileExistsByGlob} = require("../../common/util/files");
 const {loadGeneratorModel} = require("../../common/core/config-loader");
@@ -37,6 +37,7 @@ module.exports = class extends Generator {
         const loaded = loadGeneratorModel(this.env.cwd);
         config = loaded.config;
         codegenModel = loaded.codegenModel;
+        configureValueTypes(codegenModel.valueTypes, codegenModel.rootPackage);
     }
 
     async prompting() {
@@ -301,65 +302,6 @@ class VariablesGenerator {
 
         }).filter((it) => it !== "").join(",")
     }
-}
-
-const typeMapping = (fieldType, fieldCardinality, optional) => {
-    var fieldType;
-    switch (fieldType?.toLowerCase()) {
-        case "string":
-            fieldType = optional ? "String?" : "String";
-            break
-        case "double":
-            fieldType = optional ? "Double?" : "Double";
-            break
-        case "long":
-            fieldType = optional ? "Long?" : "Long";
-            break
-        case "boolean":
-            fieldType = optional ? "Boolean?" : "Boolean";
-            break
-        case "date":
-            fieldType = optional ? "LocalDate?" : "LocalDate";
-            break
-        case "datetime":
-            fieldType = optional ? "LocalDateTime?" : "LocalDateTime";
-            break
-        case "uuid":
-            fieldType = optional ? "UUID?" : "UUID";
-            break
-        default:
-            fieldType = optional ? "String?" : "String";
-            break
-    }
-    if (fieldCardinality?.toLowerCase() === "list") {
-        return `List<${fieldType}>`
-    } else {
-        return fieldType
-    }
-
-}
-
-const typeImports = (fields) => {
-    var imports = fields?.map((field) => {
-        switch (field.type?.toLowerCase()) {
-            case "date":
-                return ["import java.time.LocalDate", "import org.springframework.format.annotation.DateTimeFormat"]
-            case "datetime":
-                return ["import java.time.LocalDateTime", "import org.springframework.format.annotation.DateTimeFormat"]
-            case "uuid":
-                return ["import java.util.UUID"]
-            default:
-                return []
-        }
-        switch (field.cardinality?.toLowerCase()) {
-            case "LIST":
-                return ["java.util.List"]
-            default:
-                return []
-        }
-    })
-    return imports?.flat().join(";\n")
-
 }
 
 const constantCase = (value) => {

@@ -3,6 +3,8 @@
  * Licensed under the MIT License.
  */
 
+const {configureValueTypes, isValueType, valueTypeImport} = require('./value-types');
+
 class ClassesGenerator {
 
     static generateDataClass(name, fields) {
@@ -44,6 +46,16 @@ const typeMapping = (fieldType, fieldCardinality, optional, mutable) => {
         case "double":
             fieldType = optional ? "Double?" : "Double";
             break
+        case "float":
+            fieldType = optional ? "Float?" : "Float";
+            break
+        case "decimal":
+        case "bigdecimal":
+            fieldType = optional ? "BigDecimal?" : "BigDecimal";
+            break
+        case "number":
+            fieldType = optional ? "Double?" : "Double";
+            break
         case "int":
             fieldType = optional ? "Int?" : "Int";
             break
@@ -63,7 +75,9 @@ const typeMapping = (fieldType, fieldCardinality, optional, mutable) => {
             fieldType = optional ? "UUID?" : "UUID";
             break
         default:
-            fieldType = optional ? "String?" : "String";
+            fieldType = isValueType(fieldType)
+                ? (optional ? `${fieldType}?` : fieldType)
+                : (optional ? "String?" : "String");
             break
     }
     if (fieldCardinality?.toLowerCase() === "list") {
@@ -86,6 +100,12 @@ const typeImports = (fields, additionalImports) => {
                 return ["import java.time.LocalDateTime", "import org.springframework.format.annotation.DateTimeFormat", "import com.fasterxml.jackson.annotation.JsonFormat"]
             case "uuid":
                 return ["import java.util.UUID"]
+            case "decimal":
+            case "bigdecimal":
+                return ["import java.math.BigDecimal"]
+        }
+        if (isValueType(field.type)) {
+            return [valueTypeImport(field.type)]
         }
         switch (field.cardinality?.toLowerCase()) {
             case "list":
@@ -98,4 +118,4 @@ const typeImports = (fields, additionalImports) => {
 
 }
 
-module.exports = {ClassesGenerator, typeMapping, typeImports, idType}
+module.exports = {ClassesGenerator, configureValueTypes, typeMapping, typeImports, idType}

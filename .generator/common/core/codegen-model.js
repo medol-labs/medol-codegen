@@ -5,14 +5,16 @@
 
 function fromConfig(config = {}) {
     const contexts = normalizeContexts(config);
-    const aggregates = normalizeAggregates(config, contexts);
+    const valueTypes = normalizeValueTypes(config, contexts);
+    const aggregates = normalizeAggregates(config, contexts, valueTypes);
     const actors = normalizeActors(config);
-    const slices = normalizeSlices(config, aggregates, contexts, actors);
+    const slices = normalizeSlices(config, aggregates, contexts, actors, valueTypes);
 
     return {
         rootPackage: config.codeGen?.rootPackage ?? 'tech.medo',
         ...(config.domain ? { domain: config.domain } : {}),
         contexts,
+        valueTypes,
         aggregates,
         actors,
         slices,
@@ -25,14 +27,16 @@ function fromConfig(config = {}) {
 
 function fromCodegenModel(model = {}) {
     const contexts = normalizeContexts(model);
-    const aggregates = normalizeAggregates(model, contexts);
+    const valueTypes = normalizeValueTypes(model, contexts);
+    const aggregates = normalizeAggregates(model, contexts, valueTypes);
     const actors = normalizeActors(model);
-    const slices = normalizeSlices(model, aggregates, contexts, actors);
+    const slices = normalizeSlices(model, aggregates, contexts, actors, valueTypes);
 
     return {
         rootPackage: model.rootPackage ?? 'tech.medo',
         ...(model.domain ? { domain: model.domain } : {}),
         contexts,
+        valueTypes,
         aggregates,
         actors,
         slices,
@@ -47,6 +51,7 @@ function toGeneratorConfig(model, source = {}) {
         ...source,
         slices: model.slices,
         flows: source.flows ?? [],
+        valueTypes: model.valueTypes,
         aggregates: model.aggregates,
         actors: model.actors,
         ...(model.domain ? { domain: model.domain } : {}),
@@ -75,6 +80,7 @@ function normalizeContexts(config) {
             risks: context.risks ?? [],
             decisions: context.decisions ?? [],
             metrics: context.metrics ?? [],
+            valueTypes: normalizeValueTypeRefs(context.valueTypes ?? []),
             aggregates: normalizeAggregateRefs(context.aggregates ?? [])
         }));
     }
@@ -93,11 +99,98 @@ function normalizeContexts(config) {
         risks: [],
         decisions: [],
         metrics: [],
+        valueTypes: normalizeValueTypeRefs(valueTypesForContext(config, contextName)),
         aggregates: normalizeAggregateRefs(aggregatesForContext(config, contextName))
     }));
 }
 
-function normalizeAggregates(config, contexts) {
+function normalizeValueTypes(config, contexts) {
+    const normalized = (config.valueTypes ?? []).map((valueType, index) => {
+        const name = valueType.name ?? valueType.title ?? `ValueType${index + 1}`;
+        const context = valueType.context ?? findContextForValueType(name, contexts);
+        return {
+            id: valueType.id ?? stableId('type', `${context ?? ''}/${name}`),
+            name,
+            title: valueType.title ?? humanize(name),
+            context,
+            baseType: valueType.baseType ?? 'String',
+            constraints: normalizeValueTypeConstraints(valueType.constraints ?? [])
+        };
+    });
+    const byName = new Map(normalized.map((valueType) => [valueType.name, valueType]));
+    return normalized.map((valueType) => ({
+        ...valueType,
+        resolvedBaseType: resolveValueTypeBase(valueType, byName),
+        resolvedConstraints: resolveValueTypeConstraints(valueType, byName)
+    }));
+}
+
+function resolveValueTypeBase(valueType, byName, visited = new Set()) {
+    if (!byName.has(valueType.baseType)) {
+        return valueType.baseType;
+    }
+    if (visited.has(valueType.name)) {
+        return 'String';
+    }
+    const next = new Set(visited).add(valueType.name);
+    return resolveValueTypeBase(byName.get(valueType.baseType), byName, next);
+}
+
+function resolveValueTypeConstraints(valueType, byName, visited = new Set()) {
+    if (visited.has(valueType.name)) {
+        return valueType.constraints;
+    }
+    const parent = byName.get(valueType.baseType);
+    const inherited = parent
+        ? resolveValueTypeConstraints(parent, byName, new Set(visited).add(valueType.name))
+        : [];
+    return [...inherited, ...valueType.constraints];
+}
+
+function normalizeValueTypeConstraints(constraints) {
+    return constraints.map((constraint) => {
+        switch (constraint.kind) {
+            case 'format':
+                return {kind: 'format', format: constraint.format};
+            case 'length':
+            case 'range':
+                return {kind: constraint.kind, min: Number(constraint.min), max: Number(constraint.max)};
+            case 'matches':
+                return {kind: 'matches', pattern: constraint.pattern};
+            case 'oneOf':
+                return {kind: 'oneOf', values: constraint.values ?? []};
+            default:
+                return constraint;
+        }
+    });
+}
+
+function normalizeValueTypeRefs(valueTypes) {
+    return valueTypes.map((valueType) => {
+        if (typeof valueType === 'string') {
+            return {id: stableId('type', valueType), name: valueType, title: humanize(valueType)};
+        }
+        const name = valueType.name ?? valueType.title;
+        return {
+            id: valueType.id ?? stableId('type', name),
+            name,
+            title: valueType.title ?? humanize(name)
+        };
+    });
+}
+
+function findContextForValueType(valueTypeName, contexts) {
+    return contexts.find((context) => (context.valueTypes ?? []).some((valueType) => {
+        const name = typeof valueType === 'string' ? valueType : valueType.name ?? valueType.title;
+        return name === valueTypeName;
+    }))?.name;
+}
+
+function valueTypesForContext(config, contextName) {
+    return (config.valueTypes ?? []).filter((valueType) => !valueType.context || valueType.context === contextName);
+}
+
+function normalizeAggregates(config, contexts, valueTypes) {
     return (config.aggregates ?? []).map((aggregate) => {
         const name = aggregate.name ?? aggregate.title;
         const title = aggregate.title ?? humanize(name);
@@ -106,7 +199,7 @@ function normalizeAggregates(config, contexts) {
             name,
             title,
             context: aggregate.context ?? findContextForAggregate(title, contexts),
-            fields: normalizeFields(aggregate.fields ?? []),
+            fields: normalizeFields(aggregate.fields ?? [], valueTypes),
             states: aggregate.states ?? []
         };
     });
@@ -137,7 +230,7 @@ function normalizeActors(config) {
     return Array.from(byId.values());
 }
 
-function normalizeSlices(config, aggregates, contexts) {
+function normalizeSlices(config, aggregates, contexts, actors, valueTypes) {
     return (config.slices ?? []).map((slice, index) => {
         const context = slice.context ?? slice.chapter ?? config.context ?? primaryContextName({ contexts });
         const aggregate = normalizeAggregateRef(slice.aggregates?.[0] ?? findAggregateForSlice(slice, aggregates));
@@ -149,11 +242,11 @@ function normalizeSlices(config, aggregates, contexts) {
             chapter: slice.chapter ?? context,
             context,
             aggregate,
-            commands: normalizeElements(slice.commands, 'COMMAND', slice, aggregate),
-            events: normalizeElements(slice.events, 'EVENT', slice, aggregate),
-            readmodels: normalizeElements(slice.readmodels, 'READMODEL', slice, aggregate),
-            screens: normalizeElements(slice.screens, 'SCREEN', slice, aggregate),
-            processors: normalizeElements(slice.processors, 'PROCESSOR', slice, aggregate),
+            commands: normalizeElements(slice.commands, 'COMMAND', slice, aggregate, valueTypes),
+            events: normalizeElements(slice.events, 'EVENT', slice, aggregate, valueTypes),
+            readmodels: normalizeElements(slice.readmodels, 'READMODEL', slice, aggregate, valueTypes),
+            screens: normalizeElements(slice.screens, 'SCREEN', slice, aggregate, valueTypes),
+            processors: normalizeElements(slice.processors, 'PROCESSOR', slice, aggregate, valueTypes),
             specifications: slice.specifications ?? [],
             actors: slice.actors ?? [],
             hotspots: slice.hotspots ?? [],
@@ -162,7 +255,7 @@ function normalizeSlices(config, aggregates, contexts) {
     });
 }
 
-function normalizeElements(elements = [], type, slice, sliceAggregate) {
+function normalizeElements(elements = [], type, slice, sliceAggregate, valueTypes) {
     return elements.map((element) => {
         const aggregate = normalizeAggregateRef(element.aggregate ?? element.aggregateName ?? element.aggregateDependencies?.[0] ?? sliceAggregate);
         return {
@@ -176,14 +269,15 @@ function normalizeElements(elements = [], type, slice, sliceAggregate) {
             aggregate: aggregate?.name,
             aggregateRef: aggregate,
             aggregateDependencies: element.aggregateDependencies ?? (aggregate?.title ? [aggregate.title] : []),
-            fields: normalizeFields(element.fields ?? []),
+            fields: normalizeFields(element.fields ?? [], valueTypes),
             dependencies: normalizeDependencies(element.dependencies ?? []),
             createsAggregate: element.createsAggregate ?? false
         };
     });
 }
 
-function normalizeFields(fields) {
+function normalizeFields(fields, valueTypes = []) {
+    const byName = new Map(valueTypes.map((valueType) => [valueType.name, valueType]));
     return fields.map((field) => ({
         ...field,
         name: field.name,
@@ -194,6 +288,7 @@ function normalizeFields(fields) {
         generated: !!field.generated,
         technicalAttribute: !!field.technicalAttribute,
         query: !!field.query,
+        ...(byName.has(field.type) ? { valueType: byName.get(field.type) } : {}),
         ...(field.mappings && !field.source ? { source: field.mappings[0] } : {})
     }));
 }

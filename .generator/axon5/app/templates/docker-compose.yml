@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: medol
+      POSTGRES_PASSWORD: medol
+      POSTGRES_DB: medol
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medol -d medol"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

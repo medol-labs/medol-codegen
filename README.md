@@ -1,6 +1,6 @@
 # ES Code Generator
 
-Custom Nebulit/Yeoman code generator for generating Axon-based Kotlin/Spring Boot code from `config.json`.
+Custom Nebulit/Yeoman code generator for generating Axon-based Kotlin/Spring Boot and Refine code from Medol's `CodegenModel`.
 
 The project wraps `nebulit/codegen` with a custom Docker image. The custom image bakes `.generator` and its `node_modules` into the image, then overrides `gen` so the default command runs the local generator.
 
@@ -71,9 +71,10 @@ Then select:
 - `slices` to generate slice-level commands, events, read models, REST resources, processors, and specifications
 - `aggregates` to generate Axon aggregate code
 
-The top-level generator now supports two targets:
+The top-level generator supports three targets:
 
 - `axon` for the Kotlin/Spring Boot backend
+- `axon5` for the Axon Framework 5 backend generated directly from CodegenModel
 - `refine` for the React refine frontend foundation
 
 For the frontend target, run `gen`, choose `refine`, then choose:
@@ -133,12 +134,13 @@ cd example
 ./test-codegen-model.sh
 ```
 
-This generates Axon skeleton, Axon slices, Axon aggregates, Refine skeleton, and Refine config-driven pages without opening generator prompts.
+This generates Axon 4, Axon 5, and Refine projects without opening generator prompts.
 
 Generated files are separated by target:
 
 ```text
 example/generated/axon
+example/generated/axon5
 example/generated/refine
 ```
 
@@ -146,6 +148,7 @@ To jump directly into a target:
 
 ```bash
 ./test-codegen-model.sh axon
+./test-codegen-model.sh axon5
 ./test-codegen-model.sh refine
 ```
 
@@ -210,3 +213,17 @@ docker build -f Dockerfile.codegen -t es-codegen .
 ```
 
 You do not need to run `npm install` manually on the host. Generator dependencies are installed during image build.
+# Axon Framework 5 generator
+
+The `axon5` generator consumes Medol's `codegen-model.json` directly. It does not read or create the legacy `config.json` compatibility model.
+
+It generates Axon Framework 5.1.1 code using event-sourced entities, `EventAppender`, explicit event tags, and composite `EventCriteria` derived from Medol slice tags. Medol expressions such as `normalize(code)` become computed tag values on commands and events.
+
+```bash
+cd example
+./test-codegen-model.sh axon5
+```
+
+Generated code is written to `example/generated/axon5` and uses Axon Framework 5 entity, command, event-tagging, and `EventAppender` APIs.
+
+The Axon 5 skeleton includes Maven Wrapper, Docker Compose PostgreSQL, Flyway, Actuator, application configuration, a baseline migration, and a Spring context test.

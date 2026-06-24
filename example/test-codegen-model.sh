@@ -10,6 +10,7 @@ generator_path="/opt/codegen/.generator/app/"
 output_root="${CODEGEN_OUTPUT_ROOT:-generated}"
 model_path="${CODEGEN_MODEL_PATH:-$script_dir/codegen-model.json}"
 axon_workspace="$script_dir/$output_root/axon"
+axon5_workspace="$script_dir/$output_root/axon5"
 refine_workspace="$script_dir/$output_root/refine"
 
 if [[ "$current_dir" != "$script_dir" ]]; then
@@ -31,7 +32,7 @@ if ! docker image inspect "$image" >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! docker run --rm "$image" /bin/sh -lc "grep -q 'loadGeneratorModel' /opt/codegen/.generator/axon/app/index.js && grep -q 'allAggregates' /opt/codegen/.generator/axon/aggregates/index.js"; then
+if ! docker run --rm "$image" /bin/sh -lc "grep -q 'loadGeneratorModel' /opt/codegen/.generator/axon/app/index.js && grep -q 'allAggregates' /opt/codegen/.generator/axon/aggregates/index.js && grep -q 'loadCodegenModel' /opt/codegen/.generator/axon5/app/index.js"; then
   echo "Docker image $image does not include the latest codegen-model generator changes." >&2
   echo "Rebuild it from the code-generator root with:" >&2
   echo "  docker build -f Dockerfile.codegen -t $image ." >&2
@@ -39,9 +40,9 @@ if ! docker run --rm "$image" /bin/sh -lc "grep -q 'loadGeneratorModel' /opt/cod
 fi
 
 case "$target" in
-  all|axon|refine|shell) ;;
+  all|axon|axon5|refine|shell) ;;
   *)
-    echo "Usage: ./test-codegen-model.sh [all|axon|refine|shell]" >&2
+    echo "Usage: ./test-codegen-model.sh [all|axon|axon5|refine|shell]" >&2
     exit 1
     ;;
 esac
@@ -71,6 +72,12 @@ run_axon() {
   run_gen "$axon_workspace" --generator axon --generator-type aggregates --all-aggregates
 }
 
+run_axon5() {
+  rm -rf "$axon5_workspace"
+  run_gen "$axon5_workspace" --generator axon5 --generator-type Skeleton
+  run_gen "$axon5_workspace" --generator axon5 --generator-type slices --all-slices
+}
+
 run_refine() {
   run_gen "$refine_workspace" --generator refine --generator-type Skeleton --skip-install
   run_gen "$refine_workspace" --generator refine --generator-type all --all-commands --skip-install
@@ -79,10 +86,14 @@ run_refine() {
 case "$target" in
   all)
     run_axon
+    run_axon5
     run_refine
     ;;
   axon)
     run_axon
+    ;;
+  axon5)
+    run_axon5
     ;;
   refine)
     run_refine

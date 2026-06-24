@@ -75,6 +75,13 @@ module.exports = class extends Generator {
             rootPackage: this.model.rootPackage,
             applicationClass
         });
+        this.fs.copyTpl(this.templatePath('OpenApiConfig.kt.tpl'), this._kotlinPath('support/OpenApiConfig.kt'), {
+            rootPackage: this.model.rootPackage,
+            domain: this.model.domain
+        });
+        this.fs.copyTpl(this.templatePath('ApiExceptionHandler.kt.tpl'), this._kotlinPath('support/ApiExceptionHandler.kt'), {
+            rootPackage: this.model.rootPackage
+        });
         this.fs.copy(this.templatePath('application.yml'), this.destinationPath('src/main/resources/application.yml'));
         this.fs.copy(this.templatePath('docker-compose.yml'), this.destinationPath('docker-compose.yml'));
         this.fs.copy(this.templatePath('V1__baseline.sql'), this.destinationPath('src/main/resources/db/migration/V1__baseline.sql'));
@@ -140,8 +147,9 @@ module.exports = class extends Generator {
             relatedEvents.forEach((event) => this._writeEvent(event, slice, selection));
             this._writeState(packageName, context, slicePackage, slice, selection, relatedEvents);
             this._writeCommandHandlers(packageName, context, slicePackage, slice, selection, relatedEvents);
+            this._writeCommandResource(packageName, context, slicePackage, slice);
         }
-        slice.readmodels.forEach((readmodel) => this._writeReadModel(packageName, context, slicePackage, readmodel));
+        slice.readmodels.forEach((readmodel) => this._writeReadModel(packageName, context, slicePackage, slice, readmodel));
     }
 
     _writeSelection(packageName, context, slicePackage, slice, selection) {
@@ -170,7 +178,10 @@ object ${pascal(slice.name)}Metadata {
     _writeCommand(packageName, context, slicePackage, command, selection) {
         const commandName = _commandTitle(command.title);
         const imports = typeImports(command.fields);
-        const properties = command.fields.map((field) => `    val ${field.name}: ${mappedType(field, field.optional)}`).join(',\n');
+        const properties = command.fields.map((field) => {
+            const defaultValue = field.generated ? ` = ${fallbackValue(field)}` : '';
+            return `    val ${field.name}: ${mappedType(field, field.optional)}${defaultValue}`;
+        }).join(',\n');
         const selectionArgs = selection.fields.map((field) => `${field.alias} = ${field.commandExpression}`).join(', ');
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${commandName}.kt`), `package ${packageName}
 
@@ -295,7 +306,36 @@ ${handlers}
 `);
     }
 
-    _writeReadModel(packageName, context, slicePackage, readmodel) {
+    _writeCommandResource(packageName, context, slicePackage, slice) {
+        const resourceName = `${pascal(slice.name)}Resource`;
+        const conceptRoute = httpRoute(slice.concepts[0] ?? slice.name);
+        const methods = slice.commands.map((command) => {
+            const commandName = _commandTitle(command.title);
+            return `    @PostMapping("/${httpRoute(command.title)}")
+    fun ${safeIdentifier(command.name)}(@Valid @RequestBody command: ${commandName}): CompletableFuture<${commandName}> =
+        commandGateway.send(command).resultMessage.thenApply { command }`;
+        }).join('\n\n');
+        this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${resourceName}.kt`), `package ${packageName}
+
+import jakarta.validation.Valid
+import org.axonframework.messaging.commandhandling.gateway.CommandGateway
+import org.springframework.web.bind.annotation.CrossOrigin
+import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RestController
+import java.util.concurrent.CompletableFuture
+
+@CrossOrigin
+@RestController
+@RequestMapping("/${conceptRoute}")
+class ${resourceName}(private val commandGateway: CommandGateway) {
+${methods}
+}
+`);
+    }
+
+    _writeReadModel(packageName, context, slicePackage, slice, readmodel) {
         const name = _readmodelTitle(readmodel.title);
         const imports = typeImports(readmodel.fields);
         const id = readmodel.fields.find((field) => field.idAttribute) ?? readmodel.fields[0];
@@ -323,6 +363,46 @@ ${entityFields}
 data class ${name}(
 ${resultFields}
 )
+`);
+        if (id) {
+            this._writeReadModelResource(packageName, context, slicePackage, slice, readmodel, name, id);
+        }
+    }
+
+    _writeReadModelResource(packageName, context, slicePackage, slice, readmodel, name, id) {
+        const entityName = `${name}Entity`;
+        const repositoryName = `${name}Repository`;
+        const resourceName = `${name}Resource`;
+        const idType = mappedType(id, false);
+        const conceptRoute = httpRoute(slice.concepts[0] ?? slice.name);
+        const readmodelRoute = httpRoute(readmodel.title);
+        const imports = typeImports([id]);
+        this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${resourceName}.kt`), `package ${packageName}
+
+import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.http.ResponseEntity
+import org.springframework.web.bind.annotation.CrossOrigin
+import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RestController
+${imports}
+
+interface ${repositoryName} : JpaRepository<${entityName}, ${idType}>
+
+@CrossOrigin
+@RestController
+@RequestMapping("/${conceptRoute}/${readmodelRoute}")
+class ${resourceName}(private val repository: ${repositoryName}) {
+    @GetMapping
+    fun findAll(): List<${entityName}> = repository.findAll()
+
+    @GetMapping("/{id}")
+    fun findOne(@PathVariable id: ${idType}): ResponseEntity<${entityName}> =
+        repository.findById(id)
+            .map { ResponseEntity.ok(it) }
+            .orElseGet { ResponseEntity.notFound().build() }
+}
 `);
     }
 
@@ -394,9 +474,20 @@ function renderDerivedEventTags(selection, event) {
     if (derived.length === 0) return '';
     const properties = derived.map((field) => [
         `    @EventTag(key = "${escapeKotlin(field.tag.name)}")`,
-        `    val ${field.alias}: String = ${field.eventExpression}`
+        `    val ${derivedEventTagProperty(field, event)}: String = ${field.eventExpression}`
     ].join('\n')).join('\n\n');
     return ` {\n${properties}\n}`;
+}
+
+function derivedEventTagProperty(field, event) {
+    const fieldNames = new Set(event.fields.map((eventField) => eventField.name));
+    let candidate = `${field.alias}EventTag`;
+    let suffix = 2;
+    while (fieldNames.has(candidate)) {
+        candidate = `${field.alias}EventTag${suffix}`;
+        suffix += 1;
+    }
+    return candidate;
 }
 
 function relatedEventsForSlice(model, slice) {
@@ -498,6 +589,10 @@ function pascal(value) {
 function safeIdentifier(value) {
     const result = String(value ?? '').replace(/[^A-Za-z0-9_]/g, '');
     return result && /^[A-Za-z_]/.test(result) ? result : `tag${pascal(result)}`;
+}
+
+function httpRoute(value) {
+    return String(value ?? '').replace(/[\s_-]+/g, '').toLowerCase();
 }
 
 function constant(value) {

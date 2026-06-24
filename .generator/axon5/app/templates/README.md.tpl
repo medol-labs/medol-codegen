@@ -22,6 +22,11 @@ docker compose up -d
 
 Health endpoint: `http://localhost:8080/actuator/health`
 
+OpenAPI endpoints:
+
+- Swagger UI: `http://localhost:8080/swagger-ui.html`
+- OpenAPI JSON: `http://localhost:8080/v3/api-docs`
+
 ## Build
 
 ```bash

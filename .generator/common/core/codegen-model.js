@@ -5,6 +5,7 @@
 
 function fromConfig(config = {}) {
     const contexts = normalizeContexts(config);
+    const concepts = normalizeConcepts(config, contexts);
     const valueTypes = normalizeValueTypes(config, contexts);
     const aggregates = normalizeAggregates(config, contexts, valueTypes);
     const actors = normalizeActors(config);
@@ -14,6 +15,7 @@ function fromConfig(config = {}) {
         rootPackage: config.codeGen?.rootPackage ?? 'tech.medo',
         ...(config.domain ? { domain: config.domain } : {}),
         contexts,
+        concepts,
         valueTypes,
         aggregates,
         actors,
@@ -27,6 +29,7 @@ function fromConfig(config = {}) {
 
 function fromCodegenModel(model = {}) {
     const contexts = normalizeContexts(model);
+    const concepts = normalizeConcepts(model, contexts);
     const valueTypes = normalizeValueTypes(model, contexts);
     const aggregates = normalizeAggregates(model, contexts, valueTypes);
     const actors = normalizeActors(model);
@@ -36,6 +39,7 @@ function fromCodegenModel(model = {}) {
         rootPackage: model.rootPackage ?? 'tech.medo',
         ...(model.domain ? { domain: model.domain } : {}),
         contexts,
+        concepts,
         valueTypes,
         aggregates,
         actors,
@@ -52,6 +56,7 @@ function toGeneratorConfig(model, source = {}) {
         slices: model.slices,
         flows: source.flows ?? [],
         valueTypes: model.valueTypes,
+        concepts: model.concepts,
         aggregates: model.aggregates,
         actors: model.actors,
         ...(model.domain ? { domain: model.domain } : {}),
@@ -64,6 +69,31 @@ function toGeneratorConfig(model, source = {}) {
             contextPackage: primaryContextName(model)
         }
     };
+}
+
+function normalizeConcepts(config, contexts) {
+    const source = (config.concepts ?? []).length > 0
+        ? config.concepts
+        : contexts.flatMap((context) => context.concepts ?? []);
+    const byName = new Map();
+    source.forEach((concept) => {
+        const name = concept.name ?? concept.title;
+        if (!name || byName.has(name)) {
+            return;
+        }
+        byName.set(name, {
+            ...concept,
+            name,
+            title: concept.title ?? humanize(name),
+            context: concept.context ?? contexts.find((context) =>
+                (context.concepts ?? []).some((candidate) =>
+                    (candidate.name ?? candidate.title) === name
+                )
+            )?.name,
+            states: concept.states ?? []
+        });
+    });
+    return Array.from(byName.values());
 }
 
 function primaryContextName(model) {
@@ -80,6 +110,7 @@ function normalizeContexts(config) {
             risks: context.risks ?? [],
             decisions: context.decisions ?? [],
             metrics: context.metrics ?? [],
+            concepts: context.concepts ?? [],
             valueTypes: normalizeValueTypeRefs(context.valueTypes ?? []),
             aggregates: normalizeAggregateRefs(context.aggregates ?? [])
         }));
@@ -99,6 +130,7 @@ function normalizeContexts(config) {
         risks: [],
         decisions: [],
         metrics: [],
+        concepts: [],
         valueTypes: normalizeValueTypeRefs(valueTypesForContext(config, contextName)),
         aggregates: normalizeAggregateRefs(aggregatesForContext(config, contextName))
     }));
@@ -241,6 +273,7 @@ function normalizeSlices(config, aggregates, contexts, actors, valueTypes) {
             title: cleanTitle(slice.title ?? slice.name ?? `Slice ${index + 1}`),
             chapter: slice.chapter ?? context,
             context,
+            concepts: slice.concepts ?? [],
             aggregate,
             commands: normalizeElements(slice.commands, 'COMMAND', slice, aggregate, valueTypes),
             events: normalizeElements(slice.events, 'EVENT', slice, aggregate, valueTypes),
@@ -266,12 +299,13 @@ function normalizeElements(elements = [], type, slice, sliceAggregate, valueType
             type: element.type ?? type,
             modelContext: element.modelContext ?? slice.context,
             slice: element.slice ?? slice.title,
+            concept: element.concept ?? element.concepts?.[0] ?? slice.concepts?.[0],
             aggregate: aggregate?.name,
             aggregateRef: aggregate,
             aggregateDependencies: element.aggregateDependencies ?? (aggregate?.title ? [aggregate.title] : []),
             fields: normalizeFields(element.fields ?? [], valueTypes),
             dependencies: normalizeDependencies(element.dependencies ?? []),
-            createsAggregate: element.createsAggregate ?? false
+            startsLifecycle: element.startsLifecycle ?? element.createsAggregate ?? false
         };
     });
 }

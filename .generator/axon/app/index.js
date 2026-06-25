@@ -26,7 +26,7 @@ module.exports = class extends Generator {
         const loaded = loadGeneratorModel(this.env.cwd);
         config = loaded.config;
         codegenModel = loaded.codegenModel;
-        configureValueTypes(codegenModel.valueTypes, codegenModel.rootPackage);
+        configureValueTypes(codegenModel.valueTypes, codegenModel.rootPackage, codegenModel.concepts);
     }
 
     // Async Await
@@ -141,6 +141,7 @@ module.exports = class extends Generator {
             this.destinationPath('./.mvn')
         )
         this._writeValueTypes();
+        this._writeConceptStates();
 
     }
 
@@ -158,6 +159,18 @@ module.exports = class extends Generator {
                     imports: kotlinImports(baseType),
                     validations: renderValidations(valueType, baseType)
                 }
+            );
+        });
+    }
+
+    _writeConceptStates() {
+        (codegenModel.concepts ?? []).filter((concept) => concept.states?.length).forEach((concept) => {
+            const context = contextPackage(concept.context);
+            const typeName = `${concept.name}State`;
+            const values = concept.states.map((state) => `    ${constantCase(state)}`).join(',\n');
+            this.fs.write(
+                this.destinationPath(`./src/main/kotlin/${this.answers.rootPackageName.split('.').join('/')}/${context}/domain/states/${typeName}.kt`),
+                `package ${this.answers.rootPackageName}.${context}.domain.states\n\nenum class ${typeName} {\n${values}\n}\n`
             );
         });
     }
@@ -225,4 +238,12 @@ function kotlinLiteral(value, baseType) {
 
 function escapeKotlin(value) {
     return String(value ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function constantCase(value) {
+    return String(value ?? '')
+        .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+        .replace(/[^A-Za-z0-9]+/g, '_')
+        .replace(/_+/g, '_')
+        .toUpperCase();
 }

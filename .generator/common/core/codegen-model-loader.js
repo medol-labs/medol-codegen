@@ -26,7 +26,14 @@ function loadCodegenModel(cwd) {
         contexts: raw.contexts,
         valueTypes: array(raw.valueTypes),
         aggregates: array(raw.aggregates),
-        concepts: array(raw.concepts),
+        concepts: array(raw.concepts).length > 0
+            ? array(raw.concepts)
+            : raw.contexts.flatMap((context) =>
+                array(context.concepts).map((concept) => ({
+                    ...concept,
+                    context: concept.context ?? context.name
+                }))
+            ),
         actors: array(raw.actors),
         slices: raw.slices.map((slice, index) => ({
             ...slice,

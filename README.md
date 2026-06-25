@@ -89,7 +89,7 @@ For the frontend target, run `gen`, choose `refine`, then choose:
 - `src/pages/<screen>/show.tsx`
 - command pages for outbound screen commands
 
-The refine generator derives resources from `slices[].screens`. If a slice has no screens, it falls back to `slices[].readmodels`.
+The refine generator derives navigation resources from `slices[].readmodels` where `listElement` is `true`. Commands never create menu resources; event dependencies attach selected commands to the matching list as create, edit, delete, or row actions.
 
 The refine generator is template-based, mirroring the Axon generator layout:
 
@@ -101,7 +101,7 @@ The refine generator is template-based, mirroring the Axon generator layout:
 - `templates/src/pages/show.tsx.tpl`
 - `templates/src/pages/index.ts.tpl`
 
-Create/edit/delete capabilities are generated only when matching event-modeling commands exist. Aggregate-creating commands generate the resource create form with `useCommandForm`; item commands generate command routes and `CommandButton` actions.
+Create/edit/delete capabilities are generated only when matching event-modeling commands exist. Commands marked with `startsLifecycle` generate the resource create form with `useCommandForm`; item commands generate command routes and `CommandButton` actions.
 
 When generating `all`, `resources`, `router`, or `pages`, the refine generator prompts for the commands to generate. Unselected commands are omitted from resource metadata, routes, list action buttons, and command form pages.
 
@@ -217,7 +217,7 @@ You do not need to run `npm install` manually on the host. Generator dependencie
 
 The `axon5` generator consumes Medol's `codegen-model.json` directly. It does not read or create the legacy `config.json` compatibility model.
 
-It generates Axon Framework 5.1.1 code using event-sourced entities, `EventAppender`, explicit event tags, and composite `EventCriteria` derived from Medol slice tags. Medol expressions such as `normalize(code)` become computed tag values on commands and events.
+It generates Axon Framework 5.1.1 code using event-sourced entities, `EventAppender`, explicit event tags, composite `EventCriteria` derived from Medol slice tags, and JPA read-model projectors updated by inbound events. Concept states generate Kotlin enums, and fields such as `TrainingJob.State` are mapped to `TrainingJobState` with assignments derived from `stateChange`. Medol expressions such as `normalize(code)` become computed tag values on commands and events.
 
 ```bash
 cd example

@@ -37,7 +37,7 @@ module.exports = class extends Generator {
         const loaded = loadGeneratorModel(this.env.cwd);
         config = loaded.config;
         codegenModel = loaded.codegenModel;
-        configureValueTypes(codegenModel.valueTypes, codegenModel.rootPackage);
+        configureValueTypes(codegenModel.valueTypes, codegenModel.rootPackage, codegenModel.concepts);
     }
 
     async prompting() {
@@ -153,10 +153,13 @@ module.exports = class extends Generator {
         if (!aggregate.states?.length || fields.some(field => field.name === "state")) {
             return undefined
         }
+        var concept = codegenModel.concepts?.find(candidate =>
+            candidate.name === aggregate.name || candidate.title === aggregate.title
+        )
 
         return {
             name: "state",
-            type: "String",
+            type: concept ? `${concept.name}.State` : "String",
             cardinality: "Single",
             optional: true
         }
@@ -180,7 +183,7 @@ module.exports = class extends Generator {
 //AI-TODO: 
         ${specs.join("\n")}
         */` : ``}
-    ${command.createsAggregate ? "@CreationPolicy(AggregateCreationPolicy.CREATE_IF_MISSING)" : ""}
+    ${command.startsLifecycle ? "@CreationPolicy(AggregateCreationPolicy.CREATE_IF_MISSING)" : ""}
         @CommandHandler
         fun handle(command: ${_commandTitle(command.title)}) {
            ${events.map(event => {
@@ -194,7 +197,7 @@ module.exports = class extends Generator {
         @EventSourcingHandler
         fun on(event: ${_eventTitle(event.title)}){
         // handle event
-            ${this._renderEventSourcingAssignments(aggregate, event, aggregateIdField, command.createsAggregate)}
+            ${this._renderEventSourcingAssignments(aggregate, event, aggregateIdField, command.startsLifecycle)}
         }`).join("\n")}
         `
         })
@@ -222,7 +225,14 @@ module.exports = class extends Generator {
 
         var stateChange = this._stateChangeForEvent(event)
         if (stateChange) {
-            assignments.push(`state="${constantCase(stateChange.to)}"`)
+            var concept = config.slices.find(slice =>
+                slice.events?.some(candidate => candidate.id === event.id)
+            )?.concepts?.[0]
+            var enumStateField = aggregate.fields?.find(field => field.type === `${concept}.State`)
+                ?? (concept && aggregate.states?.length ? {name: "state"} : undefined)
+            assignments.push(enumStateField
+                ? `${enumStateField.name}=${concept}State.${constantCase(stateChange.to)}`
+                : `state="${constantCase(stateChange.to)}"`)
         }
 
         return assignments.join("\n")

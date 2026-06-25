@@ -293,8 +293,9 @@ export const commandDataProvider = (
         );
       }
 
+      const commandPath = routeSegment(String(command));
       const res = await fetch(
-        `${baseUrl}/${aggregatePath(resource, meta)}/${command.toLowerCase()}`,
+        `${baseUrl}/${aggregatePath(resource, meta)}/${commandPath}`,
         {
           method: "POST",
           body: JSON.stringify(variables),

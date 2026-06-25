@@ -3,7 +3,7 @@
  * Licensed under the MIT License.
  */
 
-const {configureValueTypes, isValueType, valueTypeImport} = require('./value-types');
+const {configureValueTypes, conceptState, conceptStateImport, isValueType, valueTypeImport} = require('./value-types');
 
 class ClassesGenerator {
 
@@ -74,11 +74,15 @@ const typeMapping = (fieldType, fieldCardinality, optional, mutable) => {
         case "uuid":
             fieldType = optional ? "UUID?" : "UUID";
             break
-        default:
-            fieldType = isValueType(fieldType)
+        default: {
+            const state = conceptState(fieldType);
+            fieldType = state
+                ? (optional ? `${state.typeName}?` : state.typeName)
+                : isValueType(fieldType)
                 ? (optional ? `${fieldType}?` : fieldType)
                 : (optional ? "String?" : "String");
             break
+        }
     }
     if (fieldCardinality?.toLowerCase() === "list") {
         return mutable ? `MutableList<${fieldType}>` : `List<${fieldType}>`
@@ -106,6 +110,9 @@ const typeImports = (fields, additionalImports) => {
         }
         if (isValueType(field.type)) {
             return [valueTypeImport(field.type)]
+        }
+        if (conceptState(field.type)) {
+            return [conceptStateImport(field.type)]
         }
         switch (field.cardinality?.toLowerCase()) {
             case "list":

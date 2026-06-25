@@ -39,7 +39,7 @@ module.exports = class extends Generator {
         const loaded = loadGeneratorModel(this.env.cwd);
         config = loaded.config;
         codegenModel = loaded.codegenModel;
-        configureValueTypes(codegenModel.valueTypes, codegenModel.rootPackage);
+        configureValueTypes(codegenModel.valueTypes, codegenModel.rootPackage, codegenModel.concepts);
     }
 
     async prompting() {
@@ -995,7 +995,7 @@ class VariablesGenerator {
                  )
                 \tvar ${variable.name}:${typeMapping(variable.type, variable.cardinality, variable.optional, variable.mutable)} = mutableListOf();`;
             } else {
-                return `\t${variable.idAttribute ? "@Id " : ""} @Column(name="${slugify(variable.name)}") var ${variable.name}:${typeMapping(variable.type, variable.cardinality, variable.optional)}${variable.optional ? "" : "?"} = null;`;
+                return `\t${variable.idAttribute ? "@Id " : ""}${variable.type?.endsWith(".State") ? "@jakarta.persistence.Enumerated(jakarta.persistence.EnumType.STRING) " : ""}@Column(name="${slugify(variable.name)}") var ${variable.name}:${typeMapping(variable.type, variable.cardinality, variable.optional)}${variable.optional ? "" : "?"} = null;`;
             }
         }).join("\n")
     }
@@ -1072,16 +1072,39 @@ _renderReadModelSwitchCase = (readModel, events) => {
 
 const readModelAssignments = (readModel, event, separator = "\n", fallbacks = {}) => {
     var stateChange = stateChangeForEvent(event)
-    var shouldAssignState = stateChange && readModel.fields?.some(field => field.name === "state") && !event.fields?.some(field => field.name === "state")
-    var fields = shouldAssignState ? readModel.fields?.filter(field => field.name !== "state") : readModel.fields
+    var concept = conceptForEvent(event)
+    var enumStateField = stateChange && concept
+        ? readModel.fields?.find(field => field.type === `${concept}.State`)
+        : undefined
+    var legacyStateField = stateChange && !enumStateField
+        ? readModel.fields?.find(field => field.name === "state" && field.type?.toLowerCase() === "string")
+        : undefined
+    var stateField = enumStateField ?? legacyStateField
+    var shouldAssignState = stateField && !event.fields?.some(field => field.name === stateField.name)
+    var fields = readModel.fields?.filter(field =>
+        event.fields?.some(eventField => eventField.name === field.name)
+        || !field.type?.endsWith(".State")
+    )
+    if (shouldAssignState) {
+        fields = fields.filter(field => field.name !== stateField.name)
+    }
     var assignments = variableAssignments(fields, "event", event, separator, "=", {includeUnmapped: true, fallbacks})
 
     if (shouldAssignState) {
-        var stateAssignment = `\t\t\tstate="${constantCase(stateChange.to)}"`
+        var stateValue = enumStateField
+            ? `${concept}State.${constantCase(stateChange.to)}`
+            : `"${constantCase(stateChange.to)}"`
+        var stateAssignment = `\t\t\t${stateField.name}=${stateValue}`
         assignments = assignments ? [assignments, stateAssignment].join(separator) : stateAssignment
     }
 
     return assignments
+}
+
+const conceptForEvent = (event) => {
+    return config.slices
+        .find(slice => slice.events?.some(candidate => candidate.id === event.id))
+        ?.concepts?.[0]
 }
 
 const stateChangeForEvent = (event) => {

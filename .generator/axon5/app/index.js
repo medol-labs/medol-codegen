@@ -16,7 +16,7 @@ module.exports = class extends Generator {
         super(args, opts);
         this.opts = opts ?? {};
         this.model = loadCodegenModel(this.env.cwd);
-        configureValueTypes(this.model.valueTypes, this.model.rootPackage);
+        configureValueTypes(this.model.valueTypes, this.model.rootPackage, this.model.concepts);
     }
 
     async prompting() {
@@ -88,6 +88,7 @@ module.exports = class extends Generator {
         this.fs.copy(this.templatePath('gitignore'), this.destinationPath('.gitignore'));
         this._copyMavenWrapper();
         this._writeValueTypes();
+        this._writeConceptStates();
         this._writeConceptCatalog();
     }
 
@@ -114,6 +115,18 @@ module.exports = class extends Generator {
                         : renderScalarValueType(valueType, baseType)
             ].filter((line, index, lines) => line !== '' || lines[index - 1] !== '').join('\n');
             this.fs.write(this._kotlinPath(`${contextPackage(valueType.context)}/domain/types/${valueType.name}.kt`), `${lines}\n`);
+        }
+    }
+
+    _writeConceptStates() {
+        for (const concept of this.model.concepts.filter((candidate) => candidate.states?.length)) {
+            const packageName = `${this.model.rootPackage}.${contextPackage(concept.context)}.domain.states`;
+            const typeName = `${concept.name}State`;
+            const values = concept.states.map((state) => `    ${constant(state)}`).join(',\n');
+            this.fs.write(
+                this._kotlinPath(`${contextPackage(concept.context)}/domain/states/${typeName}.kt`),
+                `package ${packageName}\n\nenum class ${typeName} {\n${values}\n}\n`
+            );
         }
     }
 
@@ -283,7 +296,7 @@ ${sourcingHandlers}
             const appendStatement = outputs.length > 0
                 ? `eventAppender.append(\n${outputs.map((event) => `            ${_eventTitle(event.title)}(${eventArguments(event, command)})`).join(',\n')}\n        )`
                 : '// TODO: append the event produced by this command.';
-            if (command.startsLifecycle || command.createsAggregate) {
+            if (command.startsLifecycle) {
                 return `    @CommandHandler\n    fun handle(command: ${commandName}, eventAppender: EventAppender) {\n        ${appendStatement}\n    }`;
             }
             return `    @CommandHandler\n    fun handle(command: ${commandName}, @InjectEntity state: ${stateName}, eventAppender: EventAppender) {\n        // TODO: validate domain rules against state before appending events.\n        ${appendStatement}\n    }`;
@@ -338,23 +351,37 @@ ${methods}
     _writeReadModel(packageName, context, slicePackage, slice, readmodel) {
         const name = _readmodelTitle(readmodel.title);
         const imports = typeImports(readmodel.fields);
-        const id = readmodel.fields.find((field) => field.idAttribute) ?? readmodel.fields[0];
+        const ids = readmodel.fields.filter((field) => field.idAttribute);
+        const idFields = ids.length > 0 ? ids : readmodel.fields.slice(0, 1);
+        const id = idFields[0];
+        const compositeId = idFields.length > 1;
         const entityFields = readmodel.fields.map((field) => {
-            const annotation = field.name === id?.name ? '    @Id\n' : '';
-            return `${annotation}    var ${field.name}: ${stateFieldType(field)} = ${stateFieldDefault(field)}`;
+            const annotation = idFields.some((candidate) => candidate.name === field.name) ? '    @Id\n' : '';
+            const enumAnnotation = field.type?.endsWith('.State') ? '    @Enumerated(EnumType.STRING)\n' : '';
+            return `${annotation}${enumAnnotation}    var ${field.name}: ${stateFieldType(field)} = ${stateFieldDefault(field)}`;
         }).join('\n');
+        const keyName = `${name}Key`;
+        const keyDeclaration = compositeId
+            ? `@Embeddable\ndata class ${keyName}(\n${idFields.map((field) => `    var ${field.name}: ${mappedType(field, true)} = null`).join(',\n')}\n) : java.io.Serializable\n\n`
+            : '';
+        const idClassAnnotation = compositeId ? `@IdClass(${keyName}::class)\n` : '';
         const resultFields = readmodel.fields.map((field) => `    val ${field.name}: ${mappedType(field, true)}`).join(',\n');
         const queryDeclaration = readmodel.listElement || !id
             ? `class ${name}Query`
             : `data class ${name}Query(val ${id.name}: ${mappedType(id, false)})`;
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${name}.kt`), `package ${packageName}
 
+import jakarta.persistence.Embeddable
 import jakarta.persistence.Entity
+import jakarta.persistence.EnumType
+import jakarta.persistence.Enumerated
 import jakarta.persistence.Id
+import jakarta.persistence.IdClass
 ${imports}
 
 ${queryDeclaration}
 
+${keyDeclaration}${idClassAnnotation}
 @Entity
 class ${name}Entity {
 ${entityFields}
@@ -365,18 +392,25 @@ ${resultFields}
 )
 `);
         if (id) {
-            this._writeReadModelResource(packageName, context, slicePackage, slice, readmodel, name, id);
+            this._writeReadModelResource(packageName, context, slicePackage, slice, readmodel, name, idFields);
+            this._writeReadModelProjector(packageName, context, slicePackage, slice, readmodel, name, idFields);
         }
     }
 
-    _writeReadModelResource(packageName, context, slicePackage, slice, readmodel, name, id) {
+    _writeReadModelResource(packageName, context, slicePackage, slice, readmodel, name, idFields) {
         const entityName = `${name}Entity`;
         const repositoryName = `${name}Repository`;
         const resourceName = `${name}Resource`;
-        const idType = mappedType(id, false);
+        const id = idFields[0];
+        const idType = idFields.length > 1 ? `${name}Key` : mappedType(id, false);
         const conceptRoute = httpRoute(slice.concepts[0] ?? slice.name);
         const readmodelRoute = httpRoute(readmodel.title);
-        const imports = typeImports([id]);
+        const imports = typeImports(idFields);
+        const partialLookupMethods = idFields.length > 1
+            ? idFields.map((field) =>
+                `    fun findAllBy${pascal(field.name)}(${field.name}: ${mappedType(field, false)}): List<${entityName}>`
+            ).join('\n')
+            : '';
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${resourceName}.kt`), `package ${packageName}
 
 import org.springframework.data.jpa.repository.JpaRepository
@@ -388,7 +422,9 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 ${imports}
 
-interface ${repositoryName} : JpaRepository<${entityName}, ${idType}>
+interface ${repositoryName} : JpaRepository<${entityName}, ${idType}> {
+${partialLookupMethods}
+}
 
 @CrossOrigin
 @RestController
@@ -397,13 +433,123 @@ class ${resourceName}(private val repository: ${repositoryName}) {
     @GetMapping
     fun findAll(): List<${entityName}> = repository.findAll()
 
+${idFields.length === 1 ? `
     @GetMapping("/{id}")
     fun findOne(@PathVariable id: ${idType}): ResponseEntity<${entityName}> =
         repository.findById(id)
             .map { ResponseEntity.ok(it) }
             .orElseGet { ResponseEntity.notFound().build() }
+` : ''}
 }
 `);
+    }
+
+    _writeReadModelProjector(packageName, context, slicePackage, slice, readmodel, name, idFields) {
+        const inboundEventIds = new Set((readmodel.dependencies ?? [])
+            .filter((dependency) => dependency.direction === 'INBOUND' && dependency.elementType === 'EVENT')
+            .map((dependency) => dependency.id));
+        const events = this.model.slices
+            .flatMap((candidate) => candidate.events ?? [])
+            .filter((event) => inboundEventIds.has(event.id));
+        if (events.length === 0) {
+            return;
+        }
+
+        const entityName = `${name}Entity`;
+        const repositoryName = `${name}Repository`;
+        const keyName = `${name}Key`;
+        const eventImports = events
+            .map((event) => `import ${this._eventPackage(event, slice)}.${_eventTitle(event.title)}`)
+            .join('\n');
+        const stateImports = uniqueBy(events
+            .map((event) => {
+                const ownerSlice = this.model.slices.find((candidate) =>
+                    (candidate.events ?? []).some((item) => item.id === event.id)
+                );
+                const concept = ownerSlice?.concepts?.[0];
+                return ownerSlice?.stateChange?.eventId === event.id
+                    && readmodel.fields.some((field) => field.type === `${concept}.State`)
+                    ? `import ${this.model.rootPackage}.${contextPackage(ownerSlice.context)}.domain.states.${concept}State`
+                    : undefined;
+            })
+            .filter(Boolean), (value) => value)
+            .join('\n');
+        const handlers = events.map((event) => {
+            const eventFields = new Set((event.fields ?? []).map((field) => field.name));
+            const stateAssignment = this._readModelStateAssignment(readmodel, event);
+            const assignments = [
+                ...readmodel.fields
+                .filter((field) => eventFields.has(field.name))
+                .map((field) => `            entity.${field.name} = event.${field.name}`),
+                ...(stateAssignment ? [`            ${stateAssignment}`] : [])
+            ]
+                .join('\n');
+            const availableIds = idFields.filter((field) => eventFields.has(field.name));
+
+            if (availableIds.length === idFields.length) {
+                const keyExpression = idFields.length > 1
+                    ? `${keyName}(${idFields.map((field) => `${field.name} = event.${field.name}`).join(', ')})`
+                    : `event.${idFields[0].name}`;
+                const initializeIds = idFields
+                    .map((field) => `                this.${field.name} = event.${field.name}`)
+                    .join('\n');
+                return `    @EventHandler
+    fun on(event: ${_eventTitle(event.title)}) {
+        val entity = repository.findById(${keyExpression}).orElseGet {
+            ${entityName}().apply {
+${initializeIds}
+            }
+        }
+${assignments || '        // No read-model fields are present on this event.'}
+        repository.save(entity)
+    }`;
+            }
+
+            if (availableIds.length === 1 && idFields.length > 1) {
+                const lookupField = availableIds[0];
+                return `    @EventHandler
+    fun on(event: ${_eventTitle(event.title)}) {
+        repository.findAllBy${pascal(lookupField.name)}(event.${lookupField.name}).forEach { entity ->
+${assignments || '            // No read-model fields are present on this event.'}
+            repository.save(entity)
+        }
+    }`;
+            }
+
+            return `    @EventHandler
+    fun on(event: ${_eventTitle(event.title)}) {
+        // Skipped: ${_eventTitle(event.title)} does not provide enough key fields to locate ${entityName}.
+    }`;
+        }).join('\n\n');
+
+        this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${name}Projector.kt`), `package ${packageName}
+
+import org.axonframework.messaging.eventhandling.annotation.EventHandler
+import org.springframework.stereotype.Component
+${eventImports}
+${stateImports}
+
+@Component
+class ${name}Projector(private val repository: ${repositoryName}) {
+${handlers}
+}
+`);
+    }
+
+    _readModelStateAssignment(readmodel, event) {
+        const ownerSlice = this.model.slices.find((slice) =>
+            (slice.events ?? []).some((candidate) => candidate.id === event.id)
+        );
+        const stateChange = ownerSlice?.stateChange?.eventId === event.id ? ownerSlice.stateChange : undefined;
+        const concept = ownerSlice?.concepts?.[0];
+        if (!stateChange || !concept) {
+            return undefined;
+        }
+        const field = readmodel.fields.find((candidate) => candidate.type === `${concept}.State`);
+        if (!field || event.fields.some((candidate) => candidate.name === field.name)) {
+            return undefined;
+        }
+        return `entity.${field.name} = ${concept}State.${constant(stateChange.to)}`;
     }
 
     _eventPackage(event, fallbackSlice) {

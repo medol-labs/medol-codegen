@@ -198,45 +198,19 @@ function buildFrontendModel(source, selectedCommandKeys) {
     const slices = source.slices ?? [];
     const allAggregates = source.aggregates ?? [];
     const allContexts = source.contexts ?? source.context ?? [];
-    const allReadModels = slices.flatMap((slice) => slice.readmodels ?? []);
-    const allScreens = slices.flatMap((slice) => slice.screens ?? []);
     const allEvents = slices.flatMap((slice) => slice.events ?? []);
     const selected = selectedCommandKeys ? new Set(selectedCommandKeys) : null;
     const workflow = buildWorkflowModel(slices, allAggregates, allContexts, selected);
-    const commandsByAggregate = new Map();
-
-    slices.forEach((slice) => {
-        (slice.commands ?? [])
-            .filter((command) => command?.title)
-            .filter((command) => !selected || selected.has(commandKey(command)))
-            .forEach((command) => {
-                const aggregate = aggregateName(command, slice, allAggregates, allContexts);
-                if (!commandsByAggregate.has(aggregate.key)) {
-                    commandsByAggregate.set(aggregate.key, {
-                        ...aggregate,
-                        slice,
-                        commands: []
-                    });
-                }
-                commandsByAggregate.get(aggregate.key).commands.push(command);
-            });
-
-        (slice.readmodels ?? [])
-            .filter((readModel) => readModel?.title)
-            .forEach((readModel) => {
-                const aggregate = aggregateName(readModel, slice, allAggregates, allContexts);
-                if (!commandsByAggregate.has(aggregate.key)) {
-                    commandsByAggregate.set(aggregate.key, {
-                        ...aggregate,
-                        slice,
-                        commands: []
-                    });
-                }
-            });
-    });
-
-    const resources = uniqueResourceNames(Array.from(commandsByAggregate.values())
-        .flatMap((group) => toAggregateResources(group, slices, allScreens, allReadModels, allEvents, workflow))
+    const resources = uniqueResourceNames(slices
+        .flatMap((slice) => (slice.readmodels ?? [])
+            .filter((readModel) => readModel?.title && readModel.listElement)
+            .map((readModel) => toReadModelResource({
+                ...aggregateName(readModel, slice, allAggregates, allContexts),
+                slice,
+                commands: workflow.commandsForReadModel(readModel),
+                producerCommandKeys: workflow.producerCommandKeys(readModel),
+                itemCommandKeys: workflow.itemCommandKeys(readModel)
+            }, readModel, allEvents, workflow)))
         .filter(Boolean));
     const chapters = uniqueChapters(resources.map((resource) => resource.chapter).filter(Boolean));
 
@@ -280,19 +254,11 @@ function uniqueCommands(commands) {
     return Array.from(byName.values());
 }
 
-function findDependencies(element, elementType, source) {
-    const ids = (element.dependencies ?? [])
-        .filter((dependency) => dependency.type === 'INBOUND' || dependency.type === 'OUTBOUND')
-        .filter((dependency) => dependency.elementType === elementType)
-        .map((dependency) => dependency.id);
-
-    return (source ?? []).filter((item) => ids.includes(item.id));
-}
-
 function buildWorkflowModel(slices, aggregates, contexts, selectedCommands) {
     const selectableReadModels = new Map();
     const commandsById = new Map();
     const eventsById = new Map();
+    const producerCommandsByReadModelId = new Map();
     const nextCommandsByReadModelId = new Map();
 
     slices.flatMap((slice) => slice.commands ?? [])
@@ -343,20 +309,43 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands) {
             const inboundEventIds = (readModel.dependencies ?? [])
                 .filter((dependency) => dependency.type === 'INBOUND' && dependency.elementType === 'EVENT')
                 .map((dependency) => dependency.id ?? String(dependency.title ?? ''));
-            const nextCommands = uniqueElements(inboundEventIds
+            const inboundEvents = inboundEventIds
                 .map((eventId) => eventsById.get(eventId))
-                .filter(Boolean)
+                .filter(Boolean);
+            const producerCommands = uniqueElements(inboundEvents
+                .flatMap((event) => (event.dependencies ?? [])
+                    .filter((dependency) => dependency.type === 'INBOUND' && dependency.elementType === 'COMMAND')
+                    .map((dependency) => commandsById.get(dependency.id) ?? commandsById.get(String(dependency.title ?? '')))
+                    .filter(Boolean)));
+            const nextCommands = uniqueElements(inboundEvents
                 .flatMap((event) => (event.dependencies ?? [])
                     .filter((dependency) => dependency.type === 'OUTBOUND' && dependency.elementType === 'COMMAND')
                     .map((dependency) => commandsById.get(dependency.id) ?? commandsById.get(String(dependency.title ?? '')))
                     .filter(Boolean)));
 
+            if (producerCommands.length > 0) {
+                producerCommandsByReadModelId.set(readModel.id, producerCommands);
+            }
             if (nextCommands.length > 0) {
                 nextCommandsByReadModelId.set(readModel.id, nextCommands);
             }
         });
 
-    return { selectableReadModels, nextCommandsByReadModelId };
+    return {
+        selectableReadModels,
+        commandsForReadModel(readModel) {
+            return uniqueElements([
+                ...(producerCommandsByReadModelId.get(readModel.id) ?? []),
+                ...(nextCommandsByReadModelId.get(readModel.id) ?? [])
+            ]);
+        },
+        producerCommandKeys(readModel) {
+            return new Set((producerCommandsByReadModelId.get(readModel.id) ?? []).map(commandKey));
+        },
+        itemCommandKeys(readModel) {
+            return new Set((nextCommandsByReadModelId.get(readModel.id) ?? []).map(commandKey));
+        }
+    };
 }
 
 function commandWorkflowFields(command, readModel, allEvents, workflow) {
@@ -387,54 +376,6 @@ function commandWorkflowFields(command, readModel, allEvents, workflow) {
     return { prefill, selects };
 }
 
-function toAggregateResources(group, slices, allScreens, allReadModels, allEvents, workflow) {
-    const title = cleanTitle(group.title);
-    const aggregateSlices = slices.filter((slice) => sliceHasAggregate(slice, title));
-    const relatedScreens = uniqueElements(group.commands.flatMap((command) => findDependencies(command, 'SCREEN', allScreens)));
-    const aggregateReadModels = aggregateSlices
-        .flatMap((slice) => slice.readmodels ?? []);
-    const relatedReadModels = uniqueElements([
-        ...aggregateReadModels,
-        ...allReadModels.filter((readModel) => elementHasAggregate(readModel, title)),
-        ...relatedScreens.flatMap((screen) => findDependencies(screen, 'READMODEL', allReadModels)),
-        ...group.commands.flatMap((command) => findDependencies(command, 'READMODEL', allReadModels))
-    ]);
-
-    if (relatedReadModels.length === 0) {
-        return [toReadModelResource(group, null, allEvents, workflow)];
-    }
-
-    return relatedReadModels.map((readModel) => toReadModelResource({
-        ...group,
-        commands: commandsForReadModel(readModel, aggregateSlices, group.commands)
-    }, readModel, allEvents, workflow));
-}
-
-function commandsForReadModel(readModel, slices, aggregateCommands) {
-    if (!readModel) {
-        return aggregateCommands;
-    }
-
-    const ownerIndex = slices.findIndex((slice) =>
-        (slice.readmodels ?? []).some((item) => item.id === readModel.id)
-        || (
-            (slice.screens ?? []).some((screen) => screen.ui?.type === 'list' || screen.ui?.type === 'detail')
-            && (slice.readmodels ?? []).some((item) => cleanTitle(item.title) === cleanTitle(readModel.title))
-        )
-    );
-    if (ownerIndex < 0) {
-        return aggregateCommands;
-    }
-
-    const selectedCommandIds = new Set(aggregateCommands.map(commandKey));
-    const timelineCommands = uniqueElements(slices
-        .slice(0, ownerIndex)
-        .flatMap((slice) => slice.commands ?? [])
-        .filter((command) => selectedCommandIds.has(commandKey(command))));
-
-    return timelineCommands.length > 0 ? timelineCommands : aggregateCommands;
-}
-
 function toReadModelResource(group, readModel, allEvents, workflow) {
     const aggregateTitle = cleanTitle(group.title);
     const queryTitle = cleanTitle(readModel?.title ?? aggregateTitle);
@@ -451,11 +392,23 @@ function toReadModelResource(group, readModel, allEvents, workflow) {
         .filter((command) => command?.title)
         .map((command) => toCommand(command, route, component, readModel, allEvents, workflow));
     normalizedCommands = withPrefillFields(normalizedCommands, queryFields);
-    const createCommand = normalizedCommands.find((command) => command.createsAggregate && isCreateCommand(command))
-        ?? normalizedCommands.find((command) => command.createsAggregate);
-    const editCommand = normalizedCommands.find((command) => isEditCommand(command));
-    const deleteCommand = normalizedCommands.find((command) => isDeleteCommand(command));
+    const producerCommandKeys = group.producerCommandKeys ?? new Set();
+    const itemCommandKeys = group.itemCommandKeys ?? new Set();
+    const producerCommands = normalizedCommands.filter((command) => producerCommandKeys.has(command.id));
+    const createCommand = producerCommands.find((command) => command.startsLifecycle && isCreateCommand(command))
+        ?? producerCommands.find((command) => command.startsLifecycle);
+    const rowCommands = normalizedCommands
+        .filter((command) => itemCommandKeys.has(command.id))
+        .filter((command) => sharesIdentifierField(command.fields, queryFields));
+    const primaryIdField = idField?.name ?? 'id';
+    const primaryRowCommands = rowCommands.filter((command) =>
+        command.fields.some((field) => field.name === primaryIdField)
+    );
+    const editCommand = primaryRowCommands.find((command) => isEditCommand(command));
+    const deleteCommand = primaryRowCommands.find((command) => isDeleteCommand(command));
     const reservedCommandNames = [createCommand, editCommand, deleteCommand].filter(Boolean).map((command) => command.name);
+    const itemCommands = rowCommands
+        .filter((command) => !reservedCommandNames.includes(command.name));
 
     return {
         title: queryTitle,
@@ -476,10 +429,23 @@ function toReadModelResource(group, readModel, allEvents, workflow) {
         createCommand,
         editCommand,
         deleteCommand,
-        commands: [createCommand, deleteCommand, ...normalizedCommands.filter((command) => !reservedCommandNames.includes(command.name))].filter(Boolean),
-        routedCommands: [deleteCommand, ...normalizedCommands.filter((command) => !reservedCommandNames.includes(command.name))].filter(Boolean),
-        itemCommands: normalizedCommands.filter((command) => !reservedCommandNames.includes(command.name))
+        commands: [createCommand, editCommand, deleteCommand, ...itemCommands].filter(Boolean),
+        routedCommands: [deleteCommand, ...itemCommands].filter(Boolean),
+        itemCommands
     };
+}
+
+function sharesIdentifierField(commandFields, readModelFields) {
+    const readModelIdentifiers = new Set(readModelFields
+        .filter(isIdentifierField)
+        .map((field) => field.name));
+    return commandFields
+        .filter(isIdentifierField)
+        .some((field) => readModelIdentifiers.has(field.name));
+}
+
+function isIdentifierField(field) {
+    return field.idAttribute || field.name === 'id' || field.name?.toLowerCase().endsWith('id');
 }
 
 function uniqueResourceNames(resources) {
@@ -523,7 +489,13 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
     const component = pascal(title);
     const normalizedFields = normalizeFields(command.fields).filter((field) => !field.generated);
     const workflowFields = commandWorkflowFields(command, readModel, allEvents, workflow);
-    const commandAggregateTitle = cleanTitle(command.aggregateName ?? command.aggregate ?? title);
+    const commandAggregateTitle = cleanTitle(
+        command.concept
+        ?? command.concepts?.[0]
+        ?? command.aggregateName
+        ?? command.aggregate
+        ?? title
+    );
     return {
         id: commandKey(command),
         title,
@@ -537,7 +509,7 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
         pageComponent: `${resourceComponent}${component}`,
         resourceRoute,
         aggregateRoute: axonRoute(commandAggregateTitle),
-        createsAggregate: !!command.createsAggregate,
+        startsLifecycle: !!(command.startsLifecycle ?? command.createsAggregate),
         fields: normalizedFields.map((field) => ({
             ...field,
             select: workflowFields.selects.get(field.name) ?? null
@@ -599,7 +571,15 @@ function commandKey(command) {
 }
 
 function aggregateName(command, slice, aggregates = [], contexts = []) {
-    const title = cleanTitle(command.aggregateName ?? command.aggregate ?? slice?.title ?? 'app');
+    const title = cleanTitle(
+        command.concept
+        ?? command.concepts?.[0]
+        ?? slice?.concepts?.[0]
+        ?? command.aggregateName
+        ?? command.aggregate
+        ?? slice?.title
+        ?? 'app'
+    );
     const aggregate = findAggregate(command, title, aggregates);
     const context = contextName(
         command.modelContext
@@ -630,36 +610,6 @@ function normalizeArray(value) {
         return [];
     }
     return Array.isArray(value) ? value : [value];
-}
-
-function sliceHasAggregate(slice, aggregateTitle) {
-    const normalizedAggregateTitle = cleanTitle(aggregateTitle).toLowerCase();
-    const directMatch = normalizeArray(slice?.aggregates)
-        .map((aggregate) => cleanTitle(typeof aggregate === 'string' ? aggregate : aggregate.title ?? aggregate.name).toLowerCase())
-        .includes(normalizedAggregateTitle);
-    if (directMatch) {
-        return true;
-    }
-
-    return [
-        ...(slice?.commands ?? []),
-        ...(slice?.events ?? []),
-        ...(slice?.readmodels ?? []),
-        ...(slice?.screens ?? []),
-        ...(slice?.processors ?? [])
-    ].some((element) => elementHasAggregate(element, normalizedAggregateTitle));
-}
-
-function elementHasAggregate(element, aggregateTitle) {
-    const normalizedAggregateTitle = cleanTitle(aggregateTitle).toLowerCase();
-    return [
-        element?.aggregate,
-        element?.aggregateName,
-        ...(element?.aggregateDependencies ?? [])
-    ]
-        .filter(Boolean)
-        .map((value) => cleanTitle(typeof value === 'string' ? value : value.title ?? value.name).toLowerCase())
-        .includes(normalizedAggregateTitle);
 }
 
 function findAggregate(command, title, aggregates) {
@@ -772,6 +722,7 @@ function decorateField(field) {
     const textArea = field.name.toLowerCase().includes('content')
         || field.name.toLowerCase().includes('description')
         || field.name.toLowerCase().includes('notes');
+    const boolean = isBooleanField(field);
 
     return {
         ...field,
@@ -780,9 +731,14 @@ function decorateField(field) {
         cellValue: cellValue(field),
         inputComponent: textArea ? 'Textarea' : 'Input',
         inputType: inputType(field),
+        boolean,
         rows: textArea ? 8 : null,
-        rules: field.optional ? '{}' : `{ required: "${escapeString(field.label)} is required" }`
+        rules: field.optional || boolean ? '{}' : `{ required: "${escapeString(field.label)} is required" }`
     };
+}
+
+function isBooleanField(field) {
+    return (field.valueType?.resolvedBaseType ?? field.type)?.toLowerCase() === 'boolean';
 }
 
 function isEditCommand(command) {
@@ -867,9 +823,6 @@ function zodPrimitive(type) {
 
 function inputType(field) {
     const lower = (field.valueType?.resolvedBaseType ?? field.type)?.toLowerCase();
-    if (lower === 'boolean') {
-        return 'boolean';
-    }
     if (['int', 'long', 'double', 'number'].includes(lower)) {
         return 'number';
     }

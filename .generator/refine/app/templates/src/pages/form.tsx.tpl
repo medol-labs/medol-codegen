@@ -15,6 +15,13 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useCommandForm } from "@/hooks/command/useCommandForm";
 
@@ -46,6 +53,22 @@ export const <%= command.pageComponent %> = () => {
             render={({ field }) => (
               <FormItem>
                 <FormLabel><%= field.label %></FormLabel>
+<% if (field.boolean) { -%>
+                <Select
+                  value={field.value === undefined || field.value === null ? undefined : String(field.value)}
+                  onValueChange={(value) => field.onChange(value === "true")}
+                >
+                  <FormControl>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select <%= field.label %>" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    <SelectItem value="true">True</SelectItem>
+                    <SelectItem value="false">False</SelectItem>
+                  </SelectContent>
+                </Select>
+<% } else { -%>
                 <FormControl>
                   <<%= field.inputComponent %>
 <% if (field.inputType) { -%>
@@ -59,6 +82,7 @@ export const <%= command.pageComponent %> = () => {
 <% } -%>
                   />
                 </FormControl>
+<% } -%>
                 <FormMessage />
               </FormItem>
             )}

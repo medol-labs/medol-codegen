@@ -125,8 +125,14 @@ export const <%= command.pageComponent %> = () => {
                     type="<%= field.inputType %>"
 <% } -%>
                     {...field}
+<% if (field.json) { -%>
+                    value={typeof field.value === "string" ? field.value : JSON.stringify(field.value ?? <%- field.jsonEmptyValue %>, null, 2)}
+                    onChange={(event) => field.onChange(event.target.value)}
+                    placeholder={<%- JSON.stringify(field.placeholder) %>}
+<% } else { -%>
                     value={field.value || ""}
-                    placeholder="Enter <%= field.label %>"
+                    placeholder={<%- JSON.stringify(field.placeholder) %>}
+<% } -%>
 <% if (field.rows) { -%>
                     rows={<%= field.rows %>}
 <% } -%>

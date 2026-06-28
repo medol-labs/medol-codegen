@@ -41,6 +41,7 @@ export const resources: IResourceItem[] = [
       icon: <Package />,
       tableName: "<%= resource.tableName %>",
       idField: "<%= resource.idField %>",
+      idFields: <%- JSON.stringify(resource.idFields) %>,
       aggregateRoute: "<%= resource.aggregateRoute %>",
       queryRoute: "<%= resource.queryRoute %>",
 <% if (resource.commands.length > 0) { -%>

@@ -51,7 +51,9 @@ module.exports = class extends Generator {
         }
         if (type === 'slices' || type === 'all') {
             const selected = this.answers.sliceNames ?? this.model.slices.map((slice) => slice.title);
-            this.model.slices.filter((slice) => selected.includes(slice.title)).forEach((slice) => this._writeSlice(slice));
+            const selectedSlices = this.model.slices.filter((slice) => selected.includes(slice.title));
+            selectedSlices.forEach((slice) => this._writeSlice(slice));
+            this._writeConceptEntityStates(selectedSlices);
         }
     }
 
@@ -153,24 +155,28 @@ module.exports = class extends Generator {
         const slicePackage = _sliceTitle(slice.title);
         const packageName = `${this.model.rootPackage}.${context}.${slicePackage}`;
         if (slice.commands.length > 0) {
-            const selection = selectionFor(slice);
+            const selection = selectionFor(slice, this.model);
+            const selectionTarget = selectionTargetFor(this.model, slice);
             const relatedEvents = relatedEventsForSlice(this.model, slice);
-            this._writeSelection(packageName, context, slicePackage, slice, selection);
-            slice.commands.forEach((command) => this._writeCommand(packageName, context, slicePackage, command, selection));
+            this._writeSelection(selectionTarget.packageName, selectionTarget.pathPrefix, slice, selection);
+            slice.commands.forEach((command) => this._writeCommand(packageName, context, slicePackage, command, selection, selectionTarget.packageName));
             relatedEvents.forEach((event) => this._writeEvent(event, slice, selection));
-            this._writeState(packageName, context, slicePackage, slice, selection, relatedEvents);
+            if (!primaryConcept(slice)) {
+                this._writeState(packageName, context, slicePackage, slice, selection, relatedEvents);
+            }
             this._writeCommandHandlers(packageName, context, slicePackage, slice, selection, relatedEvents);
             this._writeCommandResource(packageName, context, slicePackage, slice);
         }
         slice.readmodels.forEach((readmodel) => this._writeReadModel(packageName, context, slicePackage, slice, readmodel));
     }
 
-    _writeSelection(packageName, context, slicePackage, slice, selection) {
+    _writeSelection(packageName, pathPrefix, slice, selection) {
         const imports = typeImports(selection.fields);
         const properties = selection.fields.map((field) => `    val ${field.alias}: ${field.selectionType}`).join(',\n');
         const tagConstants = selection.tags.map((tag) => `    const val ${constant(tag.name)} = "${escapeKotlin(tag.name)}"`).join('\n');
-        const conceptNames = slice.concepts.map((concept) => `"${escapeKotlin(concept)}"`).join(', ');
-        this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${selection.name}.kt`), `package ${packageName}
+        const metadataOwner = selection.metadataOwner ?? slice.name;
+        const concepts = selection.concepts ?? slice.concepts;
+        this.fs.write(this._kotlinPath(`${pathPrefix}/${selection.name}.kt`), `package ${packageName}
 
 ${imports}
 
@@ -178,19 +184,20 @@ data class ${selection.name}(
 ${properties}
 )
 
-object ${pascal(slice.name)}Tags {
+object ${pascal(metadataOwner)}Tags {
 ${tagConstants}
 }
 
-object ${pascal(slice.name)}Metadata {
-    val concepts = ${stringList(slice.concepts)}
+object ${pascal(metadataOwner)}Metadata {
+    val concepts = ${stringList(concepts)}
 }
 `);
     }
 
-    _writeCommand(packageName, context, slicePackage, command, selection) {
+    _writeCommand(packageName, context, slicePackage, command, selection, selectionPackageName = packageName) {
         const commandName = _commandTitle(command.title);
         const imports = typeImports(command.fields);
+        const selectionImport = selectionPackageName === packageName ? '' : `import ${selectionPackageName}.${selection.name}\n`;
         const properties = command.fields.map((field) => {
             const defaultValue = field.generated ? ` = ${fallbackValue(field)}` : '';
             return `    val ${field.name}: ${mappedType(field, field.optional)}${defaultValue}`;
@@ -200,7 +207,7 @@ object ${pascal(slice.name)}Metadata {
 
 import org.axonframework.messaging.commandhandling.annotation.Command
 import org.axonframework.modelling.annotation.TargetEntityId
-${imports}
+${selectionImport}${imports}
 
 @Command
 data class ${commandName}(
@@ -247,13 +254,25 @@ ${properties}
 `);
     }
 
-    _writeState(packageName, context, slicePackage, slice, selection, events) {
-        const stateName = `${pascal(slice.name)}State`;
-        const fields = uniqueFields(events.flatMap((event) => event.fields));
+    _writeState(packageName, context, slicePackage, slice, selection, events, overrideStateName, childTransitions = []) {
+        const stateName = overrideStateName ?? `${pascal(slice.name)}State`;
+        const childTransitionByEventId = new Map(childTransitions.map((transition) => [transition.eventId, transition]));
+        const hasChildMemberState = childTransitions.length > 0;
+        const fields = uniqueFields(events.flatMap((event) => event.fields))
+            .filter((field) => !(hasChildMemberState && field.name === 'organizationId'));
         const imports = typeImports(fields);
-        const stateFields = fields.map((field) => `    private var ${field.name}: ${stateFieldType(field)} = ${stateFieldDefault(field)}`).join('\n');
+        const stateFields = [
+            ...fields.map((field) => `    private var ${field.name}: ${stateFieldType(field)} = ${stateFieldDefault(field)}`),
+            ...(hasChildMemberState ? ['    private val members: MutableMap<UUID, String> = mutableMapOf()'] : [])
+        ].join('\n');
         const sourcingHandlers = events.map((event) => {
-            const assignments = event.fields.map((field) => `        ${field.name} = event.${field.name}`).join('\n');
+            const transition = childTransitionByEventId.get(event.id);
+            const assignments = [
+                ...event.fields
+                    .filter((field) => !(transition && field.name === 'organizationId'))
+                    .map((field) => `        ${field.name} = event.${field.name}`),
+                ...(transition ? [`        members[event.organizationId] = "${escapeKotlin(transition.to)}"`] : [])
+            ].join('\n');
             return `    @EventSourcingHandler\n    fun evolve(event: ${_eventTitle(event.title)}): ${stateName} = apply {\n${assignments}\n    }`;
         }).join('\n\n');
         const eventImports = events.map((event) => `import ${this._eventPackage(event, slice)}.${_eventTitle(event.title)}`).join('\n');
@@ -289,7 +308,8 @@ ${sourcingHandlers}
     }
 
     _writeCommandHandlers(packageName, context, slicePackage, slice, selection, events) {
-        const stateName = `${pascal(slice.name)}State`;
+        const stateTarget = stateTargetFor(this.model, slice);
+        const stateName = stateTarget.name;
         const handlers = slice.commands.map((command) => {
             const commandName = _commandTitle(command.title);
             const outputs = outboundEvents(command, events);
@@ -303,6 +323,7 @@ ${sourcingHandlers}
         }).join('\n\n');
         const commandImports = slice.commands.map((command) => `import ${packageName}.${_commandTitle(command.title)}`).join('\n');
         const eventImports = events.map((event) => `import ${this._eventPackage(event, slice)}.${_eventTitle(event.title)}`).join('\n');
+        const stateImport = stateTarget.packageName === packageName ? '' : `import ${stateTarget.packageName}.${stateName}\n`;
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${pascal(slice.name)}CommandHandler.kt`), `package ${packageName}
 
 import org.axonframework.messaging.commandhandling.annotation.CommandHandler
@@ -311,12 +332,33 @@ import org.axonframework.modelling.annotation.InjectEntity
 import org.springframework.stereotype.Component
 ${commandImports}
 ${eventImports}
+${stateImport}
 
 @Component
 class ${pascal(slice.name)}CommandHandler {
 ${handlers}
 }
 `);
+    }
+
+    _writeConceptEntityStates(slices) {
+        const groups = groupByMap(slices.filter((slice) => primaryConcept(slice) && slice.commands.length > 0), (slice) => primaryConcept(slice));
+        for (const [, conceptSlices] of groups.entries()) {
+            const first = conceptSlices[0];
+            const selection = selectionFor(first, this.model);
+            const target = stateTargetFor(this.model, first);
+            const context = contextPackage(first.context);
+            const conceptPackage = _sliceTitle(primaryConcept(first));
+            const packageName = target.packageName;
+            const events = uniqueBy(
+                conceptSlices.flatMap((slice) => relatedEventsForSlice(this.model, slice)),
+                (event) => event.id ?? `${event.slice}:${event.name}`
+            );
+            const childTransitions = selection.fields.some((field) => field.source === 'organizationId' || field.alias === 'organizationId')
+                ? []
+                : childStateTransitions(conceptSlices);
+            this._writeState(packageName, context, conceptPackage, first, selection, events, target.name, childTransitions);
+        }
     }
 
     _writeCommandResource(packageName, context, slicePackage, slice) {
@@ -545,6 +587,9 @@ ${handlers}
         if (!stateChange || !concept) {
             return undefined;
         }
+        if ((event.fields ?? []).some((field) => field.name === 'organizationId')) {
+            return undefined;
+        }
         const field = readmodel.fields.find((candidate) => candidate.type === `${concept}.State`);
         if (!field || event.fields.some((candidate) => candidate.name === field.name)) {
             return undefined;
@@ -566,10 +611,37 @@ ${handlers}
     }
 };
 
-function selectionFor(slice) {
+function selectionFor(slice, model) {
+    if (primaryConcept(slice)) {
+        return conceptSelectionFor(slice, model);
+    }
+    return sliceSelectionFor(slice);
+}
+
+function conceptSelectionFor(slice, model) {
+    const concept = primaryConcept(slice);
+    const conceptSlices = (model?.slices ?? [])
+        .filter((candidate) => candidate.context === slice.context && primaryConcept(candidate) === concept && candidate.commands.length > 0);
+    const sourceSlice = conceptSlices.find((candidate) => candidate.startsLifecycle && commandIdFields(candidate).length > 0)
+        ?? conceptSlices.find((candidate) => commandIdFields(candidate).length > 0)
+        ?? slice;
+    const idFields = commandIdFields(sourceSlice);
+    if (idFields.length > 0) {
+        const tags = idFields.map((field) => ({name: field.name, expression: field.name}));
+        return selectionFromTags(sourceSlice, tags, `${pascal(concept)}Selection`, concept, [concept]);
+    }
+    return selectionFromTags(sourceSlice, sourceSlice.tags.length > 0 ? sourceSlice.tags : fallbackTags(sourceSlice, sourceSlice.commands[0]?.fields ?? []), `${pascal(concept)}Selection`, concept, [concept]);
+}
+
+function sliceSelectionFor(slice) {
     const firstCommand = slice.commands[0];
     const commandFields = firstCommand?.fields ?? [];
     const tags = slice.tags.length > 0 ? slice.tags : fallbackTags(slice, commandFields);
+    return selectionFromTags(slice, tags, `${pascal(slice.name)}Selection`, slice.name, slice.concepts);
+}
+
+function selectionFromTags(slice, tags, name, metadataOwner, concepts) {
+    const commandFields = slice.commands[0]?.fields ?? [];
     const fields = tags.map((tag, index) => {
         const source = tagSource(tag, commandFields) ?? commandFields.find((field) => field.idAttribute)?.name ?? commandFields[0]?.name;
         const sourceField = commandFields.find((field) => field.name === source) ?? {name: source ?? `selection${index + 1}`, type: 'String', cardinality: 'Single'};
@@ -586,13 +658,75 @@ function selectionFor(slice) {
             eventExpression: expression ?? sourceField.name
         };
     });
-    return {name: `${pascal(slice.name)}Selection`, tags, fields};
+    return {name, tags, fields, metadataOwner, concepts};
+}
+
+function commandIdFields(slice) {
+    return slice.commands[0]?.fields?.filter((field) => field.idAttribute) ?? [];
 }
 
 function fallbackTags(slice, fields) {
-    const idField = fields.find((field) => field.idAttribute) ?? fields[0];
-    const concept = slice.concepts[0] ?? slice.aggregate?.name ?? slice.name;
+    const idFields = fields.filter((field) => field.idAttribute);
+    if (idFields.length > 0) {
+        return idFields.map((field) => ({name: field.name, expression: field.name}));
+    }
+    const idField = fields[0];
+    const concept = primaryConcept(slice) ?? slice.name;
     return [{name: concept, expression: idField?.name}];
+}
+
+function selectionTargetFor(model, slice) {
+    const context = contextPackage(slice.context);
+    const concept = primaryConcept(slice);
+    if (concept) {
+        const conceptPackage = _sliceTitle(concept);
+        return {
+            packageName: `${model.rootPackage}.${context}.${conceptPackage}`,
+            pathPrefix: `${context}/${conceptPackage}`
+        };
+    }
+    const slicePackage = _sliceTitle(slice.title);
+    return {
+        packageName: `${model.rootPackage}.${context}.${slicePackage}`,
+        pathPrefix: `${context}/${slicePackage}`
+    };
+}
+
+function stateTargetFor(model, slice) {
+    const context = contextPackage(slice.context);
+    const concept = primaryConcept(slice);
+    if (concept) {
+        const conceptPackage = _sliceTitle(concept);
+        return {
+            name: `${pascal(concept)}State`,
+            packageName: `${model.rootPackage}.${context}.${conceptPackage}`,
+            pathPrefix: `${context}/${conceptPackage}`
+        };
+    }
+    const slicePackage = _sliceTitle(slice.title);
+    return {
+        name: `${pascal(slice.name)}State`,
+        packageName: `${model.rootPackage}.${context}.${slicePackage}`,
+        pathPrefix: `${context}/${slicePackage}`
+    };
+}
+
+function primaryConcept(slice) {
+    return slice.concepts?.[0];
+}
+
+function childStateTransitions(slices) {
+    return slices
+        .filter((slice) => slice.stateChange?.eventId)
+        .flatMap((slice) => {
+            const events = relatedEventsForSlice({slices}, slice)
+                .filter((event) => event.id === slice.stateChange.eventId)
+                .filter((event) => (event.fields ?? []).some((field) => field.name === 'organizationId'));
+            return events.map((event) => ({
+                eventId: event.id,
+                to: slice.stateChange.to
+            }));
+        });
 }
 
 function tagSource(tag, fields) {

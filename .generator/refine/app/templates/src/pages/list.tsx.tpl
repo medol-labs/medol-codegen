@@ -129,12 +129,13 @@ export const <%= resource.component %>List = () => {
     initialState: {
       columnPinning: { right: ["actions"], left: ["select"] },
     },
-    getRowId: (row) => String(row.<%= resource.idField %>),
+    getRowId: (row) => <%- resource.rowIdExpression %>,
     refineCoreProps: {
       syncWithLocation: true,
       meta: {
         tableName: "<%= resource.tableName %>",
         idField: "<%= resource.idField %>",
+        idFields: <%- JSON.stringify(resource.idFields) %>,
         label: "<%= resource.label %>",
         aggregateRoute: "<%= resource.aggregateRoute %>",
         queryRoute: "<%= resource.queryRoute %>",

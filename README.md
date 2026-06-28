@@ -69,7 +69,7 @@ Then select:
 
 - `Skeleton` to generate the base Kotlin/Spring Boot project structure
 - `slices` to generate slice-level commands, events, read models, REST resources, processors, and specifications
-- `aggregates` to generate Axon aggregate code
+- concept-root state generation is derived from Medol `concept` references and slice identity fields
 
 The top-level generator supports three targets:
 
@@ -197,7 +197,7 @@ The `CodegenModel` keeps the domain model shape stable for code generation:
 - `domain`: business domain from the toolkit model
 - `rootPackage`: package root from the toolkit model
 - `contexts`: bounded contexts from the toolkit model
-- `aggregates`: aggregate identity, context, fields, and states
+- `aggregates`: legacy compatibility field; new Medol models use context-level slices and `concept` references instead
 - `slices`: commands, events, read models, screens, processors, specifications, actors, hotspots, and state changes
 - `dependencies`: normalized inbound/outbound element links while preserving the legacy `type` field for compatibility
 - `fields`: normalized field metadata, including id/generated/technical/query flags and source mapping metadata
@@ -227,3 +227,91 @@ cd example
 Generated code is written to `example/generated/axon5` and uses Axon Framework 5 entity, command, event-tagging, and `EventAppender` APIs.
 
 The Axon 5 skeleton includes Maven Wrapper, Docker Compose PostgreSQL, Flyway, Actuator, application configuration, a baseline migration, and a Spring context test.
+
+### Axon 5 identity modeling
+
+The generator supports two Axon 5 identity styles:
+
+- Independent event-sourced entity: model the relationship or entity as its own `concept`, mark every identity field with `id`, and use explicit `tags` when the identity is composite.
+- Concept-root state: place slices at context level and reference them from the same `concept` block. Slices in the same concept share one generated Axon selection and state class, so command handlers load the same concept-root state.
+
+The federation-learning sample currently uses the concept-root style for membership management. This keeps all participant commands on the `Federation` concept and generates a `FederationState` that tracks child membership status by organization:
+
+```medol
+slice InviteParticipant {
+  command InviteParticipant {
+    federationId: UUID id technical
+    organizationId: UUID
+    invitationNote: String
+  }
+
+  event ParticipantInvited {
+    federationId: UUID id technical
+    organizationId: UUID
+    invitationNote: String
+  }
+
+  state Invited
+}
+
+slice ApproveParticipant {
+  command ApproveParticipant {
+    federationId: UUID id technical
+    organizationId: UUID
+    approvalNote: String?
+  }
+
+  event ParticipantJoined {
+    federationId: UUID id technical
+    organizationId: UUID
+    approvalNote: String?
+  }
+
+  state Active
+}
+
+concept Federation {
+  state Draft
+  state Active
+
+  slice InviteParticipant
+  slice ApproveParticipant
+}
+```
+
+This generates `FederationSelection` and `FederationState`, with all concept slices resolving criteria from the concept identity. When concept events include `organizationId` and the slice declares `state`, the concept state maintains membership status in a generated `members: MutableMap<UUID, String>`.
+
+Use this style when the concept state is expected to hold and validate the child collection in memory. For large collections or high write concurrency, prefer the independent entity style plus read models, policies, or quota/counter concepts for cross-membership constraints.
+
+For the independent entity style, model the relationship as its own concept and use composite tags:
+
+```medol
+slice InviteParticipant {
+  tags {
+    federationId
+    organizationId
+  }
+
+  command InviteParticipant {
+    federationId: UUID id technical
+    organizationId: UUID id technical
+    invitationNote: String
+  }
+
+  event ParticipantInvited {
+    federationId: UUID id technical
+    organizationId: UUID id technical
+    invitationNote: String
+  }
+}
+
+concept FederationMembership {
+  state Invited
+  state Active
+
+  slice InviteParticipant
+  slice ApproveParticipant
+}
+```
+
+This generates a composite Axon entity selection and matching event tags. If a slice does not declare `tags`, the Axon 5 generator now falls back to all command fields marked `id`; if there are no `id` fields, it falls back to the first command field.

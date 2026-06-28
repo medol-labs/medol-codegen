@@ -195,6 +195,7 @@ module.exports = class extends Generator {
 };
 
 function buildFrontendModel(source, selectedCommandKeys) {
+    source = withResolvedValueTypes(source);
     const slices = source.slices ?? [];
     const allAggregates = source.aggregates ?? [];
     const allContexts = source.contexts ?? source.context ?? [];
@@ -222,9 +223,10 @@ function buildFrontendModel(source, selectedCommandKeys) {
 }
 
 function buildDomainModel(source) {
+    source = withResolvedValueTypes(source);
     const valueTypes = (source.valueTypes ?? []).map((valueType) => ({
         ...valueType,
-        tsBaseType: tsPrimitive(valueType.resolvedBaseType ?? valueType.baseType),
+        tsBaseType: tsValueType(valueType),
         schema: zodValueTypeExpression(valueType)
     }));
     const commands = uniqueCommands((source.slices ?? []).flatMap((slice) => slice.commands ?? []))
@@ -242,6 +244,35 @@ function buildDomainModel(source) {
             };
         });
     return {valueTypes, commands};
+}
+
+function withResolvedValueTypes(source) {
+    const valueTypesByName = new Map((source.valueTypes ?? []).map((valueType) => [valueType.name, valueType]));
+    const enrichField = (field) => ({
+        ...field,
+        valueType: field.valueType ?? valueTypesByName.get(field.type)
+    });
+    const enrichValueType = (valueType) => ({
+        ...valueType,
+        fields: (valueType.fields ?? []).map(enrichField)
+    });
+    const valueTypes = (source.valueTypes ?? []).map(enrichValueType);
+    const slices = (source.slices ?? []).map((slice) => ({
+        ...slice,
+        commands: (slice.commands ?? []).map((command) => ({
+            ...command,
+            fields: (command.fields ?? []).map(enrichField)
+        })),
+        events: (slice.events ?? []).map((event) => ({
+            ...event,
+            fields: (event.fields ?? []).map(enrichField)
+        })),
+        readmodels: (slice.readmodels ?? []).map((readModel) => ({
+            ...readModel,
+            fields: (readModel.fields ?? []).map(enrichField)
+        }))
+    }));
+    return {...source, valueTypes, slices};
 }
 
 function uniqueCommands(commands) {
@@ -368,7 +399,7 @@ function commandWorkflowFields(command, readModel, allEvents, workflow) {
             }
 
             const select = workflow.selectableReadModels.get(field.name);
-            if (select && !field.idAttribute) {
+            if (select && !field.idAttribute && isReferenceSelectField(field)) {
                 selects.set(field.name, select);
             }
         });
@@ -386,7 +417,8 @@ function toReadModelResource(group, readModel, allEvents, workflow) {
     const fields = queryFields.length > 0
         ? queryFields
         : normalizeFields(group.commands.flatMap((command) => command.fields ?? []));
-    const idField = fields.find((field) => field.idAttribute) ?? fields.find((field) => field.name === 'id') ?? fields[0];
+    const idFields = identifierFields(fields);
+    const idField = idFields[0] ?? fields.find((field) => field.name === 'id') ?? fields[0];
     const resourceCommands = uniqueElements(group.commands);
     let normalizedCommands = resourceCommands
         .filter((command) => command?.title)
@@ -422,6 +454,8 @@ function toReadModelResource(group, readModel, allEvents, workflow) {
         component,
         chapter: group.chapter,
         idField: idField?.name ?? 'id',
+        idFields: (idFields.length > 0 ? idFields : [idField]).filter(Boolean).map((field) => field.name),
+        rowIdExpression: rowIdExpression((idFields.length > 0 ? idFields : [idField]).filter(Boolean)),
         readModelId: readModel?.id,
         canList: readModel ? !!readModel.listElement : true,
         fields,
@@ -693,6 +727,20 @@ function idFieldName(element) {
     return element?.fields?.find((field) => field.idAttribute)?.name ?? element?.fields?.find((field) => field.name === 'id')?.name;
 }
 
+function identifierFields(fields = []) {
+    return fields.filter((field) => field.idAttribute);
+}
+
+function rowIdExpression(fields = []) {
+    if (fields.length === 0) {
+        return 'String(row.id)';
+    }
+    if (fields.length === 1) {
+        return `String(row.${fields[0].name})`;
+    }
+    return fields.map((field) => `String(row.${field.name})`).join(' + ":" + ');
+}
+
 function optionLabelField(readModel) {
     return readModel?.fields?.find((field) => {
         const lower = field.name?.toLowerCase();
@@ -719,7 +767,9 @@ function normalizeFields(fields = []) {
 }
 
 function decorateField(field) {
-    const textArea = field.name.toLowerCase().includes('content')
+    const json = isJsonField(field);
+    const textArea = json
+        || field.name.toLowerCase().includes('content')
         || field.name.toLowerCase().includes('description')
         || field.name.toLowerCase().includes('notes');
     const boolean = isBooleanField(field);
@@ -732,9 +782,45 @@ function decorateField(field) {
         inputComponent: textArea ? 'Textarea' : 'Input',
         inputType: inputType(field),
         boolean,
-        rows: textArea ? 8 : null,
+        json,
+        jsonEmptyValue: isListField(field) ? '[]' : '{}',
+        placeholder: json ? jsonPlaceholder(field) : `Enter ${field.label}`,
+        rows: json ? 10 : textArea ? 8 : null,
         rules: field.optional || boolean ? '{}' : `{ required: "${escapeString(field.label)} is required" }`
     };
+}
+
+function isReferenceSelectField(field) {
+    const name = String(field.name ?? '');
+    return !isJsonField(field) && /(^id$|Id$|id$)/.test(name);
+}
+
+function isJsonField(field) {
+    return field.valueType?.kind === 'object' || isListField(field);
+}
+
+function isListField(field) {
+    return ['list', 'multiple', 'many'].includes(String(field.cardinality ?? '').toLowerCase());
+}
+
+function jsonPlaceholder(field) {
+    if (!field.valueType?.fields?.length) {
+        return isListField(field) ? 'Enter JSON array' : 'Enter JSON object';
+    }
+    const sample = Object.fromEntries(field.valueType.fields.map((nestedField) => [
+        nestedField.name,
+        sampleJsonValue(nestedField)
+    ]));
+    const value = isListField(field) ? [sample] : sample;
+    return JSON.stringify(value, null, 2);
+}
+
+function sampleJsonValue(field) {
+    if (isListField(field)) return [];
+    const type = (field.valueType?.resolvedBaseType ?? field.type ?? 'String').toLowerCase();
+    if (type === 'boolean') return false;
+    if (['int', 'integer', 'long', 'double', 'float', 'decimal', 'bigdecimal', 'number'].includes(type)) return 0;
+    return '';
 }
 
 function isBooleanField(field) {
@@ -756,11 +842,23 @@ function isDeleteCommand(command) {
 function tsType(field) {
     if (field.valueType) {
         const valueType = field.valueType.name;
-        return field.cardinality?.toLowerCase() === 'list' ? `${valueType}[]` : valueType;
+        return isListField(field) ? `${valueType}[]` : valueType;
     }
     const lower = field.type?.toLowerCase();
     const base = ['int', 'long', 'double', 'number'].includes(lower) ? 'number' : lower === 'boolean' ? 'boolean' : 'string';
-    return field.cardinality?.toLowerCase() === 'list' ? `${base}[]` : base;
+    return isListField(field) ? `${base}[]` : base;
+}
+
+function tsValueType(valueType) {
+    if (valueType.kind === 'object') {
+        const fields = normalizeFields(valueType.fields ?? []);
+        const members = fields.map((field) => `  ${field.name}${field.optional ? '?' : ''}: ${field.tsType};`);
+        return `{\n${members.join('\n')}\n}`;
+    }
+    if (valueType.kind === 'enum' && (valueType.values ?? []).length > 0) {
+        return (valueType.values ?? []).map((value) => JSON.stringify(String(value))).join(' | ');
+    }
+    return tsPrimitive(valueType.resolvedBaseType ?? valueType.baseType);
 }
 
 function tsPrimitive(type) {
@@ -771,6 +869,14 @@ function tsPrimitive(type) {
 }
 
 function zodValueTypeExpression(valueType) {
+    if (valueType.kind === 'object') {
+        const fields = normalizeFields(valueType.fields ?? []);
+        const members = fields.map((field) => `  ${field.name}: ${zodFieldExpression(field)}`);
+        return `z.object({\n${members.join(',\n')}\n})`;
+    }
+    if (valueType.kind === 'enum' && (valueType.values ?? []).length > 0) {
+        return `z.enum([${(valueType.values ?? []).map((value) => JSON.stringify(String(value))).join(', ')}])`;
+    }
     let expression = zodPrimitive(valueType.resolvedBaseType ?? valueType.baseType);
     for (const constraint of valueType.resolvedConstraints ?? valueType.constraints ?? []) {
         switch (constraint.kind) {
@@ -798,7 +904,18 @@ function zodValueTypeExpression(valueType) {
 
 function zodFieldExpression(field) {
     let expression = field.valueType ? `${field.valueType.name}Schema` : zodPrimitive(field.type);
-    if (field.cardinality?.toLowerCase() === 'list') expression = `z.array(${expression})`;
+    if (isListField(field)) expression = `z.array(${expression})`;
+    if (isJsonField(field)) {
+        expression = `z.preprocess((value) => {
+    if (typeof value !== "string") return value;
+    if (!value.trim()) return ${isListField(field) ? '[]' : 'undefined'};
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  }, ${expression})`;
+    }
     if (field.optional) expression += '.optional().nullable()';
     return expression;
 }

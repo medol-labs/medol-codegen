@@ -137,7 +137,7 @@ function normalizeContexts(config) {
 }
 
 function normalizeValueTypes(config, contexts) {
-    const normalized = (config.valueTypes ?? []).map((valueType, index) => {
+    const initial = (config.valueTypes ?? []).map((valueType, index) => {
         const name = valueType.name ?? valueType.title ?? `ValueType${index + 1}`;
         const context = valueType.context ?? findContextForValueType(name, contexts);
         return {
@@ -145,15 +145,22 @@ function normalizeValueTypes(config, contexts) {
             name,
             title: valueType.title ?? humanize(name),
             context,
+            kind: valueType.kind ?? (Array.isArray(valueType.fields) && valueType.fields.length > 0 ? 'object' : valueType.values?.length > 0 ? 'enum' : 'scalar'),
             baseType: valueType.baseType ?? 'String',
-            constraints: normalizeValueTypeConstraints(valueType.constraints ?? [])
+            constraints: normalizeValueTypeConstraints(valueType.constraints ?? []),
+            values: valueType.values ?? [],
+            fields: valueType.fields ?? []
         };
     });
-    const byName = new Map(normalized.map((valueType) => [valueType.name, valueType]));
-    return normalized.map((valueType) => ({
+    const byName = new Map(initial.map((valueType) => [valueType.name, valueType]));
+    const resolved = initial.map((valueType) => ({
         ...valueType,
         resolvedBaseType: resolveValueTypeBase(valueType, byName),
         resolvedConstraints: resolveValueTypeConstraints(valueType, byName)
+    }));
+    return resolved.map((valueType) => ({
+        ...valueType,
+        fields: normalizeFields(valueType.fields ?? [], resolved)
     }));
 }
 

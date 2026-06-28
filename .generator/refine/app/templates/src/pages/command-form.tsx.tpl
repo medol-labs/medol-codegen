@@ -1,6 +1,13 @@
 // Generated from config.json by the refine generator.
 import { useParsed } from "@refinedev/core";
 import { useNavigate, useSearchParams } from "react-router";
+<% if (command.hasArrayFields) { -%>
+import type { Control } from "react-hook-form";
+import { useFieldArray } from "react-hook-form";
+<% } -%>
+<% if (command.hasArrayFields) { -%>
+import { Plus, Trash2 } from "lucide-react";
+<% } -%>
 
 import {
   CreateView,
@@ -31,6 +38,76 @@ import { <%= command.schemaName %>, type <%= command.inputTypeName %> } from "@/
 import { ResourceSelect } from "@/components/refine-ui/form/resource-select";
 <% } -%>
 
+<% if (command.hasArrayFields) { -%>
+type ScalarArrayFieldProps = {
+  control: Control<any>;
+  name: string;
+  label: string;
+  inputType?: string | null;
+  itemDefaultValue: string | number | boolean;
+};
+
+function ScalarArrayField({
+  control,
+  name,
+  label,
+  inputType,
+  itemDefaultValue,
+}: ScalarArrayFieldProps) {
+  return (
+    <FormField
+      control={control}
+      name={name as never}
+      render={({ field }) => {
+        const values = Array.isArray(field.value) ? field.value : [];
+
+        return (
+          <FormItem>
+            <div className="flex items-center justify-between gap-2">
+              <FormLabel>{label}</FormLabel>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => field.onChange([...values, itemDefaultValue])}
+              >
+                <Plus className="size-4" />
+              </Button>
+            </div>
+            <div className="space-y-2">
+              {values.map((value, index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <Input
+                    type={inputType ?? undefined}
+                    value={value ?? ""}
+                    onChange={(event) => {
+                      const next = [...values];
+                      next[index] = inputType === "number"
+                        ? Number(event.target.value)
+                        : event.target.value;
+                      field.onChange(next);
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => field.onChange(values.filter((_, itemIndex) => itemIndex !== index))}
+                  >
+                    <Trash2 className="size-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+            <FormMessage />
+          </FormItem>
+        );
+      }}
+    />
+  );
+}
+<% } -%>
+
 export const <%= command.pageComponent %> = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -38,6 +115,9 @@ export const <%= command.pageComponent %> = () => {
   const defaultValues = {
 <% command.prefillFields.forEach((field) => { -%>
     <%= field.name %>: searchParams.get("<%= field.name %>") ?? undefined,
+<% }) -%>
+<% command.defaultValueFields.forEach((field) => { -%>
+    <%= field.name %>: <%- field.defaultValue %>,
 <% }) -%>
   };
 
@@ -65,6 +145,12 @@ export const <%= command.pageComponent %> = () => {
       resolver: zodResolver(<%= command.schemaName %>),
     },
   });
+<% command.fields.filter((field) => field.object && field.list).forEach((field) => { -%>
+  const <%= field.fieldArrayName %> = useFieldArray({
+    control: form.control,
+    name: "<%= field.name %>" as never,
+  });
+<% }) -%>
 
   function onSubmit(values: <%= command.inputTypeName %>) {
     onFinish({
@@ -79,6 +165,158 @@ export const <%= command.pageComponent %> = () => {
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
 <% command.fields.forEach((field) => { -%>
+<% if (field.object && field.list) { -%>
+          <div className="space-y-4 rounded-md border p-4">
+            <div className="flex items-center justify-between gap-2">
+              <FormLabel><%= field.label %></FormLabel>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => <%= field.fieldArrayName %>.append(<%- field.defaultValue %> as never)}
+              >
+                <Plus className="size-4" />
+              </Button>
+            </div>
+            {<%= field.fieldArrayName %>.fields.map((item, index) => (
+              <div key={item.id} className="space-y-4 rounded-md border p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-sm font-medium"><%= field.valueType.name %> {index + 1}</div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => <%= field.fieldArrayName %>.remove(index)}
+                  >
+                    <Trash2 className="size-4" />
+                  </Button>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+<% field.nestedFields.forEach((nestedField) => { -%>
+<% if (nestedField.scalarList) { -%>
+                  <ScalarArrayField
+                    control={form.control}
+                    name={`<%= field.name %>.${index}.<%= nestedField.name %>`}
+                    label="<%= nestedField.label %>"
+                    inputType={<%- nestedField.inputType ? JSON.stringify(nestedField.inputType) : 'null' %>}
+                    itemDefaultValue={<%- nestedField.scalarListItemDefaultValue %>}
+                  />
+<% } else { -%>
+                  <FormField
+                    control={form.control}
+                    name={`<%= field.name %>.${index}.<%= nestedField.name %>` as never}
+                    rules={<%- nestedField.rules %>}
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel><%= nestedField.label %></FormLabel>
+<% if (nestedField.boolean) { -%>
+                        <Select
+                          value={field.value === undefined || field.value === null ? undefined : String(field.value)}
+                          onValueChange={(value) => field.onChange(value === "true")}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select <%= nestedField.label %>" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="true">True</SelectItem>
+                            <SelectItem value="false">False</SelectItem>
+                          </SelectContent>
+                        </Select>
+<% } else { -%>
+                        <FormControl>
+                          <<%= nestedField.inputComponent %>
+<% if (nestedField.inputType) { -%>
+                            type="<%= nestedField.inputType %>"
+<% } -%>
+                            {...field}
+                            value={field.value ?? ""}
+                            placeholder={<%- JSON.stringify(nestedField.placeholder) %>}
+<% if (nestedField.rows) { -%>
+                            rows={<%= nestedField.rows %>}
+<% } -%>
+                          />
+                        </FormControl>
+<% } -%>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+<% } -%>
+<% }) -%>
+                </div>
+              </div>
+            ))}
+          </div>
+<% } else if (field.object) { -%>
+          <div className="space-y-4 rounded-md border p-4">
+            <FormLabel><%= field.label %></FormLabel>
+            <div className="grid gap-4 md:grid-cols-2">
+<% field.nestedFields.forEach((nestedField) => { -%>
+<% if (nestedField.scalarList) { -%>
+              <ScalarArrayField
+                control={form.control}
+                name="<%= field.name %>.<%= nestedField.name %>"
+                label="<%= nestedField.label %>"
+                inputType={<%- nestedField.inputType ? JSON.stringify(nestedField.inputType) : 'null' %>}
+                itemDefaultValue={<%- nestedField.scalarListItemDefaultValue %>}
+              />
+<% } else { -%>
+              <FormField
+                control={form.control}
+                name="<%= field.name %>.<%= nestedField.name %>"
+                rules={<%- nestedField.rules %>}
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel><%= nestedField.label %></FormLabel>
+<% if (nestedField.boolean) { -%>
+                    <Select
+                      value={field.value === undefined || field.value === null ? undefined : String(field.value)}
+                      onValueChange={(value) => field.onChange(value === "true")}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select <%= nestedField.label %>" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="true">True</SelectItem>
+                        <SelectItem value="false">False</SelectItem>
+                      </SelectContent>
+                    </Select>
+<% } else { -%>
+                    <FormControl>
+                      <<%= nestedField.inputComponent %>
+<% if (nestedField.inputType) { -%>
+                        type="<%= nestedField.inputType %>"
+<% } -%>
+                        {...field}
+                        value={field.value ?? ""}
+                        placeholder={<%- JSON.stringify(nestedField.placeholder) %>}
+<% if (nestedField.rows) { -%>
+                        rows={<%= nestedField.rows %>}
+<% } -%>
+                      />
+                    </FormControl>
+<% } -%>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+<% } -%>
+<% }) -%>
+            </div>
+          </div>
+<% } else if (field.scalarList) { -%>
+          <ScalarArrayField
+            control={form.control}
+            name="<%= field.name %>"
+            label="<%= field.label %>"
+            inputType={<%- field.inputType ? JSON.stringify(field.inputType) : 'null' %>}
+            itemDefaultValue={<%- field.scalarListItemDefaultValue %>}
+          />
+<% } else { -%>
           <FormField
             control={form.control}
             name="<%= field.name %>"
@@ -143,6 +381,7 @@ export const <%= command.pageComponent %> = () => {
               </FormItem>
             )}
           />
+<% } -%>
 <% }) -%>
           <div className="flex gap-2">
             <Button

@@ -549,7 +549,16 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
             select: workflowFields.selects.get(field.name) ?? null
         })),
         workflowPrefillFields: normalizedFields.filter((field) => workflowFields.prefill.has(field.name)),
-        hasSelectFields: workflowFields.selects.size > 0
+        defaultValueFields: normalizedFields
+            .filter((field) => !workflowFields.prefill.has(field.name))
+            .filter((field) => field.object || field.list)
+            .map((field) => ({
+                name: field.name,
+                defaultValue: defaultValueExpression(field)
+            })),
+        hasSelectFields: workflowFields.selects.size > 0,
+        hasObjectFields: normalizedFields.some((field) => field.object),
+        hasArrayFields: normalizedFields.some((field) => field.list || hasNestedArrayField(field))
     };
 }
 
@@ -767,12 +776,19 @@ function normalizeFields(fields = []) {
 }
 
 function decorateField(field) {
-    const json = isJsonField(field);
-    const textArea = json
-        || field.name.toLowerCase().includes('content')
+    const object = isObjectField(field);
+    const list = isListField(field);
+    const json = object;
+    const textArea = !object && (field.name.toLowerCase().includes('content')
         || field.name.toLowerCase().includes('description')
-        || field.name.toLowerCase().includes('notes');
+        || field.name.toLowerCase().includes('notes'));
     const boolean = isBooleanField(field);
+    const nestedFields = object
+        ? normalizeFields(field.valueType?.fields ?? []).map((nestedField) => ({
+            ...nestedField,
+            defaultValue: defaultValueExpression(nestedField)
+        }))
+        : [];
 
     return {
         ...field,
@@ -782,9 +798,16 @@ function decorateField(field) {
         inputComponent: textArea ? 'Textarea' : 'Input',
         inputType: inputType(field),
         boolean,
+        object,
+        list,
+        scalarList: list && !object,
         json,
         jsonEmptyValue: isListField(field) ? '[]' : '{}',
         placeholder: json ? jsonPlaceholder(field) : `Enter ${field.label}`,
+        fieldArrayName: `${camel(field.name)}Fields`,
+        defaultValue: defaultValueExpression(field),
+        scalarListItemDefaultValue: scalarListItemDefaultExpression(field),
+        nestedFields,
         rows: json ? 10 : textArea ? 8 : null,
         rules: field.optional || boolean ? '{}' : `{ required: "${escapeString(field.label)} is required" }`
     };
@@ -796,7 +819,11 @@ function isReferenceSelectField(field) {
 }
 
 function isJsonField(field) {
-    return field.valueType?.kind === 'object' || isListField(field);
+    return isObjectField(field);
+}
+
+function isObjectField(field) {
+    return field.valueType?.kind === 'object';
 }
 
 function isListField(field) {
@@ -821,6 +848,36 @@ function sampleJsonValue(field) {
     if (type === 'boolean') return false;
     if (['int', 'integer', 'long', 'double', 'float', 'decimal', 'bigdecimal', 'number'].includes(type)) return 0;
     return '';
+}
+
+function defaultValueExpression(field) {
+    if (isListField(field)) {
+        return isObjectField(field) ? `[${defaultObjectValueExpression(field.valueType)}]` : `[${scalarListItemDefaultExpression(field)}]`;
+    }
+    if (isObjectField(field)) {
+        return defaultObjectValueExpression(field.valueType);
+    }
+    const type = (field.valueType?.resolvedBaseType ?? field.type ?? 'String').toLowerCase();
+    if (type === 'boolean') return 'false';
+    if (['int', 'integer', 'long', 'double', 'float', 'decimal', 'bigdecimal', 'number'].includes(type)) return 'undefined';
+    return '""';
+}
+
+function defaultObjectValueExpression(valueType) {
+    const fields = normalizeFields(valueType?.fields ?? []);
+    const members = fields.map((field) => `  ${field.name}: ${defaultValueExpression(field)}`);
+    return `{\n${members.join(',\n')}\n}`;
+}
+
+function hasNestedArrayField(field) {
+    return isObjectField(field) && normalizeFields(field.valueType?.fields ?? []).some((nestedField) => nestedField.list);
+}
+
+function scalarListItemDefaultExpression(field) {
+    const type = (field.valueType?.resolvedBaseType ?? field.type ?? 'String').toLowerCase();
+    if (type === 'boolean') return 'false';
+    if (['int', 'integer', 'long', 'double', 'float', 'decimal', 'bigdecimal', 'number'].includes(type)) return '0';
+    return '""';
 }
 
 function isBooleanField(field) {

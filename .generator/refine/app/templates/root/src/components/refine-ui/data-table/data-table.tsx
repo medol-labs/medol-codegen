@@ -1,6 +1,6 @@
 "use client";
 
-import type { BaseRecord, HttpError } from "@refinedev/core";
+import { useTranslate, type BaseRecord, type HttpError } from "@refinedev/core";
 import type { UseTableReturnType } from "@refinedev/react-table";
 import { Column, flexRender } from "@tanstack/react-table";
 import { Loader2 } from "lucide-react";
@@ -24,6 +24,7 @@ type DataTableProps<TData extends BaseRecord> = {
 export function DataTable<TData extends BaseRecord>({
   table,
 }: DataTableProps<TData>) {
+  const t = useTranslate();
   const {
     reactTable: { getHeaderGroups, getRowModel, getAllColumns },
     refineCore: {
@@ -192,6 +193,8 @@ export function DataTable<TData extends BaseRecord>({
               <DataTableNoData
                 isOverflowing={isOverflowing}
                 columnsLength={columns.length}
+                title={t("table.empty.noDataTitle", "No data to display")}
+                description={t("table.empty.noDataDescription", "This table is empty for the time being.")}
               />
             )}
           </TableBody>
@@ -214,9 +217,13 @@ export function DataTable<TData extends BaseRecord>({
 function DataTableNoData({
   isOverflowing,
   columnsLength,
+  title,
+  description,
 }: {
   isOverflowing: { horizontal: boolean; vertical: boolean };
   columnsLength: number;
+  title: string;
+  description: string;
 }) {
   return (
     <TableRow className="hover:bg-transparent">
@@ -246,10 +253,10 @@ function DataTableNoData({
           }}
         >
           <div className={cn("text-lg", "font-semibold", "text-foreground")}>
-            No data to display
+            {title}
           </div>
           <div className={cn("text-sm", "text-muted-foreground")}>
-            This table is empty for the time being.
+            {description}
           </div>
         </div>
       </TableCell>

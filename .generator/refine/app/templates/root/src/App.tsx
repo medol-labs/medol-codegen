@@ -50,8 +50,9 @@ function App() {
             <Refine
               key={localeVersion}
               dataProvider={{
-                default: dataProvider,
+                default: commandProvider,
                 command: commandProvider,
+                query: dataProvider,
               }}
               liveProvider={liveProvider(supabaseClient)}
               authProvider={authProvider}

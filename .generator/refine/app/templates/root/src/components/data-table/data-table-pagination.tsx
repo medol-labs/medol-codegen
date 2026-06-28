@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { useTranslate } from "@refinedev/core";
 
 interface DataTablePaginationProps<TData> extends React.ComponentProps<"div"> {
   table: Table<TData>;
@@ -27,6 +28,12 @@ export function DataTablePagination<TData>({
   className,
   ...props
 }: DataTablePaginationProps<TData>) {
+  const t = useTranslate();
+  const selectedRows = table.getFilteredSelectedRowModel().rows.length;
+  const filteredRows = table.getFilteredRowModel().rows.length;
+  const pageCount = table.getPageCount();
+  const currentPage = pageCount > 0 ? table.getState().pagination.pageIndex + 1 : 0;
+
   return (
     <div
       className={cn(
@@ -36,12 +43,14 @@ export function DataTablePagination<TData>({
       {...props}
     >
       <div className="flex-1 whitespace-nowrap text-muted-foreground text-sm">
-        {table.getFilteredSelectedRowModel().rows.length} of{" "}
-        {table.getFilteredRowModel().rows.length} row(s) selected.
+        {t("table.pagination.selectedRows", {
+          selected: selectedRows,
+          total: filteredRows,
+        }, "{{selected}} of {{total}} row(s) selected.")}
       </div>
       <div className="flex flex-col-reverse items-center gap-4 sm:flex-row sm:gap-6 lg:gap-8">
         <div className="flex items-center space-x-2">
-          <p className="whitespace-nowrap font-medium text-sm">Rows per page</p>
+          <p className="whitespace-nowrap font-medium text-sm">{t("table.pagination.rowsPerPage", "Rows per page")}</p>
           <Select
             value={`${table.getState().pagination.pageSize}`}
             onValueChange={(value) => {
@@ -61,12 +70,14 @@ export function DataTablePagination<TData>({
           </Select>
         </div>
         <div className="flex items-center justify-center font-medium text-sm">
-          Page {table.getState().pagination.pageIndex + 1} of{" "}
-          {table.getPageCount()}
+          {t("table.pagination.pageOf", {
+            page: currentPage,
+            pageCount,
+          }, "Page {{page}} of {{pageCount}}")}
         </div>
         <div className="flex items-center space-x-2">
           <Button
-            aria-label="Go to first page"
+            aria-label={t("table.pagination.firstPage", "Go to first page")}
             variant="outline"
             size="icon"
             className="hidden size-8 lg:flex"
@@ -76,7 +87,7 @@ export function DataTablePagination<TData>({
             <ChevronsLeft />
           </Button>
           <Button
-            aria-label="Go to previous page"
+            aria-label={t("table.pagination.previousPage", "Go to previous page")}
             variant="outline"
             size="icon"
             className="size-8"
@@ -86,7 +97,7 @@ export function DataTablePagination<TData>({
             <ChevronLeft />
           </Button>
           <Button
-            aria-label="Go to next page"
+            aria-label={t("table.pagination.nextPage", "Go to next page")}
             variant="outline"
             size="icon"
             className="size-8"
@@ -96,11 +107,11 @@ export function DataTablePagination<TData>({
             <ChevronRight />
           </Button>
           <Button
-            aria-label="Go to last page"
+            aria-label={t("table.pagination.lastPage", "Go to last page")}
             variant="outline"
             size="icon"
             className="hidden size-8 lg:flex"
-            onClick={() => table.setPageIndex(table.getPageCount() - 1)}
+            onClick={() => table.setPageIndex(Math.max(pageCount - 1, 0))}
             disabled={!table.getCanNextPage()}
           >
             <ChevronsRight />

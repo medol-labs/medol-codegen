@@ -6,7 +6,7 @@ import { CreateButton } from "@/components/refine-ui/buttons/create";
 import { Breadcrumb } from "@/components/refine-ui/layout/breadcrumb";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
-import { useResourceParams, useUserFriendlyName } from "@refinedev/core";
+import { useResourceParams, useTranslate, useUserFriendlyName } from "@refinedev/core";
 import { type Table as TanstackTable } from "@tanstack/react-table";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import { DataTableFilterList } from "@/components/data-table/data-table-filter-list";
@@ -54,6 +54,7 @@ export const ListViewHeader = ({
   children,
 }: ListHeaderProps) => {
   const getUserFriendlyName = useUserFriendlyName();
+  const translate = useTranslate();
 
   const { resource, identifier } = useResourceParams({
     resource: resourceFromProps,
@@ -65,7 +66,9 @@ export const ListViewHeader = ({
   const title =
     titleFromProps ??
     getUserFriendlyName(
-      resource?.meta?.label ?? identifier ?? resource?.name,
+      resource?.meta?.i18nKey
+        ? translate(resource.meta.i18nKey, resource?.meta?.label ?? identifier ?? resource?.name)
+        : resource?.meta?.label ?? identifier ?? resource?.name,
       "plural"
     );
 

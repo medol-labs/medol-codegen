@@ -25,6 +25,7 @@ import {
   useLink,
   useMenu,
   useRefineOptions,
+  useTranslate,
   type TreeMenuItem,
 } from "@refinedev/core";
 import { ChevronRight, ListIcon } from "lucide-react";
@@ -272,8 +273,9 @@ function SidebarHeader() {
   );
 }
 
-function getDisplayName(item: TreeMenuItem) {
-  return item.meta?.label ?? item.label ?? item.name;
+function getDisplayName(item: TreeMenuItem, translate: ReturnType<typeof useTranslate>) {
+  const fallback = item.meta?.label ?? item.label ?? item.name;
+  return item.meta?.i18nKey ? translate(item.meta.i18nKey, fallback) : fallback;
 }
 
 type IconProps = {
@@ -312,6 +314,7 @@ function SidebarButton({
   ...props
 }: SidebarButtonProps) {
   const Link = useLink();
+  const translate = useTranslate();
 
   const buttonContent = (
     <>
@@ -328,7 +331,7 @@ function SidebarButton({
           "text-foreground": !isSelected,
         })}
       >
-        {getDisplayName(item)}
+        {getDisplayName(item, translate)}
       </span>
       {rightIcon}
     </>

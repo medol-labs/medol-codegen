@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import {
   useBack,
   useResourceParams,
+  useTranslate,
   useUserFriendlyName,
 } from "@refinedev/core";
 import { ArrowLeftIcon } from "lucide-react";
@@ -38,6 +39,7 @@ export const CreateViewHeader = ({
   const back = useBack();
 
   const getUserFriendlyName = useUserFriendlyName();
+  const translate = useTranslate();
 
   const { resource, identifier } = useResourceParams({
     resource: resourceFromProps,
@@ -46,7 +48,9 @@ export const CreateViewHeader = ({
   const title =
     titleFromProps ??
     getUserFriendlyName(
-      resource?.meta?.label ?? identifier ?? resource?.name,
+      resource?.meta?.i18nKey
+        ? translate(resource.meta.i18nKey, resource?.meta?.label ?? identifier ?? resource?.name)
+        : resource?.meta?.label ?? identifier ?? resource?.name,
       "plural"
     );
 

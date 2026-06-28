@@ -8,6 +8,7 @@ export const resources: IResourceItem[] = [
     list: "/dashboard",
     meta: {
       label: "Dashboard",
+      i18nKey: "resources.dashboard.label",
       icon: <LayoutDashboard />,
     },
   },
@@ -16,6 +17,7 @@ export const resources: IResourceItem[] = [
     name: "<%= chapter.name %>",
     meta: {
       label: "<%= chapter.label %>",
+      i18nKey: "<%= chapter.i18nKey %>",
       icon: <FlaskConical />,
     },
   },
@@ -38,6 +40,7 @@ export const resources: IResourceItem[] = [
       parent: "<%= resource.chapter.name %>",
 <% } -%>
       label: "<%= resource.label %>",
+      i18nKey: "<%= resource.i18nKey %>",
       icon: <Package />,
       tableName: "<%= resource.tableName %>",
       idField: "<%= resource.idField %>",
@@ -48,10 +51,10 @@ export const resources: IResourceItem[] = [
       commandRoute: "/<%= resource.route %>/:id/command/:command",
       commands: {
 <% if (resource.createCommand) { -%>
-        <%= resource.createCommand.name %>: { label: "<%= resource.createCommand.label %>", route: "/<%= resource.route %>/command/<%= resource.createCommand.route %>" },
+        <%= resource.createCommand.name %>: { label: "<%= resource.createCommand.label %>", i18nKey: "<%= resource.createCommand.i18nKey %>", route: "/<%= resource.route %>/command/<%= resource.createCommand.route %>" },
 <% } -%>
 <% resource.routedCommands.forEach((command) => { -%>
-        <%= command.name %>: { label: "<%= command.label %>", route: "/<%= resource.route %>/:id/command/<%= command.route %>" },
+        <%= command.name %>: { label: "<%= command.label %>", i18nKey: "<%= command.i18nKey %>", route: "/<%= resource.route %>/:id/command/<%= command.route %>" },
 <% }) -%>
       },
 <% } -%>

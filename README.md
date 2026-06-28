@@ -120,6 +120,29 @@ The preferred generator input is the `CodegenModel` exported by Event Modeling T
 /workspace/codegen-model.json
 ```
 
+Model translations are a separate optional input. Put the exported translation
+bundle next to the model as:
+
+```text
+/workspace/translations.json
+```
+
+The translation file is not merged into `codegen-model.json`; the generator only
+loads it at generation time. The expected shape matches the MEDOL translation
+download:
+
+```json
+{
+  "locales": ["zh-CN"],
+  "defaultLocale": "zh-CN",
+  "translations": {
+    "zh-CN": {
+      "Submit": "提交"
+    }
+  }
+}
+```
+
 For compatibility, the generator still falls back to:
 
 ```text
@@ -150,6 +173,12 @@ To jump directly into a target:
 ./test-codegen-model.sh axon
 ./test-codegen-model.sh axon5
 ./test-codegen-model.sh refine
+```
+
+To test Refine generation with a separate translation bundle:
+
+```bash
+CODEGEN_TRANSLATIONS_PATH=/path/to/model-translations.zh-CN.json ./test-codegen-model.sh refine
 ```
 
 To open the original interactive container shell:
@@ -189,7 +218,7 @@ The core layer lives in:
 
 It covers:
 
-- `config-loader.js`: reads `/workspace/codegen-model.json` first, falls back to `/workspace/config.json`, and returns the normalized `CodegenModel`.
+- `config-loader.js`: reads `/workspace/codegen-model.json` first, falls back to `/workspace/config.json`, optionally overlays `/workspace/translations.json`, and returns the normalized `CodegenModel`.
 - `codegen-model.js`: normalizes Event Modeling Toolkit `CodegenModel` input and can convert Martin-style `config.json` into the same shape for compatibility.
 
 The `CodegenModel` keeps the domain model shape stable for code generation:

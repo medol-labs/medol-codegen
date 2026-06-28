@@ -3,6 +3,7 @@ import {
   useGo,
   useParsed,
   useResourceParams,
+  useTranslate,
   type IResourceItem,
 } from "@refinedev/core";
 import { useCommandButtonCanAccess } from "./useCommandButtonCanAccess";
@@ -100,9 +101,13 @@ export const useCommandButton = ({
     resource,
     id,
   });
+  const translate = useTranslate();
   const { commandUrl } = useCommandNavigation();
 
   const commandMeta = resourceItem?.meta?.commands?.[command];
+  const label = commandMeta?.i18nKey
+    ? translate(commandMeta.i18nKey, commandMeta.label ?? command)
+    : commandMeta?.label ?? command;
 
   const { canAccess, title, hidden, disabled } = useCommandButtonCanAccess({
     resource: resourceItem,
@@ -119,7 +124,7 @@ export const useCommandButton = ({
       command,
       query,
     }),
-    label: commandMeta?.label ?? command,
+    label,
     hidden: hidden,
     disabled: disabled,
     canAccess,

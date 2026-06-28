@@ -1,5 +1,6 @@
 // Generated from config.json by the refine generator.
 import { useParsed } from "@refinedev/core";
+import { useTranslate } from "@refinedev/core";
 import { useNavigate, useSearchParams } from "react-router";
 <% if (command.hasArrayFields) { -%>
 import type { Control } from "react-hook-form";
@@ -109,6 +110,7 @@ function ScalarArrayField({
 <% } -%>
 
 export const <%= command.pageComponent %> = () => {
+  const t = useTranslate();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { id } = useParsed();
@@ -129,14 +131,14 @@ export const <%= command.pageComponent %> = () => {
     meta: {
       tableName: "<%= resource.tableName %>",
       idField: "<%= resource.idField %>",
-      label: "<%= resource.label %>",
+      label: t("<%= resource.i18nKey %>", "<%= resource.label %>"),
       aggregateRoute: "<%= command.aggregateRoute %>",
       queryRoute: "<%= resource.queryRoute %>",
     },
     queryMeta: {
       tableName: "<%= resource.tableName %>",
       idField: "<%= resource.idField %>",
-      label: "<%= resource.label %>",
+      label: t("<%= resource.i18nKey %>", "<%= resource.label %>"),
       aggregateRoute: "<%= resource.aggregateRoute %>",
       queryRoute: "<%= resource.queryRoute %>",
     },
@@ -161,14 +163,14 @@ export const <%= command.pageComponent %> = () => {
 
   return (
     <CreateView>
-      <CreateViewHeader title="<%= command.label %>" />
+      <CreateViewHeader title={t("<%= command.i18nKey %>", "<%= command.label %>")} />
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
 <% command.fields.forEach((field) => { -%>
 <% if (field.object && field.list) { -%>
           <div className="space-y-4 rounded-md border p-4">
             <div className="flex items-center justify-between gap-2">
-              <FormLabel><%= field.label %></FormLabel>
+              <FormLabel>{t("<%= field.i18nKey %>", "<%= field.label %>")}</FormLabel>
               <Button
                 type="button"
                 variant="outline"
@@ -181,7 +183,7 @@ export const <%= command.pageComponent %> = () => {
             {<%= field.fieldArrayName %>.fields.map((item, index) => (
               <div key={item.id} className="space-y-4 rounded-md border p-4">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="text-sm font-medium"><%= field.valueType.name %> {index + 1}</div>
+                  <div className="text-sm font-medium">{t("<%= field.i18nKey %>", "<%= field.label %>")} {index + 1}</div>
                   <Button
                     type="button"
                     variant="ghost"
@@ -197,7 +199,7 @@ export const <%= command.pageComponent %> = () => {
                   <ScalarArrayField
                     control={form.control}
                     name={`<%= field.name %>.${index}.<%= nestedField.name %>`}
-                    label="<%= nestedField.label %>"
+                    label={t("<%= nestedField.i18nKey %>", "<%= nestedField.label %>")}
                     inputType={<%- nestedField.inputType ? JSON.stringify(nestedField.inputType) : 'null' %>}
                     itemDefaultValue={<%- nestedField.scalarListItemDefaultValue %>}
                   />
@@ -208,7 +210,7 @@ export const <%= command.pageComponent %> = () => {
                     rules={<%- nestedField.rules %>}
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel><%= nestedField.label %></FormLabel>
+                        <FormLabel>{t("<%= nestedField.i18nKey %>", "<%= nestedField.label %>")}</FormLabel>
 <% if (nestedField.boolean) { -%>
                         <Select
                           value={field.value === undefined || field.value === null ? undefined : String(field.value)}
@@ -216,12 +218,12 @@ export const <%= command.pageComponent %> = () => {
                         >
                           <FormControl>
                             <SelectTrigger>
-                              <SelectValue placeholder="Select <%= nestedField.label %>" />
+                              <SelectValue placeholder={t("<%= nestedField.placeholderKey %>", "Select <%= nestedField.label %>")} />
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            <SelectItem value="true">True</SelectItem>
-                            <SelectItem value="false">False</SelectItem>
+                            <SelectItem value="true">{t("values.boolean.true", "True")}</SelectItem>
+                            <SelectItem value="false">{t("values.boolean.false", "False")}</SelectItem>
                           </SelectContent>
                         </Select>
 <% } else { -%>
@@ -232,7 +234,7 @@ export const <%= command.pageComponent %> = () => {
 <% } -%>
                             {...field}
                             value={field.value ?? ""}
-                            placeholder={<%- JSON.stringify(nestedField.placeholder) %>}
+                            placeholder={t("<%= nestedField.placeholderKey %>", <%- JSON.stringify(nestedField.placeholder) %>)}
 <% if (nestedField.rows) { -%>
                             rows={<%= nestedField.rows %>}
 <% } -%>
@@ -251,14 +253,14 @@ export const <%= command.pageComponent %> = () => {
           </div>
 <% } else if (field.object) { -%>
           <div className="space-y-4 rounded-md border p-4">
-            <FormLabel><%= field.label %></FormLabel>
+            <FormLabel>{t("<%= field.i18nKey %>", "<%= field.label %>")}</FormLabel>
             <div className="grid gap-4 md:grid-cols-2">
 <% field.nestedFields.forEach((nestedField) => { -%>
 <% if (nestedField.scalarList) { -%>
               <ScalarArrayField
                 control={form.control}
                 name="<%= field.name %>.<%= nestedField.name %>"
-                label="<%= nestedField.label %>"
+                label={t("<%= nestedField.i18nKey %>", "<%= nestedField.label %>")}
                 inputType={<%- nestedField.inputType ? JSON.stringify(nestedField.inputType) : 'null' %>}
                 itemDefaultValue={<%- nestedField.scalarListItemDefaultValue %>}
               />
@@ -269,7 +271,7 @@ export const <%= command.pageComponent %> = () => {
                 rules={<%- nestedField.rules %>}
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel><%= nestedField.label %></FormLabel>
+                    <FormLabel>{t("<%= nestedField.i18nKey %>", "<%= nestedField.label %>")}</FormLabel>
 <% if (nestedField.boolean) { -%>
                     <Select
                       value={field.value === undefined || field.value === null ? undefined : String(field.value)}
@@ -277,12 +279,12 @@ export const <%= command.pageComponent %> = () => {
                     >
                       <FormControl>
                         <SelectTrigger>
-                          <SelectValue placeholder="Select <%= nestedField.label %>" />
+                          <SelectValue placeholder={t("<%= nestedField.placeholderKey %>", "Select <%= nestedField.label %>")} />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="true">True</SelectItem>
-                        <SelectItem value="false">False</SelectItem>
+                        <SelectItem value="true">{t("values.boolean.true", "True")}</SelectItem>
+                        <SelectItem value="false">{t("values.boolean.false", "False")}</SelectItem>
                       </SelectContent>
                     </Select>
 <% } else { -%>
@@ -293,7 +295,7 @@ export const <%= command.pageComponent %> = () => {
 <% } -%>
                         {...field}
                         value={field.value ?? ""}
-                        placeholder={<%- JSON.stringify(nestedField.placeholder) %>}
+                        placeholder={t("<%= nestedField.placeholderKey %>", <%- JSON.stringify(nestedField.placeholder) %>)}
 <% if (nestedField.rows) { -%>
                         rows={<%= nestedField.rows %>}
 <% } -%>
@@ -312,7 +314,7 @@ export const <%= command.pageComponent %> = () => {
           <ScalarArrayField
             control={form.control}
             name="<%= field.name %>"
-            label="<%= field.label %>"
+            label={t("<%= field.i18nKey %>", "<%= field.label %>")}
             inputType={<%- field.inputType ? JSON.stringify(field.inputType) : 'null' %>}
             itemDefaultValue={<%- field.scalarListItemDefaultValue %>}
           />
@@ -323,7 +325,7 @@ export const <%= command.pageComponent %> = () => {
             rules={<%- field.rules %>}
             render={({ field }) => (
               <FormItem>
-                <FormLabel><%= field.label %></FormLabel>
+                <FormLabel>{t("<%= field.i18nKey %>", "<%= field.label %>")}</FormLabel>
 <% if (field.select) { -%>
                 <ResourceSelect
                   withFormControl
@@ -333,10 +335,10 @@ export const <%= command.pageComponent %> = () => {
                   optionValue="<%= field.select.optionValue %>"
                   value={field.value || ""}
                   onValueChange={field.onChange}
-                  placeholder="Select <%= field.label %>"
+                  placeholder={t("<%= field.placeholderKey %>", "Select <%= field.label %>")}
                   meta={{
                     idField: "<%= field.select.meta.idField %>",
-                    label: "<%= field.select.meta.label %>",
+                    label: t("<%= field.i18nKey %>", "<%= field.select.meta.label %>"),
                     aggregateRoute: "<%= field.select.meta.aggregateRoute %>",
                     queryRoute: "<%= field.select.meta.queryRoute %>",
                   }}
@@ -348,12 +350,12 @@ export const <%= command.pageComponent %> = () => {
                 >
                   <FormControl>
                     <SelectTrigger>
-                      <SelectValue placeholder="Select <%= field.label %>" />
+                      <SelectValue placeholder={t("<%= field.placeholderKey %>", "Select <%= field.label %>")} />
                     </SelectTrigger>
                   </FormControl>
                   <SelectContent>
-                    <SelectItem value="true">True</SelectItem>
-                    <SelectItem value="false">False</SelectItem>
+                    <SelectItem value="true">{t("values.boolean.true", "True")}</SelectItem>
+                    <SelectItem value="false">{t("values.boolean.false", "False")}</SelectItem>
                   </SelectContent>
                 </Select>
 <% } else { -%>
@@ -366,7 +368,7 @@ export const <%= command.pageComponent %> = () => {
 <% if (field.json) { -%>
                     value={typeof field.value === "string" ? field.value : JSON.stringify(field.value ?? <%- field.jsonEmptyValue %>, null, 2)}
                     onChange={(event) => field.onChange(event.target.value)}
-                    placeholder={<%- JSON.stringify(field.placeholder) %>}
+                    placeholder={t("<%= field.placeholderKey %>", <%- JSON.stringify(field.placeholder) %>)}
 <% } else { -%>
                     value={field.value || ""}
                     placeholder={<%- JSON.stringify(field.placeholder) %>}
@@ -389,14 +391,14 @@ export const <%= command.pageComponent %> = () => {
               {...form.saveButtonProps}
               disabled={form.formState.isSubmitting}
             >
-              {form.formState.isSubmitting ? "Submitting..." : "Submit"}
+              {form.formState.isSubmitting ? t("buttons.submitting", "Submitting...") : t("buttons.submit", "Submit")}
             </Button>
             <Button
               type="button"
               variant="outline"
               onClick={() => navigate(-1)}
             >
-              Cancel
+              {t("buttons.cancel", "Cancel")}
             </Button>
           </div>
         </form>

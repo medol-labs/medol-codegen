@@ -7,6 +7,7 @@ import routerProvider, {
   UnsavedChangesNotifier
 } from "@refinedev/react-router";
 import { liveProvider } from "@refinedev/supabase";
+import { useEffect, useState } from "react";
 import { BrowserRouter } from "react-router";
 import { Toaster } from "./components/refine-ui/notification/toaster";
 import { useNotificationProvider } from "./components/refine-ui/notification/use-notification-provider";
@@ -15,18 +16,39 @@ import { AppRouter } from "./providers/app-router";
 import authProvider from "./providers/mock-auth";
 import { commandProvider } from "./providers/command-provider";
 import { dataProvider } from "./providers/data";
+import {
+  getCurrentLocale,
+  getPersistedLocale,
+  i18nProvider,
+  LOCALE_CHANGE_EVENT
+} from "./providers/i18n";
 import { resources } from "./providers/resources";
 import { supabaseClient } from "./providers/supabase-client";
 
 import "./App.css";
 
 function App() {
+  const [localeVersion, setLocaleVersion] = useState(0);
+
+  useEffect(() => {
+    const handleLocaleChange = () => setLocaleVersion((version) => version + 1);
+
+    window.addEventListener(LOCALE_CHANGE_EVENT, handleLocaleChange);
+    const persistedLocale = getPersistedLocale();
+    if (persistedLocale && persistedLocale !== getCurrentLocale()) {
+      void i18nProvider.changeLocale(persistedLocale);
+    }
+
+    return () => window.removeEventListener(LOCALE_CHANGE_EVENT, handleLocaleChange);
+  }, []);
+
   return (
     <BrowserRouter>
       <RefineKbarProvider>
         <ThemeProvider>
           <DevtoolsProvider>
             <Refine
+              key={localeVersion}
               dataProvider={{
                 default: dataProvider,
                 command: commandProvider,
@@ -35,6 +57,7 @@ function App() {
               authProvider={authProvider}
               routerProvider={routerProvider}
               notificationProvider={useNotificationProvider()}
+              i18nProvider={i18nProvider}
               resources={resources}
               options={{
                 syncWithLocation: true,

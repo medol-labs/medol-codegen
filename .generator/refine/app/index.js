@@ -68,7 +68,9 @@ module.exports = class extends Generator {
 
         if (this.answers.generatorType === 'Skeleton') {
             this._writeSkeleton();
+            const model = buildFrontendModel(codegenModel);
             this._writeDomainModel(buildDomainModel(codegenModel));
+            this._writeI18n(model.i18n);
             return;
         }
 
@@ -77,6 +79,7 @@ module.exports = class extends Generator {
             : normalizeSelectedCommands(this.answers.commands);
         const model = buildFrontendModel(codegenModel, selectedCommandKeys);
         this._writeDomainModel(buildDomainModel(codegenModel));
+        this._writeI18n(model.i18n);
 
         if (this.answers.generatorType === 'all' || this.answers.generatorType === 'resources') {
             this._writeResources(model);
@@ -174,6 +177,14 @@ module.exports = class extends Generator {
         );
     }
 
+    _writeI18n(model) {
+        this.fs.copyTpl(
+            this.templatePath('src/i18n/messages.ts.tpl'),
+            this.destinationPath('./src/i18n/messages.ts'),
+            model
+        );
+    }
+
     _writeSkeleton() {
         this.fs.copyTpl(
             this.templatePath('root'),
@@ -202,7 +213,7 @@ function buildFrontendModel(source, selectedCommandKeys) {
     const allEvents = slices.flatMap((slice) => slice.events ?? []);
     const selected = selectedCommandKeys ? new Set(selectedCommandKeys) : null;
     const workflow = buildWorkflowModel(slices, allAggregates, allContexts, selected);
-    const resources = uniqueResourceNames(slices
+    const resources = withResourceI18n(uniqueResourceNames(slices
         .flatMap((slice) => (slice.readmodels ?? [])
             .filter((readModel) => readModel?.title && readModel.listElement)
             .map((readModel) => toReadModelResource({
@@ -212,13 +223,15 @@ function buildFrontendModel(source, selectedCommandKeys) {
                 producerCommandKeys: workflow.producerCommandKeys(readModel),
                 itemCommandKeys: workflow.itemCommandKeys(readModel)
             }, readModel, allEvents, workflow)))
-        .filter(Boolean));
-    const chapters = uniqueChapters(resources.map((resource) => resource.chapter).filter(Boolean));
+        .filter(Boolean)));
+    const chapters = withChapterI18n(uniqueChapters(resources.map((resource) => resource.chapter).filter(Boolean)));
+    const i18n = buildI18nModel(source, chapters, resources);
 
     return {
         appName: source.domain ?? 'Event Sourcing App',
         chapters,
-        resources: resources.sort((a, b) => a.route.localeCompare(b.route))
+        resources: resources.sort((a, b) => a.route.localeCompare(b.route)),
+        i18n
     };
 }
 
@@ -507,6 +520,55 @@ function uniqueResourceNames(resources) {
     });
 }
 
+function withChapterI18n(chapters) {
+    return chapters.map((chapter) => ({
+        ...chapter,
+        i18nKey: `chapters.${chapter.name}.label`
+    }));
+}
+
+function withResourceI18n(resources) {
+    return resources.map((resource) => {
+        const resourceKey = `resources.${resource.name}`;
+        const withCommand = (command) => command ? withCommandI18n(command, resourceKey) : command;
+        return {
+            ...resource,
+            i18nKey: `${resourceKey}.label`,
+            fields: resource.fields.map((field) => ({
+                ...field,
+                i18nKey: `${resourceKey}.fields.${field.name}.label`
+            })),
+            createCommand: withCommand(resource.createCommand),
+            editCommand: withCommand(resource.editCommand),
+            deleteCommand: withCommand(resource.deleteCommand),
+            commands: resource.commands.map(withCommand),
+            routedCommands: resource.routedCommands.map(withCommand),
+            itemCommands: resource.itemCommands.map(withCommand)
+        };
+    });
+}
+
+function withCommandI18n(command, resourceKey) {
+    const commandKey = `${resourceKey}.commands.${command.name}`;
+    return {
+        ...command,
+        i18nKey: `${commandKey}.label`,
+        fields: command.fields.map((field) => withFieldI18n(field, `${commandKey}.fields.${field.name}`)),
+        prefillFields: command.prefillFields.map((field) => withFieldI18n(field, `${commandKey}.fields.${field.name}`)),
+        workflowPrefillFields: command.workflowPrefillFields.map((field) => withFieldI18n(field, `${commandKey}.fields.${field.name}`))
+    };
+}
+
+function withFieldI18n(field, fieldKey) {
+    return {
+        ...field,
+        i18nKey: `${fieldKey}.label`,
+        placeholderKey: `${fieldKey}.placeholder`,
+        requiredKey: `${fieldKey}.required`,
+        nestedFields: (field.nestedFields ?? []).map((nestedField) => withFieldI18n(nestedField, `${fieldKey}.fields.${nestedField.name}`))
+    };
+}
+
 function withResourceComponent(command, resourceComponent) {
     if (!command) {
         return command;
@@ -695,6 +757,87 @@ function uniqueChapters(chapters) {
     return Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
 
+function buildI18nModel(source, chapters, resources) {
+    const entries = [
+        ['resources.dashboard.label', 'Dashboard'],
+        ['buttons.submit', 'Submit'],
+        ['buttons.submitting', 'Submitting...'],
+        ['buttons.cancel', 'Cancel'],
+        ['buttons.add', 'Add'],
+        ['table.actions', 'Actions'],
+        ['table.selectAll', 'Select all'],
+        ['table.selectRow', 'Select row'],
+        ['table.sort.asc', 'Asc'],
+        ['table.sort.desc', 'Desc'],
+        ['table.sort.reset', 'Reset'],
+        ['table.column.hide', 'Hide'],
+        ['values.boolean.true', 'True'],
+        ['values.boolean.false', 'False']
+    ];
+
+    chapters.forEach((chapter) => {
+        entries.push([chapter.i18nKey, chapter.label]);
+    });
+
+    resources.forEach((resource) => {
+        entries.push([resource.i18nKey, resource.label]);
+        resource.fields.forEach((field) => addFieldI18nEntries(entries, field));
+        resource.commands.forEach((command) => {
+            entries.push([command.i18nKey, command.label]);
+            command.fields.forEach((field) => addFieldI18nEntries(entries, field));
+        });
+    });
+
+    const translations = normalizeTranslations(source.translations ?? source.i18n?.translations ?? {});
+    const defaultLocale = source.defaultLocale ?? source.i18n?.defaultLocale ?? 'en';
+    const locales = unique(['en', defaultLocale, ...(source.locales ?? source.i18n?.locales ?? []), ...Object.keys(translations)]);
+    const messages = Object.fromEntries(locales.map((locale) => [locale, {}]));
+
+    entries.forEach(([key, defaultValue]) => {
+        messages.en[key] = defaultValue;
+        locales
+            .filter((locale) => locale !== 'en')
+            .forEach((locale) => {
+                messages[locale][key] = translations[locale]?.[key]
+                    ?? translations[locale]?.[defaultValue]
+                    ?? defaultValue;
+            });
+    });
+
+    return {
+        locales,
+        defaultLocale,
+        messages: Object.fromEntries(Object.entries(messages).map(([locale, values]) => [
+            locale,
+            Object.fromEntries(Object.entries(values).sort(([left], [right]) => left.localeCompare(right)))
+        ]))
+    };
+}
+
+function addFieldI18nEntries(entries, field) {
+    entries.push([field.i18nKey, field.label]);
+    entries.push([field.placeholderKey, field.placeholder]);
+    entries.push([field.requiredKey, `${field.label} is required`]);
+    (field.nestedFields ?? []).forEach((nestedField) => addFieldI18nEntries(entries, nestedField));
+}
+
+function normalizeTranslations(translations) {
+    if (Array.isArray(translations)) {
+        return translations.reduce((acc, item) => {
+            const locale = item.locale ?? item.language;
+            const key = item.key ?? item.i18nKey;
+            const value = item.value ?? item.text ?? item.translation;
+            if (!locale || !key || value === undefined) {
+                return acc;
+            }
+            acc[locale] = acc[locale] ?? {};
+            acc[locale][key] = String(value);
+            return acc;
+        }, {});
+    }
+    return translations;
+}
+
 function uniqueElements(elements) {
     const byId = new Map();
     elements.filter(Boolean).forEach((element) => {
@@ -704,6 +847,10 @@ function uniqueElements(elements) {
         }
     });
     return Array.from(byId.values());
+}
+
+function unique(values) {
+    return Array.from(new Set(values.filter(Boolean)));
 }
 
 function uniqueFields(fields) {

@@ -9,6 +9,7 @@ container_name="${CODEGEN_CONTAINER_NAME:-codegen}"
 generator_path="/opt/codegen/.generator/app/"
 output_root="${CODEGEN_OUTPUT_ROOT:-generated}"
 model_path="${CODEGEN_MODEL_PATH:-$script_dir/codegen-model.json}"
+translations_path="${CODEGEN_TRANSLATIONS_PATH:-}"
 axon_workspace="$script_dir/$output_root/axon"
 axon5_workspace="$script_dir/$output_root/axon5"
 refine_workspace="$script_dir/$output_root/refine"
@@ -51,6 +52,13 @@ prepare_workspace() {
   local workspace="$1"
   mkdir -p "$workspace"
   cp "$model_path" "$workspace/codegen-model.json"
+  if [[ -n "$translations_path" ]]; then
+    if [[ ! -f "$translations_path" ]]; then
+      echo "Translations file was not found: $translations_path" >&2
+      exit 1
+    fi
+    cp "$translations_path" "$workspace/translations.json"
+  fi
 }
 
 run_gen() {

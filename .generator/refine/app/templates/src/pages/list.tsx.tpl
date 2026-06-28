@@ -1,5 +1,6 @@
 // Generated from config.json by the refine generator.
 import { useTable } from "@refinedev/react-table";
+import { useTranslate } from "@refinedev/core";
 import { createColumnHelper } from "@tanstack/react-table";
 import React from "react";
 
@@ -28,6 +29,7 @@ type <%= resource.component %>Record = {
 };
 
 export const <%= resource.component %>List = () => {
+  const t = useTranslate();
   const columns = React.useMemo(() => {
     const columnHelper = createColumnHelper<<%= resource.component %>Record>();
     return [
@@ -37,14 +39,14 @@ export const <%= resource.component %>List = () => {
           <Checkbox
             checked={table.getIsAllPageRowsSelected() || (table.getIsSomePageRowsSelected() && "indeterminate")}
             onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-            aria-label="Select all"
+            aria-label={t("table.selectAll", "Select all")}
           />
         ),
         cell: ({ row }) => (
           <Checkbox
             checked={row.getIsSelected()}
             onCheckedChange={(value) => row.toggleSelected(!!value)}
-            aria-label="Select row"
+            aria-label={t("table.selectRow", "Select row")}
           />
         ),
         size: 32,
@@ -55,7 +57,7 @@ export const <%= resource.component %>List = () => {
       columnHelper.accessor("<%= field.name %>", {
         id: "<%= field.name %>",
         header: ({ column }) => (
-          <DataTableColumnHeader column={column} label="<%= field.label %>" />
+          <DataTableColumnHeader column={column} label={t("<%= field.i18nKey %>", "<%= field.label %>")} />
         ),
         enableSorting: true,
         enableColumnFilter: <%= field.filterable ? "true" : "false" %>,
@@ -64,7 +66,7 @@ export const <%= resource.component %>List = () => {
 <% }) -%>
       columnHelper.display({
         id: "actions",
-        header: "Actions",
+        header: t("table.actions", "Actions"),
         cell: ({ row }) => (
           <div className="flex gap-2">
 <% if (resource.deleteCommand) { -%>
@@ -122,7 +124,7 @@ export const <%= resource.component %>List = () => {
         size: 32,
       }),
     ];
-  }, []);
+  }, [t]);
 
   const table = useTable({
     columns,
@@ -136,7 +138,7 @@ export const <%= resource.component %>List = () => {
         tableName: "<%= resource.tableName %>",
         idField: "<%= resource.idField %>",
         idFields: <%- JSON.stringify(resource.idFields) %>,
-        label: "<%= resource.label %>",
+        label: t("<%= resource.i18nKey %>", "<%= resource.label %>"),
         aggregateRoute: "<%= resource.aggregateRoute %>",
         queryRoute: "<%= resource.queryRoute %>",
       },

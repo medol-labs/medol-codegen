@@ -1,0 +1,11 @@
+{
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "ralph": "bash ./ralph.sh",
+    "sync:planned": "node ./sync-planned-slices.js",
+    "agent:codex": "node ./ralph-codex.js",
+    "agent:claude": "node ./ralph-claude.js",
+    "agent:opencode": "node ./ralph-opencode.js"
+  }
+}

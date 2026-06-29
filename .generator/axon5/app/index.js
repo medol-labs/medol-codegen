@@ -92,6 +92,12 @@ module.exports = class extends Generator {
         this._writeValueTypes();
         this._writeConceptStates();
         this._writeConceptCatalog();
+        this._writeAgentSkills();
+    }
+
+    _writeAgentSkills() {
+        const agentTemplates = path.resolve(__dirname, '../../common/agent-templates');
+        this.fs.copy(agentTemplates, this.destinationPath('.agent'));
     }
 
     _copyMavenWrapper() {

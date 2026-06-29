@@ -167,6 +167,72 @@ example/generated/axon5
 example/generated/refine
 ```
 
+Skeleton generation also writes a runtime-neutral agent kit into the generated
+project:
+
+```text
+.agent/
+  README.md
+  ralph.sh
+  ralph-codex.js
+  ralph-claude.js
+  ralph-opencode.js
+  sync-planned-slices.js
+  tasks.json
+  lib/
+    ralph-runtime.js
+  skills/
+    medol-generated-code/
+    load-medol-context/
+    sync-planned-slices/
+    run-codegen/
+    build-slice/
+    axon5-backend/
+      build-state-change/
+      build-read-model/
+      build-automation/
+    refine-frontend/
+    build-refine-resource/
+    fix-generation-error/
+    update-task-status/
+```
+
+These files are modeled after the Eventmodelers build-kit pattern of shipping
+project-local agent guidance plus a small Ralph task loop, but they are not tied
+to Claude Code. Codex, Claude Code, OpenCode, or another programming agent can
+read `.agent/skills` before extending the generated code.
+
+Add queued tasks to `.agent/tasks.json`, then run one iteration:
+
+```bash
+node .agent/ralph-codex.js
+```
+
+Or run the local loop:
+
+```bash
+bash .agent/ralph.sh
+```
+
+Set `RALPH_RUNTIME=claude` or `RALPH_RUNTIME=opencode`, or provide
+`AGENT_COMMAND` to connect a different local programming agent. For OpenCode,
+use `AGENT_COMMAND` because command-line flags vary by installation. If no
+runtime is available, Ralph writes the prepared prompt into `.agent/out/` and
+marks the task as `needs-runtime`.
+
+To consume slice implementation status stored by MEDOL, sync planned slices into
+Ralph tasks:
+
+```bash
+MEDOL_WORKSPACE_ID=<workspace-id> node .agent/sync-planned-slices.js
+```
+
+Or sync before each Ralph loop iteration:
+
+```bash
+RALPH_SYNC_PLANNED=1 MEDOL_WORKSPACE_ID=<workspace-id> bash .agent/ralph.sh
+```
+
 To jump directly into a target:
 
 ```bash

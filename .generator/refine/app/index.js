@@ -4,6 +4,7 @@
  */
 
 var Generator = require('yeoman-generator').default;
+var path = require('path');
 var slugify = require('slugify');
 const {loadGeneratorModel} = require("../../common/core/config-loader");
 
@@ -202,6 +203,12 @@ module.exports = class extends Generator {
                 }
             );
         });
+        this._writeAgentSkills();
+    }
+
+    _writeAgentSkills() {
+        const agentTemplates = path.resolve(__dirname, '../../common/agent-templates');
+        this.fs.copy(agentTemplates, this.destinationPath('.agent'));
     }
 };
 

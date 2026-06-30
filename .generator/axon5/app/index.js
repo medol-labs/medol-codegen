@@ -262,18 +262,26 @@ ${properties}
 
     _writeState(packageName, context, slicePackage, slice, selection, events, overrideStateName, childTransitions = []) {
         const stateName = overrideStateName ?? `${pascal(slice.name)}State`;
+        const concept = primaryConcept(slice);
         const childTransitionByEventId = new Map(childTransitions.map((transition) => [transition.eventId, transition]));
+        const transitionByEventId = new Map((this.model.transitions ?? [])
+            .filter((transition) => transition.owner?.name === concept)
+            .filter((transition) => transition.event?.id)
+            .map((transition) => [transition.event.id, transition]));
         const hasChildMemberState = childTransitions.length > 0;
         const fields = uniqueFields(events.flatMap((event) => event.fields))
             .filter((field) => !(hasChildMemberState && field.name === 'organizationId'));
         const imports = typeImports(fields);
         const stateFields = [
+            ...(concept ? [`    var currentState: ${concept}State? = null\n        private set`] : []),
             ...fields.map((field) => `    private var ${field.name}: ${stateFieldType(field)} = ${stateFieldDefault(field)}`),
             ...(hasChildMemberState ? ['    private val members: MutableMap<UUID, String> = mutableMapOf()'] : [])
         ].join('\n');
         const sourcingHandlers = events.map((event) => {
             const transition = childTransitionByEventId.get(event.id);
+            const stateTransition = transitionByEventId.get(event.id);
             const assignments = [
+                ...(concept && stateTransition ? [`        currentState = ${concept}State.${constant(stateTransition.to)}`] : []),
                 ...event.fields
                     .filter((field) => !(transition && field.name === 'organizationId'))
                     .map((field) => `        ${field.name} = event.${field.name}`),
@@ -282,6 +290,7 @@ ${properties}
             return `    @EventSourcingHandler\n    fun evolve(event: ${_eventTitle(event.title)}): ${stateName} = apply {\n${assignments}\n    }`;
         }).join('\n\n');
         const eventImports = events.map((event) => `import ${this._eventPackage(event, slice)}.${_eventTitle(event.title)}`).join('\n');
+        const stateImport = concept ? `import ${this.model.rootPackage}.${contextPackage(slice.context)}.domain.states.${concept}State\n` : '';
         const criteria = selection.fields
             .map((field) => `Tag.of("${escapeKotlin(field.tag.name)}", selection.${field.alias}.toString())`)
             .join(',\n                ');
@@ -294,6 +303,7 @@ import org.axonframework.extension.spring.stereotype.EventSourced
 import org.axonframework.messaging.eventstreaming.EventCriteria
 import org.axonframework.messaging.eventstreaming.Tag
 ${eventImports}
+${stateImport}
 ${imports}
 
 @EventSourced(idType = ${selection.name}::class)
@@ -319,17 +329,24 @@ ${sourcingHandlers}
         const handlers = slice.commands.map((command) => {
             const commandName = _commandTitle(command.title);
             const outputs = outboundEvents(command, events);
+            const transition = transitionForCommand(this.model, command);
+            const guard = renderStateGuard(transition);
             const appendStatement = outputs.length > 0
                 ? `eventAppender.append(\n${outputs.map((event) => `            ${_eventTitle(event.title)}(${eventArguments(event, command)})`).join(',\n')}\n        )`
                 : '// TODO: append the event produced by this command.';
             if (command.startsLifecycle) {
                 return `    @CommandHandler\n    fun handle(command: ${commandName}, eventAppender: EventAppender) {\n        ${appendStatement}\n    }`;
             }
-            return `    @CommandHandler\n    fun handle(command: ${commandName}, @InjectEntity state: ${stateName}, eventAppender: EventAppender) {\n        // TODO: validate domain rules against state before appending events.\n        ${appendStatement}\n    }`;
+            return `    @CommandHandler\n    fun handle(command: ${commandName}, @InjectEntity state: ${stateName}, eventAppender: EventAppender) {\n${guard}\n        ${appendStatement}\n    }`;
         }).join('\n\n');
         const commandImports = slice.commands.map((command) => `import ${packageName}.${_commandTitle(command.title)}`).join('\n');
         const eventImports = events.map((event) => `import ${this._eventPackage(event, slice)}.${_eventTitle(event.title)}`).join('\n');
         const stateImport = stateTarget.packageName === packageName ? '' : `import ${stateTarget.packageName}.${stateName}\n`;
+        const stateEnumImports = uniqueBy(slice.commands
+            .map((command) => transitionForCommand(this.model, command))
+            .filter((transition) => transition?.from && transition.owner?.type === 'concept')
+            .map((transition) => `import ${this.model.rootPackage}.${contextPackage(transition.context ?? slice.context)}.domain.states.${transition.owner.name}State`), (value) => value)
+            .join('\n');
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${pascal(slice.name)}CommandHandler.kt`), `package ${packageName}
 
 import org.axonframework.messaging.commandhandling.annotation.CommandHandler
@@ -339,6 +356,7 @@ import org.springframework.stereotype.Component
 ${commandImports}
 ${eventImports}
 ${stateImport}
+${stateEnumImports}
 
 @Component
 class ${pascal(slice.name)}CommandHandler {
@@ -791,6 +809,24 @@ function outboundEvents(command, events) {
         .map((dependency) => dependency.id));
     const selected = events.filter((event) => ids.has(event.id));
     return selected.length > 0 ? selected : events.slice(0, 1);
+}
+
+function transitionForCommand(model, command) {
+    return (model.transitions ?? []).find((transition) =>
+        transition.command?.id === command.id || transition.command?.name === command.name
+    );
+}
+
+function renderStateGuard(transition) {
+    if (!transition?.from || transition.owner?.type !== 'concept') {
+        return '        // TODO: validate domain rules against state before appending events.';
+    }
+    const stateType = `${transition.owner.name}State`;
+    return [
+        `        require(state.currentState == ${stateType}.${constant(transition.from)}) {`,
+        `            "${escapeKotlin(transition.command?.name ?? 'Command')} requires ${escapeKotlin(transition.owner.name)} to be ${escapeKotlin(transition.from)}."`,
+        '        }'
+    ].join('\n');
 }
 
 function eventArguments(event, command) {

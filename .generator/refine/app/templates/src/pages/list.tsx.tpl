@@ -75,6 +75,9 @@ export const <%= resource.component %>List = () => {
               command="<%= resource.deleteCommand.name %>"
               recordItemId={row.original.<%= resource.idField %>}
               size="sm"
+<% if (resource.deleteCommand.enabledField) { -%>
+              disabled={row.original.<%= resource.deleteCommand.enabledField %> === false}
+<% } -%>
 <% if (resource.deleteCommand.prefillFields.length > 0) { -%>
               query={{
 <% resource.deleteCommand.prefillFields.forEach((field) => { -%>
@@ -103,6 +106,9 @@ export const <%= resource.component %>List = () => {
                     command="<%= command.name %>"
                     recordItemId={row.original.<%= resource.idField %>}
                     size="sm"
+<% if (command.enabledField) { -%>
+                    disabled={row.original.<%= command.enabledField %> === false}
+<% } -%>
 <% if (command.prefillFields.length > 0) { -%>
                     query={{
 <% command.prefillFields.forEach((field) => { -%>

@@ -45,16 +45,17 @@ export const resources: IResourceItem[] = [
       tableName: "<%= resource.tableName %>",
       idField: "<%= resource.idField %>",
       idFields: <%- JSON.stringify(resource.idFields) %>,
+      actionControls: <%- JSON.stringify(resource.actionControls) %>,
       aggregateRoute: "<%= resource.aggregateRoute %>",
       queryRoute: "<%= resource.queryRoute %>",
 <% if (resource.commands.length > 0) { -%>
       commandRoute: "/<%= resource.route %>/:id/command/:command",
       commands: {
 <% if (resource.createCommand) { -%>
-        <%= resource.createCommand.name %>: { label: "<%= resource.createCommand.label %>", i18nKey: "<%= resource.createCommand.i18nKey %>", route: "/<%= resource.route %>/command/<%= resource.createCommand.route %>" },
+        <%= resource.createCommand.name %>: { label: "<%= resource.createCommand.label %>", i18nKey: "<%= resource.createCommand.i18nKey %>", route: "/<%= resource.route %>/command/<%= resource.createCommand.route %>"<% if (resource.createCommand.enabledField) { %>, enabledField: "<%= resource.createCommand.enabledField %>"<% } %> },
 <% } -%>
 <% resource.routedCommands.forEach((command) => { -%>
-        <%= command.name %>: { label: "<%= command.label %>", i18nKey: "<%= command.i18nKey %>", route: "/<%= resource.route %>/:id/command/<%= command.route %>" },
+        <%= command.name %>: { label: "<%= command.label %>", i18nKey: "<%= command.i18nKey %>", route: "/<%= resource.route %>/:id/command/<%= command.route %>"<% if (command.enabledField) { %>, enabledField: "<%= command.enabledField %>"<% } %> },
 <% }) -%>
       },
 <% } -%>

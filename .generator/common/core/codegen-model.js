@@ -10,6 +10,7 @@ function fromConfig(config = {}) {
     const aggregates = normalizeAggregates(config, contexts, valueTypes);
     const actors = normalizeActors(config);
     const slices = normalizeSlices(config, aggregates, contexts, actors, valueTypes);
+    const transitions = normalizeTransitions(config.transitions ?? [], slices, concepts, aggregates);
 
     return {
         rootPackage: config.codeGen?.rootPackage ?? 'tech.medo',
@@ -22,6 +23,7 @@ function fromConfig(config = {}) {
         concepts,
         valueTypes,
         aggregates,
+        transitions,
         actors,
         slices,
         source: {
@@ -38,6 +40,7 @@ function fromCodegenModel(model = {}) {
     const aggregates = normalizeAggregates(model, contexts, valueTypes);
     const actors = normalizeActors(model);
     const slices = normalizeSlices(model, aggregates, contexts, actors, valueTypes);
+    const transitions = normalizeTransitions(model.transitions ?? [], slices, concepts, aggregates);
 
     return {
         rootPackage: model.rootPackage ?? 'tech.medo',
@@ -50,6 +53,7 @@ function fromCodegenModel(model = {}) {
         concepts,
         valueTypes,
         aggregates,
+        transitions,
         actors,
         slices,
         source: {
@@ -66,6 +70,7 @@ function toGeneratorConfig(model, source = {}) {
         valueTypes: model.valueTypes,
         concepts: model.concepts,
         aggregates: model.aggregates,
+        transitions: model.transitions,
         actors: model.actors,
         ...(model.i18n ? { i18n: model.i18n } : {}),
         ...(model.translations ? { translations: model.translations } : {}),
@@ -303,6 +308,37 @@ function normalizeSlices(config, aggregates, contexts, actors, valueTypes) {
             actors: slice.actors ?? [],
             hotspots: slice.hotspots ?? [],
             ...(slice.stateChange ? { stateChange: slice.stateChange } : {})
+        };
+    });
+}
+
+function normalizeTransitions(transitions = [], slices = [], concepts = [], aggregates = []) {
+    const conceptsByName = new Map(concepts.map((concept) => [concept.name, concept]));
+    const aggregatesByName = new Map(aggregates.map((aggregate) => [aggregate.name, aggregate]));
+    const slicesById = new Map(slices.map((slice) => [slice.id, slice]));
+    const slicesByName = new Map(slices.map((slice) => [slice.name, slice]));
+
+    return transitions.map((transition, index) => {
+        const slice = transition.slice?.id
+            ? slicesById.get(transition.slice.id)
+            : slicesByName.get(transition.slice?.name);
+        const ownerName = transition.owner?.name ?? transition.concept ?? transition.aggregate;
+        const ownerType = transition.owner?.type ?? (conceptsByName.has(ownerName) ? 'concept' : 'aggregate');
+        const owner = ownerType === 'concept'
+            ? conceptsByName.get(ownerName)
+            : aggregatesByName.get(ownerName);
+        return {
+            ...transition,
+            id: transition.id ?? stableId('transition', `${ownerName ?? 'owner'}/${slice?.name ?? index}`),
+            context: transition.context ?? slice?.context ?? owner?.context,
+            owner: {
+                id: transition.owner?.id ?? owner?.id ?? stableId(ownerType, ownerName ?? index),
+                type: ownerType,
+                name: ownerName,
+                title: transition.owner?.title ?? owner?.title ?? humanize(ownerName)
+            },
+            slice: transition.slice ?? (slice ? {id: slice.id, name: slice.name, title: slice.title} : undefined),
+            startsLifecycle: Boolean(transition.startsLifecycle)
         };
     });
 }

@@ -77,6 +77,13 @@ The top-level generator supports three targets:
 - `axon5` for the Axon Framework 5 backend generated directly from CodegenModel
 - `refine` for the React refine frontend foundation
 
+When `codegen-model.json` contains lifecycle `transitions`, the Axon 5 generator
+uses them to generate command state guards for transitions with an inferred
+`from` state. Read-model fields such as `canSubmit`, `canPause`,
+`availableActions`, and `blockedReason` are preserved by the Refine generator as
+resource action-control metadata and row command buttons are disabled when a
+matching `canXxx` field is false.
+
 For the frontend target, run `gen`, choose `refine`, then choose:
 
 - `Skeleton` to copy the React refine/shadcn frontend foundation into the current workspace

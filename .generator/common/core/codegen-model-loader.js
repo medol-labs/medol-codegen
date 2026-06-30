@@ -34,6 +34,7 @@ function loadCodegenModel(cwd) {
                     context: concept.context ?? context.name
                 }))
             ),
+        transitions: array(raw.transitions),
         actors: array(raw.actors),
         slices: raw.slices.map((slice, index) => ({
             ...slice,

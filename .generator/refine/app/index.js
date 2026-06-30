@@ -444,6 +444,7 @@ function toReadModelResource(group, readModel, allEvents, workflow) {
         .filter((command) => command?.title)
         .map((command) => toCommand(command, route, component, readModel, allEvents, workflow));
     normalizedCommands = withPrefillFields(normalizedCommands, queryFields);
+    normalizedCommands = withActionControlFields(normalizedCommands, queryFields);
     const producerCommandKeys = group.producerCommandKeys ?? new Set();
     const itemCommandKeys = group.itemCommandKeys ?? new Set();
     const producerCommands = normalizedCommands.filter((command) => producerCommandKeys.has(command.id));
@@ -479,6 +480,7 @@ function toReadModelResource(group, readModel, allEvents, workflow) {
         readModelId: readModel?.id,
         canList: readModel ? !!readModel.listElement : true,
         fields,
+        actionControls: actionControls(queryFields),
         valueTypeImports: Array.from(new Set(fields.map((field) => field.valueType?.name).filter(Boolean))).sort(),
         createCommand,
         editCommand,
@@ -641,6 +643,47 @@ function withPrefillFields(commands, resourceFields) {
         ]),
         hasSelectFields: command.fields.some((field) => field.select)
     }));
+}
+
+function withActionControlFields(commands, resourceFields) {
+    return commands.map((command) => ({
+        ...command,
+        enabledField: findActionControlField(command, resourceFields)
+    }));
+}
+
+function findActionControlField(command, resourceFields) {
+    const fields = new Set(resourceFields.map((field) => field.name));
+    const candidates = unique([
+        `can${pascal(command.title)}`,
+        `can${pascal(command.name)}`,
+        ...verbActionCandidates(command.title),
+        ...verbActionCandidates(command.name),
+        ...verbObjectActionCandidates(command.title),
+        ...verbObjectActionCandidates(command.name)
+    ]);
+    return candidates.find((candidate) => fields.has(candidate));
+}
+
+function verbActionCandidates(value) {
+    const words = titleCase(value).split(/\s+/).filter(Boolean);
+    return words.length > 0 ? [`can${pascal(words[0])}`] : [];
+}
+
+function verbObjectActionCandidates(value) {
+    const words = titleCase(value).split(/\s+/).filter(Boolean);
+    if (words.length < 2) {
+        return [];
+    }
+    return [`can${pascal(words[0])}${pascal(words[words.length - 1])}`];
+}
+
+function actionControls(fields) {
+    return {
+        availableActionsField: fields.find((field) => field.name === 'availableActions')?.name,
+        blockedReasonField: fields.find((field) => field.name === 'blockedReason')?.name,
+        enabledFields: fields.filter((field) => /^can[A-Z]/.test(field.name)).map((field) => field.name)
+    };
 }
 
 function buildCommandChoices(source) {

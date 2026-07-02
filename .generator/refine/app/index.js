@@ -15,7 +15,11 @@ module.exports = class extends Generator {
 
     constructor(args, opts) {
         super(args, opts);
-        this.opts = opts ?? {};
+        this.opts = { ...(opts ?? {}), skipInstall: true };
+        this.options.skipInstall = true;
+        if (this.env?.options) {
+            this.env.options.skipInstall = true;
+        }
         this.argument('appname', { type: String, required: false });
 
         const loaded = loadGeneratorModel(this.env.cwd);

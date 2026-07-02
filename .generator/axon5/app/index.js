@@ -5,7 +5,6 @@
 
 const Generator = require('yeoman-generator').default;
 const path = require('path');
-const slugify = require('slugify');
 const {loadCodegenModel} = require('../../common/core/codegen-model-loader');
 const {configureValueTypes, typeMapping, typeImports} = require('../../common/util/generator');
 const {contextPackage, resolvedBaseType, resolvedConstraints} = require('../../common/util/value-types');
@@ -16,6 +15,7 @@ module.exports = class extends Generator {
         super(args, opts);
         this.opts = opts ?? {};
         this.model = loadCodegenModel(this.env.cwd);
+        this.modulePrefix = '';
         configureValueTypes(this.model.valueTypes, this.model.rootPackage, this.model.concepts);
     }
 
@@ -47,20 +47,80 @@ module.exports = class extends Generator {
     writing() {
         const type = this.answers.generatorType;
         if (type === 'Skeleton' || type === 'all') {
-            this._writeSkeleton();
+            if (this._isMonoMode()) {
+                this._writeMonoSkeleton();
+            } else {
+                this._writeSkeleton();
+            }
         }
         if (type === 'slices' || type === 'all') {
-            const selected = this.answers.sliceNames ?? this.model.slices.map((slice) => slice.title);
-            const selectedSlices = this.model.slices.filter((slice) => selected.includes(slice.title));
-            selectedSlices.forEach((slice) => this._writeSlice(slice));
-            this._writeConceptEntityStates(selectedSlices);
+            if (this._isMonoMode()) {
+                this._writeMonoSlices();
+            } else {
+                const selected = this.answers.sliceNames ?? this.model.slices.map((slice) => slice.title);
+                const selectedSlices = this.model.slices.filter((slice) => selected.includes(slice.title));
+                selectedSlices.forEach((slice) => this._writeSlice(slice));
+                this._writeConceptEntityStates(selectedSlices);
+            }
         }
     }
 
+    _isMonoMode() {
+        return !process.env.CODEGEN_DEPLOYMENT && (this.model.deployments ?? []).length > 1;
+    }
+
+    _writeMonoSkeleton() {
+        const deployments = this.model.deployments ?? [];
+        this.fs.copyTpl(this.templatePath('mono-pom.xml.tpl'), this.destinationPath('pom.xml'), {
+            rootPackage: this.model.rootPackage,
+            appName: kebab(this.model.domain) || 'medol-application',
+            modules: deployments.map((deployment) => this._deploymentModuleName(deployment))
+        });
+        this.fs.copyTpl(this.templatePath('README.md.tpl'), this.destinationPath('README.md'), {
+            appName: kebab(this.model.domain) || 'medol-application',
+            domain: this.model.domain,
+            rootPackage: this.model.rootPackage
+        });
+        this.fs.copy(this.templatePath('gitignore'), this.destinationPath('.gitignore'));
+        this._copyMavenWrapper();
+        this._writeAgentSkills();
+        deployments.forEach((deployment) => this._withDeployment(deployment, () => this._writeSkeleton()));
+    }
+
+    _writeMonoSlices() {
+        for (const deployment of this.model.deployments ?? []) {
+            this._withDeployment(deployment, () => {
+                const selected = this.answers.sliceNames ?? this.model.slices.map((slice) => slice.title);
+                const selectedSlices = this.model.slices.filter((slice) => selected.includes(slice.title));
+                selectedSlices.forEach((slice) => this._writeSlice(slice));
+                this._writeConceptEntityStates(selectedSlices);
+            });
+        }
+    }
+
+    _withDeployment(deployment, write) {
+        const previousModel = this.model;
+        const previousPrefix = this.modulePrefix;
+        this.model = filterModelByDeployment(previousModel, deployment);
+        this.modulePrefix = this._deploymentModuleName(deployment);
+        configureValueTypes(this.model.valueTypes, this.model.rootPackage, this.model.concepts);
+        try {
+            write();
+        } finally {
+            this.model = previousModel;
+            this.modulePrefix = previousPrefix;
+            configureValueTypes(this.model.valueTypes, this.model.rootPackage, this.model.concepts);
+        }
+    }
+
+    _deploymentModuleName(deployment) {
+        return kebab(deployment.name) || 'application';
+    }
+
     _writeSkeleton() {
-        const appName = slugify(this.model.domain, {lower: true, strict: true}) || 'medol-application';
+        const appName = kebab(this.model.domain) || 'medol-application';
         const applicationClass = `${pascal(this.model.domain)}Application`;
-        this.fs.copyTpl(this.templatePath('pom.xml.tpl'), this.destinationPath('pom.xml'), {
+        this.fs.copyTpl(this.templatePath('pom.xml.tpl'), this._destPath('pom.xml'), {
             rootPackage: this.model.rootPackage,
             appName
         });
@@ -68,7 +128,7 @@ module.exports = class extends Generator {
             rootPackage: this.model.rootPackage,
             applicationClass
         });
-        this.fs.copyTpl(this.templatePath('README.md.tpl'), this.destinationPath('README.md'), {
+        this.fs.copyTpl(this.templatePath('README.md.tpl'), this._destPath('README.md'), {
             appName,
             domain: this.model.domain,
             rootPackage: this.model.rootPackage
@@ -84,15 +144,19 @@ module.exports = class extends Generator {
         this.fs.copyTpl(this.templatePath('ApiExceptionHandler.kt.tpl'), this._kotlinPath('support/ApiExceptionHandler.kt'), {
             rootPackage: this.model.rootPackage
         });
-        this.fs.copy(this.templatePath('application.yml'), this.destinationPath('src/main/resources/application.yml'));
-        this.fs.copy(this.templatePath('docker-compose.yml'), this.destinationPath('docker-compose.yml'));
-        this.fs.copy(this.templatePath('V1__baseline.sql'), this.destinationPath('src/main/resources/db/migration/V1__baseline.sql'));
-        this.fs.copy(this.templatePath('gitignore'), this.destinationPath('.gitignore'));
-        this._copyMavenWrapper();
+        this.fs.copy(this.templatePath('application.yml'), this._destPath('src/main/resources/application.yml'));
+        this.fs.copy(this.templatePath('docker-compose.yml'), this._destPath('docker-compose.yml'));
+        this.fs.copy(this.templatePath('V1__baseline.sql'), this._destPath('src/main/resources/db/migration/V1__baseline.sql'));
+        this.fs.copy(this.templatePath('gitignore'), this._destPath('.gitignore'));
+        if (!this.modulePrefix) {
+            this._copyMavenWrapper();
+        }
         this._writeValueTypes();
         this._writeConceptStates();
         this._writeConceptCatalog();
-        this._writeAgentSkills();
+        if (!this.modulePrefix) {
+            this._writeAgentSkills();
+        }
     }
 
     _writeAgentSkills() {
@@ -631,11 +695,19 @@ ${handlers}
     }
 
     _kotlinPath(relative) {
-        return this.destinationPath(`src/main/kotlin/${this.model.rootPackage.split('.').join('/')}/${relative}`);
+        return this.destinationPath(this._modulePath(`src/main/kotlin/${this.model.rootPackage.split('.').join('/')}/${relative}`));
     }
 
     _testKotlinPath(relative) {
-        return this.destinationPath(`src/test/kotlin/${this.model.rootPackage.split('.').join('/')}/${relative}`);
+        return this.destinationPath(this._modulePath(`src/test/kotlin/${this.model.rootPackage.split('.').join('/')}/${relative}`));
+    }
+
+    _modulePath(relative) {
+        return this.modulePrefix ? `${this.modulePrefix}/${relative}` : relative;
+    }
+
+    _destPath(relative) {
+        return this.destinationPath(this._modulePath(relative));
     }
 };
 
@@ -937,6 +1009,14 @@ function pascal(value) {
         .map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join('') || 'Medol';
 }
 
+function kebab(value) {
+    return String(value ?? '')
+        .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+        .replace(/[^A-Za-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .toLowerCase();
+}
+
 function safeIdentifier(value) {
     const result = String(value ?? '').replace(/[^A-Za-z0-9_]/g, '');
     return result && /^[A-Za-z_]/.test(result) ? result : `tag${pascal(result)}`;
@@ -1012,4 +1092,22 @@ function literal(value, type) {
 
 function escapeKotlin(value) {
     return String(value ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function filterModelByDeployment(model, deployment) {
+    const contextNames = new Set((deployment.contexts ?? []).map((context) => context.name));
+    const inContext = (item) => !item?.context || contextNames.has(item.context);
+    const slices = (model.slices ?? []).filter((slice) => contextNames.has(slice.context ?? slice.chapter));
+    return {
+        ...model,
+        domain: deployment.name,
+        deployment: deployment.name,
+        deployments: [deployment],
+        contexts: (model.contexts ?? []).filter((context) => contextNames.has(context.name)),
+        valueTypes: (model.valueTypes ?? []).filter(inContext),
+        aggregates: (model.aggregates ?? []).filter(inContext),
+        concepts: (model.concepts ?? []).filter(inContext),
+        transitions: (model.transitions ?? []).filter(inContext),
+        slices
+    };
 }

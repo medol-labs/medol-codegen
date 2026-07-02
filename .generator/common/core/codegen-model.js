@@ -15,6 +15,8 @@ function fromConfig(config = {}) {
     return {
         rootPackage: config.codeGen?.rootPackage ?? 'tech.medo',
         ...(config.domain ? { domain: config.domain } : {}),
+        ...(config.domains ? { domains: config.domains } : {}),
+        ...(config.deployments ? { deployments: config.deployments } : {}),
         ...(config.i18n ? { i18n: config.i18n } : {}),
         ...(config.translations ? { translations: config.translations } : {}),
         ...(config.locales ? { locales: config.locales } : {}),
@@ -45,6 +47,8 @@ function fromCodegenModel(model = {}) {
     return {
         rootPackage: model.rootPackage ?? 'tech.medo',
         ...(model.domain ? { domain: model.domain } : {}),
+        ...(model.domains ? { domains: model.domains } : {}),
+        ...(model.deployments ? { deployments: model.deployments } : {}),
         ...(model.i18n ? { i18n: model.i18n } : {}),
         ...(model.translations ? { translations: model.translations } : {}),
         ...(model.locales ? { locales: model.locales } : {}),
@@ -77,6 +81,8 @@ function toGeneratorConfig(model, source = {}) {
         ...(model.locales ? { locales: model.locales } : {}),
         ...(model.defaultLocale ? { defaultLocale: model.defaultLocale } : {}),
         ...(model.domain ? { domain: model.domain } : {}),
+        ...(model.domains ? { domains: model.domains } : {}),
+        ...(model.deployments ? { deployments: model.deployments } : {}),
         context: primaryContextName(model),
         contexts: model.contexts,
         codeGen: {
@@ -123,6 +129,7 @@ function normalizeContexts(config) {
             id: context.id ?? stableId('context', context.name ?? context.title ?? index),
             name: context.name ?? context.title ?? String(context),
             title: context.title ?? humanize(context.name ?? context.title ?? String(context)),
+            ...(context.domain ? { domain: context.domain } : {}),
             notes: context.notes ?? [],
             risks: context.risks ?? [],
             decisions: context.decisions ?? [],

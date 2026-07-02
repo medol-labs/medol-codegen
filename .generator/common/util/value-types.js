@@ -35,7 +35,7 @@ function conceptState(type) {
         return undefined;
     }
     const concept = conceptRegistry.get(match[1]);
-    return concept ? {concept, typeName: `${concept.name}State`} : undefined;
+    return concept ? {concept, typeName: `${concept.name}StateEnum`} : undefined;
 }
 
 function conceptStateImport(type) {

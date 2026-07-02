@@ -28,7 +28,7 @@ function runAgentTask({ runtime }) {
   fs.writeFileSync(promptPath, prompt, "utf8");
   console.log(`[ralph] prompt written: ${path.relative(projectRoot, promptPath)}`);
 
-  const command = resolveCommand(runtime);
+  const command = resolveCommand(runtime, projectRoot);
   if (!command) {
     task.status = "needs-runtime";
     task.promptPath = path.relative(projectRoot, promptPath);
@@ -148,10 +148,12 @@ function findContextFiles(projectRoot) {
     .filter((file) => fs.existsSync(file));
 }
 
-function resolveCommand(runtime) {
+function resolveCommand(runtime, projectRoot) {
   if (process.env.AGENT_COMMAND) return process.env.AGENT_COMMAND;
   if (runtime === "claude" && commandExists("claude")) return "claude -p";
-  if (runtime === "codex" && commandExists("codex")) return "codex exec";
+  if (runtime === "codex" && commandExists("codex")) {
+    return `codex exec --skip-git-repo-check -C ${shellQuote(projectRoot)}`;
+  }
   return null;
 }
 

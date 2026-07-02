@@ -129,7 +129,7 @@ module.exports = class extends Generator {
     _writeConceptStates() {
         for (const concept of this.model.concepts.filter((candidate) => candidate.states?.length)) {
             const packageName = `${this.model.rootPackage}.${contextPackage(concept.context)}.domain.states`;
-            const typeName = `${concept.name}State`;
+            const typeName = conceptStateEnumName(concept.name);
             const values = concept.states.map((state) => `    ${constant(state)}`).join(',\n');
             this.fs.write(
                 this._kotlinPath(`${contextPackage(concept.context)}/domain/states/${typeName}.kt`),
@@ -272,8 +272,9 @@ ${properties}
         const fields = uniqueFields(events.flatMap((event) => event.fields))
             .filter((field) => !(hasChildMemberState && field.name === 'organizationId'));
         const imports = typeImports(fields);
+        const stateEnumName = concept ? conceptStateEnumName(concept) : undefined;
         const stateFields = [
-            ...(concept ? [`    var currentState: ${concept}State? = null\n        private set`] : []),
+            ...(concept ? [`    var currentState: ${stateEnumName}? = null`] : []),
             ...fields.map((field) => `    private var ${field.name}: ${stateFieldType(field)} = ${stateFieldDefault(field)}`),
             ...(hasChildMemberState ? ['    private val members: MutableMap<UUID, String> = mutableMapOf()'] : [])
         ].join('\n');
@@ -281,7 +282,7 @@ ${properties}
             const transition = childTransitionByEventId.get(event.id);
             const stateTransition = transitionByEventId.get(event.id);
             const assignments = [
-                ...(concept && stateTransition ? [`        currentState = ${concept}State.${constant(stateTransition.to)}`] : []),
+                ...(concept && stateTransition && !transition && conceptHasState(this.model, slice.context, concept, stateTransition.to) ? [`        currentState = ${stateEnumName}.${constant(stateTransition.to)}`] : []),
                 ...event.fields
                     .filter((field) => !(transition && field.name === 'organizationId'))
                     .map((field) => `        ${field.name} = event.${field.name}`),
@@ -290,7 +291,7 @@ ${properties}
             return `    @EventSourcingHandler\n    fun evolve(event: ${_eventTitle(event.title)}): ${stateName} = apply {\n${assignments}\n    }`;
         }).join('\n\n');
         const eventImports = events.map((event) => `import ${this._eventPackage(event, slice)}.${_eventTitle(event.title)}`).join('\n');
-        const stateImport = concept ? `import ${this.model.rootPackage}.${contextPackage(slice.context)}.domain.states.${concept}State\n` : '';
+        const stateImport = concept ? `import ${this.model.rootPackage}.${contextPackage(slice.context)}.domain.states.${stateEnumName}\n` : '';
         const criteria = selection.fields
             .map((field) => `Tag.of("${escapeKotlin(field.tag.name)}", selection.${field.alias}.toString())`)
             .join(',\n                ');
@@ -330,7 +331,7 @@ ${sourcingHandlers}
             const commandName = _commandTitle(command.title);
             const outputs = outboundEvents(command, events);
             const transition = transitionForCommand(this.model, command);
-            const guard = renderStateGuard(transition);
+            const guard = renderStateGuard(this.model, transition);
             const appendStatement = outputs.length > 0
                 ? `eventAppender.append(\n${outputs.map((event) => `            ${_eventTitle(event.title)}(${eventArguments(event, command)})`).join(',\n')}\n        )`
                 : '// TODO: append the event produced by this command.';
@@ -344,8 +345,8 @@ ${sourcingHandlers}
         const stateImport = stateTarget.packageName === packageName ? '' : `import ${stateTarget.packageName}.${stateName}\n`;
         const stateEnumImports = uniqueBy(slice.commands
             .map((command) => transitionForCommand(this.model, command))
-            .filter((transition) => transition?.from && transition.owner?.type === 'concept')
-            .map((transition) => `import ${this.model.rootPackage}.${contextPackage(transition.context ?? slice.context)}.domain.states.${transition.owner.name}State`), (value) => value)
+            .filter((transition) => transitionUsesConceptState(this.model, transition))
+            .map((transition) => `import ${this.model.rootPackage}.${contextPackage(transition.context ?? slice.context)}.domain.states.${conceptStateEnumName(transition.owner.name)}`), (value) => value)
             .join('\n');
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${pascal(slice.name)}CommandHandler.kt`), `package ${packageName}
 
@@ -535,7 +536,7 @@ ${idFields.length === 1 ? `
                 const concept = ownerSlice?.concepts?.[0];
                 return ownerSlice?.stateChange?.eventId === event.id
                     && readmodel.fields.some((field) => field.type === `${concept}.State`)
-                    ? `import ${this.model.rootPackage}.${contextPackage(ownerSlice.context)}.domain.states.${concept}State`
+                    ? `import ${this.model.rootPackage}.${contextPackage(ownerSlice.context)}.domain.states.${conceptStateEnumName(concept)}`
                     : undefined;
             })
             .filter(Boolean), (value) => value)
@@ -618,7 +619,10 @@ ${handlers}
         if (!field || event.fields.some((candidate) => candidate.name === field.name)) {
             return undefined;
         }
-        return `entity.${field.name} = ${concept}State.${constant(stateChange.to)}`;
+        if (!conceptHasState(this.model, ownerSlice.context, concept, stateChange.to)) {
+            return undefined;
+        }
+        return `entity.${field.name} = ${conceptStateEnumName(concept)}.${constant(stateChange.to)}`;
     }
 
     _eventPackage(event, fallbackSlice) {
@@ -660,7 +664,10 @@ function conceptSelectionFor(slice, model) {
 function sliceSelectionFor(slice) {
     const firstCommand = slice.commands[0];
     const commandFields = firstCommand?.fields ?? [];
-    const tags = slice.tags.length > 0 ? slice.tags : fallbackTags(slice, commandFields);
+    const idFields = commandFields.filter((field) => field.idAttribute);
+    const tags = idFields.length > 0
+        ? idFields.map((field) => ({name: field.name, expression: field.name}))
+        : (slice.tags.length > 0 ? slice.tags : fallbackTags(slice, commandFields));
     return selectionFromTags(slice, tags, `${pascal(slice.name)}Selection`, slice.name, slice.concepts);
 }
 
@@ -817,11 +824,33 @@ function transitionForCommand(model, command) {
     );
 }
 
-function renderStateGuard(transition) {
+function conceptStateEnumName(conceptName) {
+    return `${pascal(conceptName)}StateEnum`;
+}
+
+function conceptHasState(model, context, conceptName, stateName) {
+    const concept = (model.concepts ?? []).find((candidate) =>
+        candidate.name === conceptName && (!context || candidate.context === context)
+    );
+    return (concept?.states ?? []).some((state) => state === stateName);
+}
+
+function transitionUsesConceptState(model, transition) {
+    return Boolean(
+        transition?.from
+        && transition.owner?.type === 'concept'
+        && conceptHasState(model, transition.context, transition.owner.name, transition.from)
+    );
+}
+
+function renderStateGuard(model, transition) {
     if (!transition?.from || transition.owner?.type !== 'concept') {
         return '        // TODO: validate domain rules against state before appending events.';
     }
-    const stateType = `${transition.owner.name}State`;
+    if (!transitionUsesConceptState(model, transition)) {
+        return '        // TODO: validate child/member state before appending events.';
+    }
+    const stateType = conceptStateEnumName(transition.owner.name);
     return [
         `        require(state.currentState == ${stateType}.${constant(transition.from)}) {`,
         `            "${escapeKotlin(transition.command?.name ?? 'Command')} requires ${escapeKotlin(transition.owner.name)} to be ${escapeKotlin(transition.from)}."`,

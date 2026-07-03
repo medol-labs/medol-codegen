@@ -30,10 +30,16 @@ import {
 } from "@refinedev/core";
 import { ChevronRight, ListIcon } from "lucide-react";
 import React from "react";
+import { useLocation } from "react-router";
+
+import { backendModules } from "@/providers/resources";
 
 export function Sidebar() {
   const { open } = useShadcnSidebar();
   const { menuItems, selectedKey } = useMenu();
+  const location = useLocation();
+  const activeModule = getActiveBackendModule(location.pathname);
+  const visibleMenuItems = filterMenuItemsForModule(menuItems, activeModule);
 
   return (
     <ShadcnSidebar collapsible="icon" className={cn("border-none")}>
@@ -56,7 +62,7 @@ export function Sidebar() {
           }
         )}
       >
-        {menuItems.map((item: TreeMenuItem) => (
+        {visibleMenuItems.map((item: TreeMenuItem) => (
           <SidebarItem
             key={item.key || item.name}
             item={item}
@@ -66,6 +72,48 @@ export function Sidebar() {
       </ShadcnSidebarContent>
     </ShadcnSidebar>
   );
+}
+
+function getActiveBackendModule(pathname: string) {
+  if (backendModules.length <= 1) {
+    return backendModules[0];
+  }
+
+  return backendModules.find((module) =>
+    module.resources.some((route) => pathname.startsWith(`/${route}`)),
+  ) ?? backendModules[0];
+}
+
+function filterMenuItemsForModule(items: TreeMenuItem[], activeModule: (typeof backendModules)[number] | undefined): TreeMenuItem[] {
+  if (!activeModule || backendModules.length <= 1) {
+    return items;
+  }
+
+  const routeSet = new Set(activeModule.resources.map((route) => `/${route}`));
+
+  return items
+    .map((item) => filterMenuItemForModule(item, routeSet))
+    .filter(Boolean) as TreeMenuItem[];
+}
+
+function filterMenuItemForModule(item: TreeMenuItem, activeRoutes: Set<string>): TreeMenuItem | null {
+  const children = item.children
+    ?.map((child) => filterMenuItemForModule(child, activeRoutes))
+    .filter(Boolean) as TreeMenuItem[] | undefined;
+
+  if (children?.length) {
+    return { ...item, children };
+  }
+
+  if (item.name === "dashboard" || item.route === "/dashboard") {
+    return item;
+  }
+
+  if (item.route && Array.from(activeRoutes).some((route) => item.route === route || item.route.startsWith(`${route}/`))) {
+    return item;
+  }
+
+  return null;
 }
 
 type MenuItemProps = {

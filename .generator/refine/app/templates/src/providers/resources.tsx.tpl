@@ -2,6 +2,19 @@
 import { IResourceItem } from "@refinedev/core";
 import { FlaskConical, LayoutDashboard, Package } from "lucide-react";
 
+export const backendModules = [
+<% backendModules.forEach((module) => { -%>
+  {
+    name: "<%= module.name %>",
+    label: "<%= module.label %>",
+    dataProviderName: "<%= module.dataProviderName %>",
+    apiUrl: import.meta.env.<%= module.envName %> ?? "<%= module.defaultApiUrl %>",
+    homeRoute: "<%= module.homeRoute %>",
+    resources: <%- JSON.stringify(module.resourceRoutes) %>,
+  },
+<% }) -%>
+];
+
 export const resources: IResourceItem[] = [
   {
     name: "dashboard",
@@ -48,14 +61,17 @@ export const resources: IResourceItem[] = [
       actionControls: <%- JSON.stringify(resource.actionControls) %>,
       aggregateRoute: "<%= resource.aggregateRoute %>",
       queryRoute: "<%= resource.queryRoute %>",
+      dataProviderName: "<%= resource.dataProviderName %>",
+      moduleName: "<%= resource.moduleName %>",
+      moduleLabel: "<%= resource.moduleLabel %>",
 <% if (resource.commands.length > 0) { -%>
       commandRoute: "/<%= resource.route %>/:id/command/:command",
       commands: {
 <% if (resource.createCommand) { -%>
-        <%= resource.createCommand.name %>: { label: "<%= resource.createCommand.label %>", i18nKey: "<%= resource.createCommand.i18nKey %>", route: "/<%= resource.route %>/command/<%= resource.createCommand.route %>"<% if (resource.createCommand.enabledField) { %>, enabledField: "<%= resource.createCommand.enabledField %>"<% } %> },
+        <%= resource.createCommand.name %>: { label: "<%= resource.createCommand.label %>", i18nKey: "<%= resource.createCommand.i18nKey %>", route: "/<%= resource.route %>/command/<%= resource.createCommand.route %>", dataProviderName: "<%= resource.createCommand.dataProviderName %>"<% if (resource.createCommand.enabledField) { %>, enabledField: "<%= resource.createCommand.enabledField %>"<% } %> },
 <% } -%>
 <% resource.routedCommands.forEach((command) => { -%>
-        <%= command.name %>: { label: "<%= command.label %>", i18nKey: "<%= command.i18nKey %>", route: "/<%= resource.route %>/:id/command/<%= command.route %>"<% if (command.enabledField) { %>, enabledField: "<%= command.enabledField %>"<% } %> },
+        <%= command.name %>: { label: "<%= command.label %>", i18nKey: "<%= command.i18nKey %>", route: "/<%= resource.route %>/:id/command/<%= command.route %>", dataProviderName: "<%= command.dataProviderName %>"<% if (command.enabledField) { %>, enabledField: "<%= command.enabledField %>"<% } %> },
 <% }) -%>
       },
 <% } -%>

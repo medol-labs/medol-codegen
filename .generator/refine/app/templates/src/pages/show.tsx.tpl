@@ -19,12 +19,14 @@ const formatValue = (value: unknown, t: ReturnType<typeof useTranslate>) => {
 export const <%= resource.component %>Show = () => {
   const t = useTranslate();
   const { result: record } = useShow({
+    dataProviderName: "<%= resource.dataProviderName %>",
     meta: {
       tableName: "<%= resource.tableName %>",
       idField: "<%= resource.idField %>",
       label: t("<%= resource.i18nKey %>", "<%= resource.label %>"),
       aggregateRoute: "<%= resource.aggregateRoute %>",
       queryRoute: "<%= resource.queryRoute %>",
+      dataProviderName: "<%= resource.dataProviderName %>",
     },
   });
 

@@ -223,27 +223,79 @@ function buildFrontendModel(source, selectedCommandKeys) {
     const allContexts = source.contexts ?? source.context ?? [];
     const allEvents = slices.flatMap((slice) => slice.events ?? []);
     const selected = selectedCommandKeys ? new Set(selectedCommandKeys) : null;
-    const workflow = buildWorkflowModel(slices, allAggregates, allContexts, selected);
+    const backendModules = buildBackendModules(source);
+    const workflow = buildWorkflowModel(slices, allAggregates, allContexts, selected, backendModules);
     const resources = withResourceI18n(uniqueResourceNames(slices
         .flatMap((slice) => (slice.readmodels ?? [])
             .filter((readModel) => readModel?.title && readModel.listElement)
             .map((readModel) => toReadModelResource({
                 ...aggregateName(readModel, slice, allAggregates, allContexts),
+                deployment: backendModuleForContext(slice.context ?? slice.chapter, backendModules),
                 slice,
                 commands: workflow.commandsForReadModel(readModel),
                 producerCommandKeys: workflow.producerCommandKeys(readModel),
                 itemCommandKeys: workflow.itemCommandKeys(readModel)
             }, readModel, allEvents, workflow)))
         .filter(Boolean)));
+    const modules = withModuleResourceRoutes(backendModules, resources);
     const chapters = withChapterI18n(uniqueChapters(resources.map((resource) => resource.chapter).filter(Boolean)));
     const i18n = buildI18nModel(source, chapters, resources);
 
     return {
         appName: source.domain ?? 'Event Sourcing App',
+        backendModules: modules,
         chapters,
         resources: resources.sort((a, b) => a.route.localeCompare(b.route)),
         i18n
     };
+}
+
+function buildBackendModules(source) {
+    const deployments = normalizeArray(source.deployments);
+    if (deployments.length === 0) {
+        return [{
+            name: 'default',
+            label: 'Backend',
+            dataProviderName: 'command',
+            envName: 'VITE_AXON_API_URL',
+            defaultApiUrl: 'http://localhost:8080',
+            contexts: new Set((source.contexts ?? []).map((context) => context.name).filter(Boolean))
+        }];
+    }
+
+    return deployments.map((deployment, index) => {
+        const label = cleanTitle(deployment.title ?? deployment.name) || `Backend ${index + 1}`;
+        const dataProviderName = kebab(deployment.title ?? deployment.name ?? label) || `backend-${index + 1}`;
+        return {
+            name: dataProviderName,
+            label,
+            dataProviderName,
+            envName: `VITE_${snakeCase(dataProviderName).toUpperCase()}_API_URL`,
+            defaultApiUrl: `http://localhost:${8080 + index}`,
+            contexts: new Set(normalizeArray(deployment.contexts)
+                .map((context) => typeof context === 'string' ? context : context.name)
+                .filter(Boolean))
+        };
+    });
+}
+
+function backendModuleForContext(contextName, modules) {
+    return modules.find((module) => module.contexts.has(contextName)) ?? modules[0];
+}
+
+function withModuleResourceRoutes(modules, resources) {
+    return modules.map((module) => {
+        const moduleResources = resources
+            .filter((resource) => resource.dataProviderName === module.dataProviderName)
+            .map((resource) => resource.route)
+            .sort((a, b) => a.localeCompare(b));
+        return {
+            ...module,
+            contexts: Array.from(module.contexts),
+            resourceRoutes: moduleResources,
+            homeRoute: moduleResources[0] ? `/${moduleResources[0]}` : '/dashboard'
+        };
+    });
 }
 
 function buildDomainModel(source) {
@@ -309,7 +361,7 @@ function uniqueCommands(commands) {
     return Array.from(byName.values());
 }
 
-function buildWorkflowModel(slices, aggregates, contexts, selectedCommands) {
+function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, backendModules) {
     const selectableReadModels = new Map();
     const commandsById = new Map();
     const eventsById = new Map();
@@ -335,18 +387,20 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands) {
             }
         });
 
-    slices.flatMap((slice) => slice.readmodels ?? [])
-        .filter((readModel) => readModel?.title && readModel.listElement)
-        .forEach((readModel) => {
+    slices.flatMap((slice) => (slice.readmodels ?? []).map((readModel) => ({readModel, slice})))
+        .filter(({readModel}) => readModel?.title && readModel.listElement)
+        .forEach(({readModel, slice}) => {
             const id = idFieldName(readModel);
             if (!id || selectableReadModels.has(id)) {
                 return;
             }
 
             const aggregate = aggregateName(readModel, { title: readModel.slice }, aggregates, contexts);
+            const deployment = backendModuleForContext(slice.context ?? slice.chapter, backendModules);
             const optionLabel = optionLabelField(readModel);
             selectableReadModels.set(id, {
                 resource: snake(cleanTitle(readModel.title)),
+                dataProviderName: deployment.dataProviderName,
                 optionValue: id,
                 optionLabel,
                 meta: {
@@ -444,9 +498,13 @@ function toReadModelResource(group, readModel, allEvents, workflow) {
     const idFields = identifierFields(fields);
     const idField = idFields[0] ?? fields.find((field) => field.name === 'id') ?? fields[0];
     const resourceCommands = uniqueElements(group.commands);
+    const deployment = group.deployment;
     let normalizedCommands = resourceCommands
         .filter((command) => command?.title)
-        .map((command) => toCommand(command, route, component, readModel, allEvents, workflow));
+        .map((command) => ({
+            ...toCommand(command, route, component, readModel, allEvents, workflow),
+            dataProviderName: deployment.dataProviderName
+        }));
     normalizedCommands = withPrefillFields(normalizedCommands, queryFields);
     normalizedCommands = withActionControlFields(normalizedCommands, queryFields);
     const producerCommandKeys = group.producerCommandKeys ?? new Set();
@@ -478,6 +536,9 @@ function toReadModelResource(group, readModel, allEvents, workflow) {
         tableName: tableName(readModel, queryTitle),
         component,
         chapter: group.chapter,
+        moduleName: deployment.name,
+        moduleLabel: deployment.label,
+        dataProviderName: deployment.dataProviderName,
         idField: idField?.name ?? 'id',
         idFields: (idFields.length > 0 ? idFields : [idField]).filter(Boolean).map((field) => field.name),
         rowIdExpression: rowIdExpression((idFields.length > 0 ? idFields : [idField]).filter(Boolean)),

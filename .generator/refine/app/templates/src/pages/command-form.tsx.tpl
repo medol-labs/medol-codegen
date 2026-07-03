@@ -128,12 +128,15 @@ export const <%= command.pageComponent %> = () => {
     command: "<%= command.name %>",
     aggregateId: id?.toString(),
     redirect: false,
+    dataProviderName: "<%= command.dataProviderName %>",
+    queryDataProviderName: "<%= resource.dataProviderName %>",
     meta: {
       tableName: "<%= resource.tableName %>",
       idField: "<%= resource.idField %>",
       label: t("<%= resource.i18nKey %>", "<%= resource.label %>"),
       aggregateRoute: "<%= command.aggregateRoute %>",
       queryRoute: "<%= resource.queryRoute %>",
+      dataProviderName: "<%= command.dataProviderName %>",
     },
     queryMeta: {
       tableName: "<%= resource.tableName %>",
@@ -141,6 +144,7 @@ export const <%= command.pageComponent %> = () => {
       label: t("<%= resource.i18nKey %>", "<%= resource.label %>"),
       aggregateRoute: "<%= resource.aggregateRoute %>",
       queryRoute: "<%= resource.queryRoute %>",
+      dataProviderName: "<%= resource.dataProviderName %>",
     },
     formProps: {
       defaultValues,
@@ -330,7 +334,7 @@ export const <%= command.pageComponent %> = () => {
                 <ResourceSelect
                   withFormControl
                   resource="<%= field.select.resource %>"
-                  dataProviderName="command"
+                  dataProviderName="<%= field.select.dataProviderName %>"
                   optionLabel="<%= field.select.optionLabel %>"
                   optionValue="<%= field.select.optionValue %>"
                   value={field.value || ""}

@@ -1,4 +1,4 @@
-import { Refine } from "@refinedev/core";
+import { Refine, type DataProvider } from "@refinedev/core";
 import { DevtoolsPanel, DevtoolsProvider } from "@refinedev/devtools";
 import { RefineKbar, RefineKbarProvider } from "@refinedev/kbar";
 
@@ -14,7 +14,7 @@ import { useNotificationProvider } from "./components/refine-ui/notification/use
 import { ThemeProvider } from "./components/refine-ui/theme/theme-provider";
 import { AppRouter } from "./providers/app-router";
 import authProvider from "./providers/mock-auth";
-import { commandProvider } from "./providers/command-provider";
+import { commandDataProvider, commandProvider } from "./providers/command-provider";
 import { dataProvider } from "./providers/data";
 import {
   getCurrentLocale,
@@ -22,10 +22,20 @@ import {
   i18nProvider,
   LOCALE_CHANGE_EVENT
 } from "./providers/i18n";
-import { resources } from "./providers/resources";
+import { backendModules, resources } from "./providers/resources";
 import { supabaseClient } from "./providers/supabase-client";
 
 import "./App.css";
+
+const backendDataProviders: Record<string, Required<DataProvider>> = Object.fromEntries(
+  backendModules.map((module) => [
+    module.dataProviderName,
+    commandDataProvider(supabaseClient, { baseUrl: module.apiUrl }),
+  ]),
+);
+
+const defaultBackendProvider =
+  backendDataProviders[backendModules[0]?.dataProviderName] ?? commandProvider;
 
 function App() {
   const [localeVersion, setLocaleVersion] = useState(0);
@@ -50,9 +60,10 @@ function App() {
             <Refine
               key={localeVersion}
               dataProvider={{
-                default: commandProvider,
-                command: commandProvider,
+                default: defaultBackendProvider,
+                command: defaultBackendProvider,
                 query: dataProvider,
+                ...backendDataProviders,
               }}
               liveProvider={liveProvider(supabaseClient)}
               authProvider={authProvider}

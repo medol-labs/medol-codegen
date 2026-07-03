@@ -192,10 +192,11 @@ const applySorting = <TData extends BaseRecord>(
 
 export const commandDataProvider = (
   supabaseClient: SupabaseClient<any, any, any>,
+  options: { baseUrl?: string } = {},
 ): Required<DataProvider> => {
   void supabaseClient;
 
-  const baseUrl = "http://localhost:8080";
+  const baseUrl = options.baseUrl ?? import.meta.env.VITE_AXON_API_URL ?? "http://localhost:8080";
 
   const getJson = async (path: string, allowNotFound = false) => {
     const res = await fetch(`${baseUrl}${path}`);

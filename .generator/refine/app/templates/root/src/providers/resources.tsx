@@ -2,6 +2,17 @@ import { IResourceItem } from "@refinedev/core";
 import { FlaskConical, LayoutDashboard, Package } from "lucide-react";
 import { COMMAND_DATA_PROVIDER_NAME } from "./constants";
 
+export const backendModules = [
+  {
+    name: "default",
+    label: "Backend",
+    dataProviderName: COMMAND_DATA_PROVIDER_NAME,
+    apiUrl: import.meta.env.VITE_AXON_API_URL ?? "http://localhost:8080",
+    homeRoute: "/blog-posts",
+    resources: ["blog-posts", "categories"],
+  },
+];
+
 export const resources: IResourceItem[] = [
   {
     name: "dashboard",

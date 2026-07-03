@@ -15,6 +15,7 @@ import {
   supportedLocales,
   type SupportedLocale,
 } from "@/providers/i18n";
+import { backendModules } from "@/providers/resources";
 import {
   useActiveAuthProvider,
   useGetLocale,
@@ -22,8 +23,9 @@ import {
   useRefineOptions,
   useSetLocale,
 } from "@refinedev/core";
-import { Check, Globe2, LogOutIcon } from "lucide-react";
+import { Check, Globe2, LogOutIcon, Server } from "lucide-react";
 import { useEffect } from "react";
+import { useLocation, useNavigate } from "react-router";
 
 export const Header = () => {
   const { isMobile } = useSidebar();
@@ -50,6 +52,7 @@ function DesktopHeader() {
         "z-40"
       )}
     >
+      <ModuleSwitcher />
       <LanguageSwitcher />
       <ThemeToggle />
       <UserDropdown />
@@ -124,10 +127,69 @@ function MobileHeader() {
       </div>
 
       <div className={cn("flex", "items-center", "gap-1")}>
+        <ModuleSwitcher compact />
         <LanguageSwitcher compact />
         <ThemeToggle className={cn("h-8", "w-8")} />
       </div>
     </header>
+  );
+}
+
+function ModuleSwitcher({ compact = false }: { compact?: boolean }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  if (backendModules.length <= 1) {
+    return null;
+  }
+
+  const activeModule =
+    backendModules.find((module) =>
+      module.resources.some((route) => location.pathname.startsWith(`/${route}`)),
+    ) ?? backendModules[0];
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className={cn(
+            "h-9",
+            "gap-2",
+            "border-border",
+            "bg-background",
+            "px-2",
+            "text-foreground",
+            "shadow-sm",
+            "hover:bg-accent",
+            "hover:text-accent-foreground",
+            {
+              "w-9": compact,
+              "min-w-36": !compact,
+            }
+          )}
+          aria-label="Switch backend module"
+          title="Switch backend module"
+        >
+          <Server className="h-4 w-4" />
+          {!compact && <span className="truncate text-xs font-semibold">{activeModule.label}</span>}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {backendModules.map((module) => (
+          <DropdownMenuItem
+            key={module.name}
+            className={cn("cursor-pointer", "gap-2")}
+            onClick={() => navigate(module.homeRoute)}
+          >
+            <span className="min-w-36">{module.label}</span>
+            {module.name === activeModule.name && <Check className="ml-auto h-4 w-4" />}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

@@ -139,6 +139,7 @@ export const <%= resource.component %>List = () => {
     },
     getRowId: (row) => <%- resource.rowIdExpression %>,
     refineCoreProps: {
+      dataProviderName: "<%= resource.dataProviderName %>",
       syncWithLocation: true,
       meta: {
         tableName: "<%= resource.tableName %>",
@@ -147,6 +148,7 @@ export const <%= resource.component %>List = () => {
         label: t("<%= resource.i18nKey %>", "<%= resource.label %>"),
         aggregateRoute: "<%= resource.aggregateRoute %>",
         queryRoute: "<%= resource.queryRoute %>",
+        dataProviderName: "<%= resource.dataProviderName %>",
       },
     },
   });

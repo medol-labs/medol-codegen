@@ -2,13 +2,13 @@ services:
   postgres:
     image: postgres:16
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-<%= dbPort %>}:5432"
     environment:
       POSTGRES_USER: medol
       POSTGRES_PASSWORD: medol
-      POSTGRES_DB: medol
+      POSTGRES_DB: <%= dbName %>
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U medol -d medol"]
+      test: ["CMD-SHELL", "pg_isready -U medol -d <%= dbName %>"]
       interval: 5s
       timeout: 5s
       retries: 10

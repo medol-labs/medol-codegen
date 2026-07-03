@@ -1,11 +1,15 @@
+server:
+  port: ${SERVER_PORT:<%= appPort %>}
+
 spring:
   application:
-    name: medol-axon5
+    name: <%= appName %>
   docker:
     compose:
+      file: ${DOCKER_COMPOSE_FILE:<%= composeFile %>}
       lifecycle-management: start-and-stop
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/medol}
+    url: ${DB_URL:jdbc:postgresql://localhost:<%= dbPort %>/<%= dbName %>}
     username: ${DB_USERNAME:medol}
     password: ${DB_PASSWORD:medol}
     driver-class-name: org.postgresql.Driver

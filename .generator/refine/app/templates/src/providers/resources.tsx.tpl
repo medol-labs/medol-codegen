@@ -68,10 +68,10 @@ export const resources: IResourceItem[] = [
       commandRoute: "/<%= resource.route %>/:id/command/:command",
       commands: {
 <% if (resource.createCommand) { -%>
-        <%= resource.createCommand.name %>: { label: "<%= resource.createCommand.label %>", i18nKey: "<%= resource.createCommand.i18nKey %>", route: "/<%= resource.route %>/command/<%= resource.createCommand.route %>", dataProviderName: "<%= resource.createCommand.dataProviderName %>"<% if (resource.createCommand.enabledField) { %>, enabledField: "<%= resource.createCommand.enabledField %>"<% } %> },
+        <%= resource.createCommand.name %>: { label: "<%= resource.createCommand.label %>", i18nKey: "<%= resource.createCommand.i18nKey %>", route: "/<%= resource.route %>/command/<%= resource.createCommand.route %>", dataProviderName: "<%= resource.createCommand.dataProviderName %>"<% if (resource.createCommand.enabledField) { %>, enabledField: "<%= resource.createCommand.enabledField %>"<% } %><% if (resource.createCommand.stateField) { %>, stateField: "<%= resource.createCommand.stateField %>"<% } %><% if (resource.createCommand.allowedStates?.length) { %>, allowedStates: <%- JSON.stringify(resource.createCommand.allowedStates) %><% } %> },
 <% } -%>
 <% resource.routedCommands.forEach((command) => { -%>
-        <%= command.name %>: { label: "<%= command.label %>", i18nKey: "<%= command.i18nKey %>", route: "/<%= resource.route %>/:id/command/<%= command.route %>", dataProviderName: "<%= command.dataProviderName %>"<% if (command.enabledField) { %>, enabledField: "<%= command.enabledField %>"<% } %> },
+        <%= command.name %>: { label: "<%= command.label %>", i18nKey: "<%= command.i18nKey %>", route: "/<%= resource.route %>/:id/command/<%= command.route %>", dataProviderName: "<%= command.dataProviderName %>"<% if (command.enabledField) { %>, enabledField: "<%= command.enabledField %>"<% } %><% if (command.stateField) { %>, stateField: "<%= command.stateField %>"<% } %><% if (command.allowedStates?.length) { %>, allowedStates: <%- JSON.stringify(command.allowedStates) %><% } %> },
 <% }) -%>
       },
 <% } -%>

@@ -28,6 +28,23 @@ type <%= resource.component %>Record = {
 <% }) -%>
 };
 
+const normalizeWorkflowState = (value: unknown) =>
+  String(value ?? "").replace(/[^A-Za-z0-9]/g, "").toLowerCase();
+
+const isCommandVisible = (
+  record: <%= resource.component %>Record,
+  enabledField?: string,
+  stateField?: string,
+  allowedStates: string[] = [],
+) => {
+  const row = record as Record<string, unknown>;
+  if (enabledField && row[enabledField] === false) return false;
+  if (allowedStates.length === 0) return true;
+  if (!stateField) return false;
+  const currentState = normalizeWorkflowState(row[stateField]);
+  return allowedStates.map(normalizeWorkflowState).includes(currentState);
+};
+
 export const <%= resource.component %>List = () => {
   const t = useTranslate();
   const columns = React.useMemo(() => {
@@ -70,14 +87,12 @@ export const <%= resource.component %>List = () => {
         cell: ({ row }) => (
           <div className="flex gap-2">
 <% if (resource.deleteCommand) { -%>
+            {isCommandVisible(row.original, <%- JSON.stringify(resource.deleteCommand.enabledField ?? '') %>, <%- JSON.stringify(resource.deleteCommand.stateField ?? '') %>, <%- JSON.stringify(resource.deleteCommand.allowedStates ?? []) %>) && (
             <CommandButton
               variant="ghost"
               command="<%= resource.deleteCommand.name %>"
               recordItemId={row.original.<%= resource.idField %>}
               size="sm"
-<% if (resource.deleteCommand.enabledField) { -%>
-              disabled={row.original.<%= resource.deleteCommand.enabledField %> === false}
-<% } -%>
 <% if (resource.deleteCommand.prefillFields.length > 0) { -%>
               query={{
 <% resource.deleteCommand.prefillFields.forEach((field) => { -%>
@@ -86,6 +101,7 @@ export const <%= resource.component %>List = () => {
               }}
 <% } -%>
             />
+            )}
 <% } -%>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -95,20 +111,20 @@ export const <%= resource.component %>List = () => {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
 <% if (resource.editCommand) { -%>
+                {isCommandVisible(row.original, <%- JSON.stringify(resource.editCommand.enabledField ?? '') %>, <%- JSON.stringify(resource.editCommand.stateField ?? '') %>, <%- JSON.stringify(resource.editCommand.allowedStates ?? []) %>) && (
                 <DropdownMenuItem>
                   <EditButton variant="ghost" recordItemId={row.original.<%= resource.idField %>} size="sm" />
                 </DropdownMenuItem>
+                )}
 <% } -%>
 <% resource.itemCommands.forEach((command) => { -%>
+                {isCommandVisible(row.original, <%- JSON.stringify(command.enabledField ?? '') %>, <%- JSON.stringify(command.stateField ?? '') %>, <%- JSON.stringify(command.allowedStates ?? []) %>) && (
                 <DropdownMenuItem>
                   <CommandButton
                     variant="ghost"
                     command="<%= command.name %>"
                     recordItemId={row.original.<%= resource.idField %>}
                     size="sm"
-<% if (command.enabledField) { -%>
-                    disabled={row.original.<%= command.enabledField %> === false}
-<% } -%>
 <% if (command.prefillFields.length > 0) { -%>
                     query={{
 <% command.prefillFields.forEach((field) => { -%>
@@ -118,6 +134,7 @@ export const <%= resource.component %>List = () => {
 <% } -%>
                   />
                 </DropdownMenuItem>
+                )}
 <% }) -%>
                 <DropdownMenuItem>
                   <ShowButton variant="ghost" recordItemId={row.original.<%= resource.idField %>} size="sm" />

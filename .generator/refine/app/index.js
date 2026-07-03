@@ -224,7 +224,7 @@ function buildFrontendModel(source, selectedCommandKeys) {
     const allEvents = slices.flatMap((slice) => slice.events ?? []);
     const selected = selectedCommandKeys ? new Set(selectedCommandKeys) : null;
     const backendModules = buildBackendModules(source);
-    const workflow = buildWorkflowModel(slices, allAggregates, allContexts, selected, backendModules);
+    const workflow = buildWorkflowModel(slices, allAggregates, allContexts, selected, backendModules, source.transitions ?? []);
     const resources = withResourceI18n(uniqueResourceNames(slices
         .flatMap((slice) => (slice.readmodels ?? [])
             .filter((readModel) => readModel?.title && readModel.listElement)
@@ -361,12 +361,24 @@ function uniqueCommands(commands) {
     return Array.from(byName.values());
 }
 
-function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, backendModules) {
+function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, backendModules, transitions = []) {
     const selectableReadModels = new Map();
     const commandsById = new Map();
     const eventsById = new Map();
     const producerCommandsByReadModelId = new Map();
     const nextCommandsByReadModelId = new Map();
+    const transitionsByCommandId = new Map();
+
+    transitions
+        .filter((transition) => transition?.command)
+        .forEach((transition) => {
+            const keys = [
+                transition.command.id,
+                transition.command.name,
+                transition.command.title
+            ].filter(Boolean);
+            keys.forEach((key) => transitionsByCommandId.set(String(key), transition));
+        });
 
     slices.flatMap((slice) => slice.commands ?? [])
         .filter((command) => command?.title)
@@ -416,19 +428,19 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
         .filter((readModel) => readModel?.title)
         .forEach((readModel) => {
             const inboundEventIds = (readModel.dependencies ?? [])
-                .filter((dependency) => dependency.type === 'INBOUND' && dependency.elementType === 'EVENT')
+                .filter((dependency) => dependencyDirection(dependency) === 'INBOUND' && dependency.elementType === 'EVENT')
                 .map((dependency) => dependency.id ?? String(dependency.title ?? ''));
             const inboundEvents = inboundEventIds
                 .map((eventId) => eventsById.get(eventId))
                 .filter(Boolean);
             const producerCommands = uniqueElements(inboundEvents
                 .flatMap((event) => (event.dependencies ?? [])
-                    .filter((dependency) => dependency.type === 'INBOUND' && dependency.elementType === 'COMMAND')
+                    .filter((dependency) => dependencyDirection(dependency) === 'INBOUND' && dependency.elementType === 'COMMAND')
                     .map((dependency) => commandsById.get(dependency.id) ?? commandsById.get(String(dependency.title ?? '')))
                     .filter(Boolean)));
             const nextCommands = uniqueElements(inboundEvents
                 .flatMap((event) => (event.dependencies ?? [])
-                    .filter((dependency) => dependency.type === 'OUTBOUND' && dependency.elementType === 'COMMAND')
+                    .filter((dependency) => dependencyDirection(dependency) === 'OUTBOUND' && dependency.elementType === 'COMMAND')
                     .map((dependency) => commandsById.get(dependency.id) ?? commandsById.get(String(dependency.title ?? '')))
                     .filter(Boolean)));
 
@@ -453,13 +465,19 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
         },
         itemCommandKeys(readModel) {
             return new Set((nextCommandsByReadModelId.get(readModel.id) ?? []).map(commandKey));
+        },
+        stateControlForCommand(command, readModel) {
+            const transition = transitionsByCommandId.get(commandKey(command))
+                ?? transitionsByCommandId.get(String(command.name ?? ''))
+                ?? transitionsByCommandId.get(String(command.title ?? ''));
+            return stateControlForTransition(transition, readModel);
         }
     };
 }
 
 function commandWorkflowFields(command, readModel, allEvents, workflow) {
     const inboundEventIds = (command.dependencies ?? [])
-        .filter((dependency) => dependency.type === 'INBOUND' && dependency.elementType === 'EVENT')
+        .filter((dependency) => dependencyDirection(dependency) === 'INBOUND' && dependency.elementType === 'EVENT')
         .map((dependency) => dependency.id ?? String(dependency.title ?? ''));
     const inboundEvents = allEvents.filter((event) => inboundEventIds.includes(event.id) || inboundEventIds.includes(event.title));
     const upstreamFieldNames = new Set([
@@ -659,6 +677,7 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
     const component = pascal(title);
     const normalizedFields = normalizeFields(command.fields).filter((field) => !field.generated);
     const workflowFields = commandWorkflowFields(command, readModel, allEvents, workflow);
+    const stateControl = workflow.stateControlForCommand(command, readModel);
     const commandAggregateTitle = cleanTitle(
         command.concept
         ?? command.concepts?.[0]
@@ -680,6 +699,9 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
         resourceRoute,
         aggregateRoute: axonRoute(commandAggregateTitle),
         startsLifecycle: !!(command.startsLifecycle ?? command.createsAggregate),
+        allowedStates: stateControl.allowedStates,
+        targetState: stateControl.targetState,
+        stateField: stateControl.stateField,
         fields: normalizedFields.map((field) => ({
             ...field,
             select: workflowFields.selects.get(field.name) ?? null
@@ -715,6 +737,34 @@ function withActionControlFields(commands, resourceFields) {
         ...command,
         enabledField: findActionControlField(command, resourceFields)
     }));
+}
+
+function stateControlForTransition(transition, readModel) {
+    const allowedStates = normalizeArray(transition?.from).filter(Boolean);
+    const conceptName = transition?.owner?.name ?? transition?.owner?.title;
+    return {
+        allowedStates,
+        targetState: transition?.to,
+        stateField: allowedStates.length > 0 ? stateFieldForReadModel(readModel, conceptName) : undefined
+    };
+}
+
+function stateFieldForReadModel(readModel, conceptName) {
+    const fields = normalizeFields(readModel?.fields ?? []);
+    const conceptStateType = conceptName ? `${conceptName}.State` : undefined;
+    const candidates = [
+        fields.find((field) => conceptStateType && field.type === conceptStateType),
+        fields.find((field) => field.name === 'state'),
+        fields.find((field) => conceptName && field.name === `${camel(conceptName)}State`),
+        fields.find((field) => conceptName && field.name === `${camel(conceptName)}Status`),
+        fields.find((field) => /Status$/.test(field.name ?? '')),
+        fields.find((field) => field.name === 'status')
+    ];
+    return candidates.filter(Boolean)[0]?.name;
+}
+
+function dependencyDirection(dependency) {
+    return dependency?.direction ?? dependency?.type;
 }
 
 function findActionControlField(command, resourceFields) {

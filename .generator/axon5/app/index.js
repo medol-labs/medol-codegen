@@ -16,6 +16,8 @@ module.exports = class extends Generator {
         this.opts = opts ?? {};
         this.model = loadCodegenModel(this.env.cwd);
         this.modulePrefix = '';
+        this.currentDeployment = null;
+        this.currentDeploymentIndex = 0;
         configureValueTypes(this.model.valueTypes, this.model.rootPackage, this.model.concepts);
     }
 
@@ -79,7 +81,11 @@ module.exports = class extends Generator {
         this.fs.copyTpl(this.templatePath('README.md.tpl'), this.destinationPath('README.md'), {
             appName: kebab(this.model.domain) || 'medol-application',
             domain: this.model.domain,
-            rootPackage: this.model.rootPackage
+            rootPackage: this.model.rootPackage,
+            appPort: 8080,
+            dbPort: 5432,
+            dbName: safeDatabaseName(kebab(this.model.domain) || 'medol-application'),
+            modulePrefix: ''
         });
         this.fs.copy(this.templatePath('gitignore'), this.destinationPath('.gitignore'));
         this._copyMavenWrapper();
@@ -102,14 +108,21 @@ module.exports = class extends Generator {
     _withDeployment(deployment, write) {
         const previousModel = this.model;
         const previousPrefix = this.modulePrefix;
+        const previousDeployment = this.currentDeployment;
+        const previousDeploymentIndex = this.currentDeploymentIndex;
+        const deploymentIndex = deployment.index ?? (previousModel.deployments ?? []).findIndex((candidate) => candidate.name === deployment.name);
         this.model = filterModelByDeployment(previousModel, deployment);
         this.modulePrefix = this._deploymentModuleName(deployment);
+        this.currentDeployment = deployment;
+        this.currentDeploymentIndex = deploymentIndex >= 0 ? deploymentIndex : 0;
         configureValueTypes(this.model.valueTypes, this.model.rootPackage, this.model.concepts);
         try {
             write();
         } finally {
             this.model = previousModel;
             this.modulePrefix = previousPrefix;
+            this.currentDeployment = previousDeployment;
+            this.currentDeploymentIndex = previousDeploymentIndex;
             configureValueTypes(this.model.valueTypes, this.model.rootPackage, this.model.concepts);
         }
     }
@@ -121,9 +134,11 @@ module.exports = class extends Generator {
     _writeSkeleton() {
         const appName = kebab(this.model.domain) || 'medol-application';
         const applicationClass = `${pascal(this.model.domain)}Application`;
+        const runtime = this._runtimeConfig(appName);
         this.fs.copyTpl(this.templatePath('pom.xml.tpl'), this._destPath('pom.xml'), {
             rootPackage: this.model.rootPackage,
-            appName
+            appName,
+            appPort: runtime.appPort
         });
         this.fs.copyTpl(this.templatePath('Application.kt.tpl'), this._kotlinPath('Application.kt'), {
             rootPackage: this.model.rootPackage,
@@ -133,7 +148,10 @@ module.exports = class extends Generator {
             appName,
             domain: this.model.domain,
             rootPackage: this.model.rootPackage,
-            modulePrefix: this.modulePrefix
+            modulePrefix: this.modulePrefix,
+            appPort: runtime.appPort,
+            dbPort: runtime.dbPort,
+            dbName: runtime.dbName
         });
         this.fs.copyTpl(this.templatePath('ApplicationTest.kt.tpl'), this._testKotlinPath('ApplicationTest.kt'), {
             rootPackage: this.model.rootPackage,
@@ -146,8 +164,8 @@ module.exports = class extends Generator {
         this.fs.copyTpl(this.templatePath('ApiExceptionHandler.kt.tpl'), this._kotlinPath('support/ApiExceptionHandler.kt'), {
             rootPackage: this.model.rootPackage
         });
-        this.fs.copy(this.templatePath('application.yml'), this._destPath('src/main/resources/application.yml'));
-        this.fs.copy(this.templatePath('docker-compose.yml'), this._destPath('docker-compose.yml'));
+        this.fs.copyTpl(this.templatePath('application.yml'), this._destPath('src/main/resources/application.yml'), runtime);
+        this.fs.copyTpl(this.templatePath('docker-compose.yml'), this._destPath('docker-compose.yml'), runtime);
         this.fs.copy(this.templatePath('V1__baseline.sql'), this._destPath('src/main/resources/db/migration/V1__baseline.sql'));
         this.fs.copy(this.templatePath('gitignore'), this._destPath('.gitignore'));
         if (!this.modulePrefix) {
@@ -160,6 +178,17 @@ module.exports = class extends Generator {
         if (!this.modulePrefix) {
             this._writeAgentSkills();
         }
+    }
+
+    _runtimeConfig(appName) {
+        const index = this.currentDeployment ? this.currentDeploymentIndex : 0;
+        return {
+            appName,
+            appPort: 8080 + index,
+            dbPort: 5432 + index,
+            dbName: safeDatabaseName(appName),
+            composeFile: 'docker-compose.yml'
+        };
     }
 
     _writeAgentSkills() {
@@ -273,9 +302,10 @@ object ${pascal(metadataOwner)}Metadata {
 
     _writeCommand(packageName, context, slicePackage, command, selection, selectionPackageName = packageName) {
         const commandName = _commandTitle(command.title);
-        const imports = typeImports(command.fields);
+        const commandFields = commandFieldsWithSelection(command, selection);
+        const imports = typeImports(commandFields);
         const selectionImport = selectionPackageName === packageName ? '' : `import ${selectionPackageName}.${selection.name}\n`;
-        const properties = command.fields.map((field) => {
+        const properties = commandFields.map((field) => {
             const defaultValue = field.generated ? ` = ${fallbackValue(field)}` : '';
             return `    val ${field.name}: ${mappedType(field, field.optional)}${defaultValue}`;
         }).join(',\n');
@@ -301,20 +331,26 @@ ${properties}
         const context = contextPackage(eventSlice.context);
         const packageName = `${this.model.rootPackage}.${context}.events`;
         const eventName = _eventTitle(event.title);
-        const imports = typeImports(event.fields);
+        const eventTagFields = eventTagFieldsFor(ownerSlice, event, selection, true);
+        const eventFields = fieldsWithSelection(event.fields ?? [], eventTagFields);
+        const imports = typeImports(eventFields);
         const annotated = new Set();
-        const properties = event.fields.map((field) => {
-            const matchingTags = selection.fields.filter((selectionField) => !selectionField.derived && selectionField.source === field.name);
+        const properties = eventFields.map((field) => {
+            const matchingTags = eventTagFields.filter((selectionField) => !selectionField.derived && selectionField.source === field.name);
             const annotations = matchingTags.map((selectionField) => {
                 annotated.add(selectionField.tag.name);
                 return `    @EventTag(key = "${escapeKotlin(selectionField.tag.name)}")`;
             }).join('\n');
             return `${annotations ? `${annotations}\n` : ''}    val ${field.name}: ${mappedType(field, field.optional)}`;
         }).join(',\n');
-        const resolvedDerived = new Set(selection.fields
-            .filter((field) => field.derived && event.fields.some((eventField) => eventField.name === field.source))
+        const resolvedDerived = new Set(eventTagFields
+            .filter((field) => field.derived && eventFields.some((eventField) => eventField.name === field.source))
             .map((field) => field.tag.name));
-        const unresolved = selection.tags.filter((tag) => !annotated.has(tag.name) && !resolvedDerived.has(tag.name));
+        const expectedTags = uniqueTags([
+            ...(selection.tags ?? []),
+            ...(ownerSlice.tags ?? [])
+        ]);
+        const unresolved = expectedTags.filter((tag) => !annotated.has(tag.name) && !resolvedDerived.has(tag.name));
         const note = unresolved.length
             ? `\n/* TODO: provide values for selection tags: ${unresolved.map((tag) => tag.expression ? `${tag.name} = ${tag.expression}` : tag.name).join(', ')} */\n`
             : '\n';
@@ -327,7 +363,7 @@ ${note}
 @Event
 data class ${eventName}(
 ${properties}
-)${renderDerivedEventTags(selection, event)}
+)${renderDerivedEventTags(eventTagFields, {fields: eventFields})}
 `);
     }
 
@@ -404,7 +440,7 @@ ${sourcingHandlers}
             const transition = transitionForCommand(this.model, command);
             const guard = renderStateGuard(this.model, transition);
             const appendStatement = outputs.length > 0
-                ? `eventAppender.append(\n${outputs.map((event) => `            ${_eventTitle(event.title)}(${eventArguments(event, command)})`).join(',\n')}\n        )`
+                ? `eventAppender.append(\n${outputs.map((event) => `            ${_eventTitle(event.title)}(${eventArguments(event, command, selection)})`).join(',\n')}\n        )`
                 : '// TODO: append the event produced by this command.';
             if (command.startsLifecycle) {
                 return `    @CommandHandler\n    fun handle(command: ${commandName}, eventAppender: EventAppender) {\n        ${appendStatement}\n    }`;
@@ -729,9 +765,14 @@ function conceptSelectionFor(slice, model) {
     const concept = primaryConcept(slice);
     const conceptSlices = (model?.slices ?? [])
         .filter((candidate) => candidate.context === slice.context && primaryConcept(candidate) === concept && candidate.commands.length > 0);
-    const sourceSlice = conceptSlices.find((candidate) => candidate.startsLifecycle && commandIdFields(candidate).length > 0)
+    const sourceSlice = conceptSlices.find((candidate) => candidate.startsLifecycle && (candidate.tags ?? []).length > 0)
+        ?? conceptSlices.find((candidate) => (candidate.tags ?? []).length > 0)
+        ?? conceptSlices.find((candidate) => candidate.startsLifecycle && commandIdFields(candidate).length > 0)
         ?? conceptSlices.find((candidate) => commandIdFields(candidate).length > 0)
         ?? slice;
+    if ((sourceSlice.tags ?? []).length > 0) {
+        return selectionFromTags(sourceSlice, sourceSlice.tags, `${pascal(concept)}Selection`, concept, [concept]);
+    }
     const idFields = commandIdFields(sourceSlice);
     if (idFields.length > 0) {
         const tags = idFields.map((field) => ({name: field.name, expression: field.name}));
@@ -769,6 +810,51 @@ function selectionFromTags(slice, tags, name, metadataOwner, concepts) {
         };
     });
     return {name, tags, fields, metadataOwner, concepts};
+}
+
+function commandFieldsWithSelection(command, selection) {
+    return fieldsWithSelection(command.fields ?? [], selection.fields ?? []);
+}
+
+function fieldsWithSelection(fields, selectionFields) {
+    const result = [...fields];
+    const existing = new Set(result.map((field) => field.name));
+    (selectionFields ?? []).forEach((field) => {
+        if (existing.has(field.alias)) return;
+        result.push({
+            name: field.alias,
+            type: field.type,
+            cardinality: 'Single',
+            optional: false,
+            idAttribute: false,
+            generated: false,
+            technicalAttribute: false,
+            query: false
+        });
+        existing.add(field.alias);
+    });
+    return result;
+}
+
+function eventTagFieldsFor(slice, event, selection, includeMissing = false) {
+    const explicitTagSelection = (slice.tags ?? []).length > 0
+        ? selectionFromTags(slice, slice.tags, `${pascal(slice.name)}ExplicitTags`, slice.name, slice.concepts)
+        : {fields: []};
+    const byTagName = new Map();
+    [...(selection.fields ?? []), ...(explicitTagSelection.fields ?? [])]
+        .filter((field) => includeMissing || (event.fields ?? []).some((eventField) => eventField.name === field.source))
+        .forEach((field) => {
+            if (!byTagName.has(field.tag.name)) byTagName.set(field.tag.name, field);
+        });
+    return Array.from(byTagName.values());
+}
+
+function uniqueTags(tags) {
+    const byName = new Map();
+    tags.filter(Boolean).forEach((tag) => {
+        if (!byName.has(tag.name)) byName.set(tag.name, tag);
+    });
+    return Array.from(byName.values());
 }
 
 function commandIdFields(slice) {
@@ -851,16 +937,17 @@ function renderTagExpression(expression, sourceField, fields) {
     const normalizeMatch = normalized.match(/^normalize\(([A-Za-z_][A-Za-z0-9_]*)\)$/);
     if (normalizeMatch) {
         const field = fields.find((candidate) => candidate.name === normalizeMatch[1]) ?? sourceField;
-        const primitive = ['string', 'boolean', 'int', 'integer', 'long', 'float', 'double', 'number', 'decimal', 'bigdecimal', 'uuid', 'date', 'datetime']
-            .includes(String(field.type).toLowerCase());
+        const type = String(field.type).toLowerCase();
+        const primitive = ['string', 'boolean', 'int', 'integer', 'long', 'float', 'double', 'number', 'decimal', 'bigdecimal', 'uuid', 'date', 'datetime'].includes(type);
         const value = primitive ? field.name : `${field.name}.value`;
-        return `${value}.toString().trim().lowercase()`;
+        const textValue = type === 'string' ? value : `${value}.toString()`;
+        return `${textValue}.trim().lowercase()`;
     }
     return `${sourceField.name}.toString() /* TODO Medol tag expression: ${escapeKotlin(normalized)} */`;
 }
 
-function renderDerivedEventTags(selection, event) {
-    const derived = selection.fields.filter((field) => field.derived && event.fields.some((eventField) => eventField.name === field.source));
+function renderDerivedEventTags(fields, event) {
+    const derived = fields.filter((field) => field.derived && event.fields.some((eventField) => eventField.name === field.source));
     if (derived.length === 0) return '';
     const properties = derived.map((field) => [
         `    @EventTag(key = "${escapeKotlin(field.tag.name)}")`,
@@ -937,10 +1024,12 @@ function renderStateGuard(model, transition) {
     ].join('\n');
 }
 
-function eventArguments(event, command) {
-    return event.fields.map((field) => {
-        if (command.fields.some((candidate) => candidate.name === field.name)) return `${field.name} = command.${field.name}`;
-        const source = field.source?.from?.find((name) => command.fields.some((candidate) => candidate.name === name));
+function eventArguments(event, command, selection) {
+    const eventFields = fieldsWithSelection(event.fields ?? [], selection?.fields ?? []);
+    const commandFields = commandFieldsWithSelection(command, selection ?? {fields: []});
+    return eventFields.map((field) => {
+        if (commandFields.some((candidate) => candidate.name === field.name)) return `${field.name} = command.${field.name}`;
+        const source = field.source?.from?.find((name) => commandFields.some((candidate) => candidate.name === name));
         if (source) return `${field.name} = command.${source}`;
         return `${field.name} = ${fallbackValue(field)} /* TODO: ${field.source?.rule ?? 'derive value'} */`;
     }).join(', ');
@@ -1022,6 +1111,15 @@ function kebab(value) {
         .replace(/[^A-Za-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '')
         .toLowerCase();
+}
+
+function safeDatabaseName(value) {
+    const name = String(value ?? '')
+        .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+        .replace(/[^A-Za-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .toLowerCase();
+    return name || 'medol';
 }
 
 function safeIdentifier(value) {

@@ -20,12 +20,18 @@ docker compose up -d
 ./mvnw spring-boot:run
 ```
 
-Health endpoint: `http://localhost:8080/actuator/health`
+Health endpoint: `http://localhost:<%= appPort %>/actuator/health`
 
 OpenAPI endpoints:
 
-- Swagger UI: `http://localhost:8080/swagger-ui.html`
-- OpenAPI JSON: `http://localhost:8080/v3/api-docs`
+- Swagger UI: `http://localhost:<%= appPort %>/swagger-ui.html`
+- OpenAPI JSON: `http://localhost:<%= appPort %>/v3/api-docs`
+
+Default ports:
+
+- Application: `<%= appPort %>`; override with `SERVER_PORT`
+- PostgreSQL host port: `<%= dbPort %>`; override with `DB_PORT`
+- PostgreSQL database: `<%= dbName %>`; override the full connection with `DB_URL`
 
 ## Seed Development Data
 
@@ -51,6 +57,25 @@ node scripts/seed-dev-data.mjs --dry-run
 ```bash
 ./mvnw clean verify
 ```
+
+## Container Image
+
+Build a Docker image directly from Maven:
+
+```bash
+<% if (modulePrefix) { -%>
+./mvnw -pl <%= modulePrefix || '.' %> jib:dockerBuild
+<% } else { -%>
+./mvnw -pl <module-name> jib:dockerBuild
+<% } -%>
+```
+
+<% if (modulePrefix) { -%>
+The generated image is `<%= "medol/" + appName %>:0.0.1-SNAPSHOT` and exposes port `<%= appPort %>`.
+<% } else { -%>
+The generated image is `medol/<module-name>:0.0.1-SNAPSHOT`.
+<% } -%>
+The container disables Spring Boot docker-compose integration; pass `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` for the runtime database.
 
 Root package: `<%= rootPackage %>`
 

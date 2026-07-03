@@ -15,6 +15,9 @@
         <java.version>21</java.version>
         <kotlin.version>2.3.20</kotlin.version>
         <axon.version>5.1.1</axon.version>
+        <start-class><%= rootPackage %>.ApplicationKt</start-class>
+        <jib-maven-plugin.version>3.4.5</jib-maven-plugin.version>
+        <docker.image.prefix>medol</docker.image.prefix>
     </properties>
     <dependencyManagement>
         <dependencies>
@@ -120,6 +123,29 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>com.google.cloud.tools</groupId>
+                <artifactId>jib-maven-plugin</artifactId>
+                <version>${jib-maven-plugin.version}</version>
+                <configuration>
+                    <from>
+                        <image>eclipse-temurin:21-jre</image>
+                    </from>
+                    <to>
+                        <image>${docker.image.prefix}/${project.artifactId}:${project.version}</image>
+                    </to>
+                    <container>
+                        <ports>
+                            <port><%= appPort %></port>
+                        </ports>
+                        <environment>
+                            <JAVA_TOOL_OPTIONS>-XX:MaxRAMPercentage=75.0</JAVA_TOOL_OPTIONS>
+                            <SPRING_DOCKER_COMPOSE_ENABLED>false</SPRING_DOCKER_COMPOSE_ENABLED>
+                        </environment>
+                        <creationTime>USE_CURRENT_TIMESTAMP</creationTime>
+                    </container>
+                </configuration>
             </plugin>
             <plugin>
                 <groupId>org.jetbrains.kotlin</groupId>

@@ -83,6 +83,7 @@ module.exports = class extends Generator {
         });
         this.fs.copy(this.templatePath('gitignore'), this.destinationPath('.gitignore'));
         this._copyMavenWrapper();
+        this._writeDevSeedScript();
         this._writeAgentSkills();
         deployments.forEach((deployment) => this._withDeployment(deployment, () => this._writeSkeleton()));
     }
@@ -131,7 +132,8 @@ module.exports = class extends Generator {
         this.fs.copyTpl(this.templatePath('README.md.tpl'), this._destPath('README.md'), {
             appName,
             domain: this.model.domain,
-            rootPackage: this.model.rootPackage
+            rootPackage: this.model.rootPackage,
+            modulePrefix: this.modulePrefix
         });
         this.fs.copyTpl(this.templatePath('ApplicationTest.kt.tpl'), this._testKotlinPath('ApplicationTest.kt'), {
             rootPackage: this.model.rootPackage,
@@ -150,6 +152,7 @@ module.exports = class extends Generator {
         this.fs.copy(this.templatePath('gitignore'), this._destPath('.gitignore'));
         if (!this.modulePrefix) {
             this._copyMavenWrapper();
+            this._writeDevSeedScript();
         }
         this._writeValueTypes();
         this._writeConceptStates();
@@ -169,6 +172,10 @@ module.exports = class extends Generator {
         this.fs.copy(path.join(axonTemplates, '.mvn'), this.destinationPath('.mvn'));
         this.fs.copy(path.join(axonTemplates, 'root/mvnw'), this.destinationPath('mvnw'));
         this.fs.copy(path.join(axonTemplates, 'root/mvnw.cmd'), this.destinationPath('mvnw.cmd'));
+    }
+
+    _writeDevSeedScript() {
+        this.fs.copy(this.templatePath('seed-dev-data.mjs'), this.destinationPath('scripts/seed-dev-data.mjs'));
     }
 
     _writeValueTypes() {

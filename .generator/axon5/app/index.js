@@ -270,6 +270,7 @@ module.exports = class extends Generator {
             if (!primaryConcept(slice)) {
                 this._writeState(packageName, context, slicePackage, slice, selection, relatedEvents);
             }
+            this._writeDecision(packageName, context, slicePackage, slice, selection, relatedEvents);
             this._writeCommandHandlers(packageName, context, slicePackage, slice, selection, relatedEvents);
             this._writeCommandResource(packageName, context, slicePackage, slice);
         }
@@ -279,7 +280,8 @@ module.exports = class extends Generator {
     _writeSelection(packageName, pathPrefix, slice, selection) {
         const imports = typeImports(selection.fields);
         const properties = selection.fields.map((field) => `    val ${field.alias}: ${field.selectionType}`).join(',\n');
-        const tagConstants = selection.tags.map((tag) => `    const val ${constant(tag.name)} = "${escapeKotlin(tag.name)}"`).join('\n');
+        const tags = uniqueTags([...(selection.tags ?? []), ...(slice.tags ?? [])]);
+        const tagConstants = tags.map((tag) => `    const val ${constant(tag.name)} = "${escapeKotlin(tag.name)}"`).join('\n');
         const metadataOwner = selection.metadataOwner ?? slice.name;
         const concepts = selection.concepts ?? slice.concepts;
         this.fs.write(this._kotlinPath(`${pathPrefix}/${selection.name}.kt`), `package ${packageName}
@@ -332,25 +334,22 @@ ${properties}
         const packageName = `${this.model.rootPackage}.${context}.events`;
         const eventName = _eventTitle(event.title);
         const eventTagFields = eventTagFieldsFor(ownerSlice, event, selection, true);
-        const eventFields = fieldsWithSelection(event.fields ?? [], eventTagFields);
+        const eventFields = eventFieldsWithTags(event.fields ?? [], eventTagFields);
         const imports = typeImports(eventFields);
         const annotated = new Set();
         const properties = eventFields.map((field) => {
-            const matchingTags = eventTagFields.filter((selectionField) => !selectionField.derived && selectionField.source === field.name);
-            const annotations = matchingTags.map((selectionField) => {
-                annotated.add(selectionField.tag.name);
-                return `    @EventTag(key = "${escapeKotlin(selectionField.tag.name)}")`;
+            const annotations = (field.eventTagKeys ?? []).map((tagName) => {
+                annotated.add(tagName);
+                return `    @EventTag(key = "${escapeKotlin(tagName)}")`;
             }).join('\n');
-            return `${annotations ? `${annotations}\n` : ''}    val ${field.name}: ${mappedType(field, field.optional)}`;
+            const defaultValue = field.defaultValue ? ` = ${field.defaultValue}` : '';
+            return `${annotations ? `${annotations}\n` : ''}    val ${field.name}: ${mappedType(field, field.optional)}${defaultValue}`;
         }).join(',\n');
-        const resolvedDerived = new Set(eventTagFields
-            .filter((field) => field.derived && eventFields.some((eventField) => eventField.name === field.source))
-            .map((field) => field.tag.name));
         const expectedTags = uniqueTags([
             ...(selection.tags ?? []),
             ...(ownerSlice.tags ?? [])
         ]);
-        const unresolved = expectedTags.filter((tag) => !annotated.has(tag.name) && !resolvedDerived.has(tag.name));
+        const unresolved = expectedTags.filter((tag) => !annotated.has(tag.name));
         const note = unresolved.length
             ? `\n/* TODO: provide values for selection tags: ${unresolved.map((tag) => tag.expression ? `${tag.name} = ${tag.expression}` : tag.name).join(', ')} */\n`
             : '\n';
@@ -363,7 +362,7 @@ ${note}
 @Event
 data class ${eventName}(
 ${properties}
-)${renderDerivedEventTags(eventTagFields, {fields: eventFields})}
+)
 `);
     }
 
@@ -399,12 +398,29 @@ ${properties}
         }).join('\n\n');
         const eventImports = events.map((event) => `import ${this._eventPackage(event, slice)}.${_eventTitle(event.title)}`).join('\n');
         const stateImport = concept ? `import ${this.model.rootPackage}.${contextPackage(slice.context)}.domain.states.${stateEnumName}\n` : '';
+        const singleTag = selection.fields.length === 1;
+        const tagOwner = pascal(selection.metadataOwner ?? slice.name);
+        const entityAnnotation = singleTag
+            ? `@EventSourced(tagKey = ${tagOwner}Tags.${constant(selection.fields[0].tag.name)})`
+            : '@EventSourcedEntity';
         const criteria = selection.fields
-            .map((field) => `Tag.of("${escapeKotlin(field.tag.name)}", selection.${field.alias}.toString())`)
+            .map((field) => `EventCriteria.havingTags(Tag.of(${tagOwner}Tags.${constant(field.tag.name)}, selection.${field.alias}.toString()))`)
             .join(',\n                ');
+        const criteriaFunction = singleTag
+            ? ''
+            : `    companion object {
+        @JvmStatic
+        @EventCriteriaBuilder
+        fun resolveCriteria(selection: ${selection.name}): EventCriteria = EventCriteria.either(
+                ${criteria}
+        )
+    }
+
+`;
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${stateName}.kt`), `package ${packageName}
 
 import org.axonframework.eventsourcing.annotation.EventCriteriaBuilder
+import org.axonframework.eventsourcing.annotation.EventSourcedEntity
 import org.axonframework.eventsourcing.annotation.EventSourcingHandler
 import org.axonframework.eventsourcing.annotation.reflection.EntityCreator
 import org.axonframework.extension.spring.stereotype.EventSourced
@@ -414,16 +430,9 @@ ${eventImports}
 ${stateImport}
 ${imports}
 
-@EventSourced(idType = ${selection.name}::class)
+${entityAnnotation}
 class ${stateName} @EntityCreator constructor() {
-    companion object {
-        @JvmStatic
-        @EventCriteriaBuilder
-        fun resolveCriteria(selection: ${selection.name}): EventCriteria = EventCriteria.havingTags(
-                ${criteria}
-        )
-    }
-
+${criteriaFunction}
 ${stateFields}
 
 ${sourcingHandlers}
@@ -431,21 +440,19 @@ ${sourcingHandlers}
 `);
     }
 
-    _writeCommandHandlers(packageName, context, slicePackage, slice, selection, events) {
+    _writeDecision(packageName, context, slicePackage, slice, selection, events) {
         const stateTarget = stateTargetFor(this.model, slice);
         const stateName = stateTarget.name;
-        const handlers = slice.commands.map((command) => {
+        const decisionName = `${pascal(slice.name)}Decision`;
+        const methods = slice.commands.map((command) => {
             const commandName = _commandTitle(command.title);
             const outputs = outboundEvents(command, events);
             const transition = transitionForCommand(this.model, command);
-            const guard = renderStateGuard(this.model, transition);
-            const appendStatement = outputs.length > 0
-                ? `eventAppender.append(\n${outputs.map((event) => `            ${_eventTitle(event.title)}(${eventArguments(event, command, selection)})`).join(',\n')}\n        )`
-                : '// TODO: append the event produced by this command.';
-            if (command.startsLifecycle) {
-                return `    @CommandHandler\n    fun handle(command: ${commandName}, eventAppender: EventAppender) {\n        ${appendStatement}\n    }`;
-            }
-            return `    @CommandHandler\n    fun handle(command: ${commandName}, @InjectEntity state: ${stateName}, eventAppender: EventAppender) {\n${guard}\n        ${appendStatement}\n    }`;
+            const guard = command.startsLifecycle ? '' : `${renderStateGuard(this.model, transition)}\n`;
+            const returnStatement = outputs.length > 0
+                ? `return listOf(\n${outputs.map((event) => `            ${_eventTitle(event.title)}(${eventArguments(event, command, selection)})`).join(',\n')}\n        )`
+                : 'return emptyList() // TODO: return the event produced by this command.';
+            return `    fun decide(command: ${commandName}, state: ${stateName}): List<Any> {\n${guard}        ${returnStatement}\n    }`;
         }).join('\n\n');
         const commandImports = slice.commands.map((command) => `import ${packageName}.${_commandTitle(command.title)}`).join('\n');
         const eventImports = events.map((event) => `import ${this._eventPackage(event, slice)}.${_eventTitle(event.title)}`).join('\n');
@@ -455,11 +462,8 @@ ${sourcingHandlers}
             .filter((transition) => transitionUsesConceptState(this.model, transition))
             .map((transition) => `import ${this.model.rootPackage}.${contextPackage(transition.context ?? slice.context)}.domain.states.${conceptStateEnumName(transition.owner.name)}`), (value) => value)
             .join('\n');
-        this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${pascal(slice.name)}CommandHandler.kt`), `package ${packageName}
+        this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${decisionName}.kt`), `package ${packageName}
 
-import org.axonframework.messaging.commandhandling.annotation.CommandHandler
-import org.axonframework.messaging.eventhandling.gateway.EventAppender
-import org.axonframework.modelling.annotation.InjectEntity
 import org.springframework.stereotype.Component
 ${commandImports}
 ${eventImports}
@@ -467,7 +471,34 @@ ${stateImport}
 ${stateEnumImports}
 
 @Component
-class ${pascal(slice.name)}CommandHandler {
+class ${decisionName} {
+${methods}
+}
+`);
+    }
+
+    _writeCommandHandlers(packageName, context, slicePackage, slice, selection, events) {
+        const stateTarget = stateTargetFor(this.model, slice);
+        const stateName = stateTarget.name;
+        const decisionName = `${pascal(slice.name)}Decision`;
+        const injectEntity = injectEntityExpression(selection);
+        const handlers = slice.commands.map((command) => {
+            const commandName = _commandTitle(command.title);
+            return `    @CommandHandler\n    fun handle(command: ${commandName}, @InjectEntity${injectEntity} state: ${stateName}, eventAppender: EventAppender) {\n        eventAppender.append(decision.decide(command, state))\n    }`;
+        }).join('\n\n');
+        const commandImports = slice.commands.map((command) => `import ${packageName}.${_commandTitle(command.title)}`).join('\n');
+        const stateImport = stateTarget.packageName === packageName ? '' : `import ${stateTarget.packageName}.${stateName}\n`;
+        this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${pascal(slice.name)}CommandHandler.kt`), `package ${packageName}
+
+import org.axonframework.messaging.commandhandling.annotation.CommandHandler
+import org.axonframework.messaging.eventhandling.gateway.EventAppender
+import org.axonframework.modelling.annotation.InjectEntity
+import org.springframework.stereotype.Component
+${commandImports}
+${stateImport}
+
+@Component
+class ${pascal(slice.name)}CommandHandler(private val decision: ${decisionName}) {
 ${handlers}
 }
 `);
@@ -486,9 +517,7 @@ ${handlers}
                 conceptSlices.flatMap((slice) => relatedEventsForSlice(this.model, slice)),
                 (event) => event.id ?? `${event.slice}:${event.name}`
             );
-            const childTransitions = selection.fields.some((field) => field.source === 'organizationId' || field.alias === 'organizationId')
-                ? []
-                : childStateTransitions(conceptSlices);
+            const childTransitions = [];
             this._writeState(packageName, context, conceptPackage, first, selection, events, target.name, childTransitions);
         }
     }
@@ -765,13 +794,16 @@ function conceptSelectionFor(slice, model) {
     const concept = primaryConcept(slice);
     const conceptSlices = (model?.slices ?? [])
         .filter((candidate) => candidate.context === slice.context && primaryConcept(candidate) === concept && candidate.commands.length > 0);
-    const sourceSlice = conceptSlices.find((candidate) => candidate.startsLifecycle && (candidate.tags ?? []).length > 0)
-        ?? conceptSlices.find((candidate) => (candidate.tags ?? []).length > 0)
+    const sourceSlice = conceptSlices.find((candidate) => candidate.startsLifecycle && explicitConsistencyTags(candidate).length > commandIdFields(candidate).length)
+        ?? conceptSlices.find((candidate) => explicitConsistencyTags(candidate).length > commandIdFields(candidate).length)
         ?? conceptSlices.find((candidate) => candidate.startsLifecycle && commandIdFields(candidate).length > 0)
         ?? conceptSlices.find((candidate) => commandIdFields(candidate).length > 0)
+        ?? conceptSlices.find((candidate) => candidate.startsLifecycle && (candidate.tags ?? []).length > 0)
+        ?? conceptSlices.find((candidate) => (candidate.tags ?? []).length > 0)
         ?? slice;
-    if ((sourceSlice.tags ?? []).length > 0) {
-        return selectionFromTags(sourceSlice, sourceSlice.tags, `${pascal(concept)}Selection`, concept, [concept]);
+    const explicitTags = explicitConsistencyTags(sourceSlice);
+    if (explicitTags.length > commandIdFields(sourceSlice).length) {
+        return selectionFromTags(sourceSlice, explicitTags, `${pascal(concept)}Selection`, concept, [concept]);
     }
     const idFields = commandIdFields(sourceSlice);
     if (idFields.length > 0) {
@@ -785,10 +817,17 @@ function sliceSelectionFor(slice) {
     const firstCommand = slice.commands[0];
     const commandFields = firstCommand?.fields ?? [];
     const idFields = commandFields.filter((field) => field.idAttribute);
-    const tags = idFields.length > 0
+    const explicitTags = explicitConsistencyTags(slice);
+    const tags = explicitTags.length > idFields.length
+        ? explicitTags
+        : idFields.length > 0
         ? idFields.map((field) => ({name: field.name, expression: field.name}))
         : (slice.tags.length > 0 ? slice.tags : fallbackTags(slice, commandFields));
     return selectionFromTags(slice, tags, `${pascal(slice.name)}Selection`, slice.name, slice.concepts);
+}
+
+function explicitConsistencyTags(slice) {
+    return slice.tags ?? [];
 }
 
 function selectionFromTags(slice, tags, name, metadataOwner, concepts) {
@@ -836,6 +875,39 @@ function fieldsWithSelection(fields, selectionFields) {
     return result;
 }
 
+function eventFieldsWithTags(fields, tagFields) {
+    const result = fields.map((field) => ({
+        ...field,
+        eventTagKeys: (tagFields ?? [])
+            .filter((tagField) => !tagField.derived && tagField.source === field.name)
+            .map((tagField) => tagField.tag.name)
+    }));
+    const existing = new Set(result.map((field) => field.name));
+    const eventShape = {fields: result};
+    (tagFields ?? [])
+        .filter((tagField) => tagField.derived)
+        .filter((tagField) => fields.some((field) => field.name === tagField.source))
+        .forEach((tagField) => {
+            const name = derivedEventTagProperty(tagField, eventShape);
+            if (existing.has(name)) return;
+            result.push({
+                name,
+                type: 'String',
+                cardinality: 'Single',
+                optional: false,
+                idAttribute: false,
+                generated: false,
+                technicalAttribute: false,
+                query: false,
+                eventTagKeys: [tagField.tag.name],
+                defaultValue: tagField.eventExpression
+            });
+            existing.add(name);
+            eventShape.fields = result;
+        });
+    return result;
+}
+
 function eventTagFieldsFor(slice, event, selection, includeMissing = false) {
     const explicitTagSelection = (slice.tags ?? []).length > 0
         ? selectionFromTags(slice, slice.tags, `${pascal(slice.name)}ExplicitTags`, slice.name, slice.concepts)
@@ -847,6 +919,13 @@ function eventTagFieldsFor(slice, event, selection, includeMissing = false) {
             if (!byTagName.has(field.tag.name)) byTagName.set(field.tag.name, field);
         });
     return Array.from(byTagName.values());
+}
+
+function injectEntityExpression(selection) {
+    if ((selection.fields ?? []).length === 1) {
+        return `(idProperty = "${escapeKotlin(selection.fields[0].alias)}")`;
+    }
+    return '(idProperty = "selection")';
 }
 
 function uniqueTags(tags) {

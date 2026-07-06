@@ -18,6 +18,7 @@ module.exports = class extends Generator {
         this.modulePrefix = '';
         this.currentDeployment = null;
         this.currentDeploymentIndex = 0;
+        this.eventStorageMode = String(this.opts.eventStorageMode ?? this.model.eventStorageMode ?? 'dcb').toLowerCase();
         configureValueTypes(this.model.valueTypes, this.model.rootPackage, this.model.concepts);
     }
 
@@ -31,7 +32,7 @@ module.exports = class extends Generator {
                 choices: ['Skeleton', 'slices', 'all']
             });
         }
-        if (!this.opts.allSlices && this.opts.generatorType === 'slices') {
+        if (!this.opts.allSlices && String(this.opts.generatorType ?? '').toLowerCase() === 'slices') {
             prompts.push({
                 type: 'checkbox',
                 name: 'sliceNames',
@@ -47,8 +48,8 @@ module.exports = class extends Generator {
     }
 
     writing() {
-        const type = this.answers.generatorType;
-        if (type === 'Skeleton' || type === 'all') {
+        const type = String(this.answers.generatorType ?? '').toLowerCase();
+        if (type === 'skeleton' || type === 'all') {
             if (this._isMonoMode()) {
                 this._writeMonoSkeleton();
             } else {
@@ -164,6 +165,11 @@ module.exports = class extends Generator {
         this.fs.copyTpl(this.templatePath('ApiExceptionHandler.kt.tpl'), this._kotlinPath('support/ApiExceptionHandler.kt'), {
             rootPackage: this.model.rootPackage
         });
+        if (this.eventStorageMode === 'dcb') {
+            this.fs.copyTpl(this.templatePath('AxonEventStorageConfig.kt.tpl'), this._kotlinPath('support/AxonEventStorageConfig.kt'), {
+                rootPackage: this.model.rootPackage
+            });
+        }
         this.fs.copyTpl(this.templatePath('application.yml'), this._destPath('src/main/resources/application.yml'), runtime);
         this.fs.copyTpl(this.templatePath('docker-compose.yml'), this._destPath('docker-compose.yml'), runtime);
         this.fs.copy(this.templatePath('V1__baseline.sql'), this._destPath('src/main/resources/db/migration/V1__baseline.sql'));
@@ -261,17 +267,19 @@ module.exports = class extends Generator {
         const slicePackage = _sliceTitle(slice.title);
         const packageName = `${this.model.rootPackage}.${context}.${slicePackage}`;
         if (slice.commands.length > 0) {
-            const selection = selectionFor(slice, this.model);
+            const selection = selectionFor(slice, this.model, this.eventStorageMode);
             const selectionTarget = selectionTargetFor(this.model, slice);
             const relatedEvents = relatedEventsForSlice(this.model, slice);
+            const reservations = uniqueReservationsForSlice(slice, this.model, this.eventStorageMode);
             this._writeSelection(selectionTarget.packageName, selectionTarget.pathPrefix, slice, selection);
-            slice.commands.forEach((command) => this._writeCommand(packageName, context, slicePackage, command, selection, selectionTarget.packageName));
+            reservations.forEach((reservation) => this._writeReservationArtifacts(context, reservation));
+            slice.commands.forEach((command) => this._writeCommand(packageName, context, slicePackage, command, selection, selectionTarget.packageName, reservations));
             relatedEvents.forEach((event) => this._writeEvent(event, slice, selection));
             if (!primaryConcept(slice)) {
                 this._writeState(packageName, context, slicePackage, slice, selection, relatedEvents);
             }
-            this._writeDecision(packageName, context, slicePackage, slice, selection, relatedEvents);
-            this._writeCommandHandlers(packageName, context, slicePackage, slice, selection, relatedEvents);
+            this._writeDecision(packageName, context, slicePackage, slice, selection, relatedEvents, reservations);
+            this._writeCommandHandlers(packageName, context, slicePackage, slice, selection, relatedEvents, reservations);
             this._writeCommandResource(packageName, context, slicePackage, slice);
         }
         slice.readmodels.forEach((readmodel) => this._writeReadModel(packageName, context, slicePackage, slice, readmodel));
@@ -280,17 +288,20 @@ module.exports = class extends Generator {
     _writeSelection(packageName, pathPrefix, slice, selection) {
         const imports = typeImports(selection.fields);
         const properties = selection.fields.map((field) => `    val ${field.alias}: ${field.selectionType}`).join(',\n');
-        const tags = uniqueTags([...(selection.tags ?? []), ...(slice.tags ?? [])]);
+        const tags = uniqueTags(selection.tags ?? []);
         const tagConstants = tags.map((tag) => `    const val ${constant(tag.name)} = "${escapeKotlin(tag.name)}"`).join('\n');
         const metadataOwner = selection.metadataOwner ?? slice.name;
         const concepts = selection.concepts ?? slice.concepts;
+        const body = selection.compositeTag
+            ? ` {\n    val ${selection.compositeTag.property}: String = ${selection.compositeTag.expression}\n}`
+            : '';
         this.fs.write(this._kotlinPath(`${pathPrefix}/${selection.name}.kt`), `package ${packageName}
 
 ${imports}
 
 data class ${selection.name}(
 ${properties}
-)
+)${body}
 
 object ${pascal(metadataOwner)}Tags {
 ${tagConstants}
@@ -302,16 +313,23 @@ object ${pascal(metadataOwner)}Metadata {
 `);
     }
 
-    _writeCommand(packageName, context, slicePackage, command, selection, selectionPackageName = packageName) {
+    _writeCommand(packageName, context, slicePackage, command, selection, selectionPackageName = packageName, reservations = []) {
         const commandName = _commandTitle(command.title);
         const commandFields = commandFieldsWithSelection(command, selection);
-        const imports = typeImports(commandFields);
+        const commandReservations = command.startsLifecycle ? reservations : [];
+        const imports = uniqueBy([
+            typeImports(commandFields),
+            ...commandReservations.map((reservation) => `import ${reservation.packageName}.${reservation.selectionName}`)
+        ].filter(Boolean), (value) => value).join('\n');
         const selectionImport = selectionPackageName === packageName ? '' : `import ${selectionPackageName}.${selection.name}\n`;
         const properties = commandFields.map((field) => {
             const defaultValue = field.generated ? ` = ${fallbackValue(field)}` : '';
             return `    val ${field.name}: ${mappedType(field, field.optional)}${defaultValue}`;
         }).join(',\n');
         const selectionArgs = selection.fields.map((field) => `${field.alias} = ${field.commandExpression}`).join(', ');
+        const reservationSelections = commandReservations.map((reservation) =>
+            `    val ${reservation.selectionProperty}: ${reservation.selectionName} = ${reservation.selectionName}(${reservation.selectionArgs.join(', ')})`
+        ).join('\n');
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${commandName}.kt`), `package ${packageName}
 
 import org.axonframework.messaging.commandhandling.annotation.Command
@@ -324,6 +342,99 @@ ${properties}
 ) {
     @TargetEntityId
     val selection: ${selection.name} = ${selection.name}(${selectionArgs})
+${reservationSelections ? `\n${reservationSelections}` : ''}
+}
+`);
+    }
+
+    _writeReservationArtifacts(context, reservation) {
+        const fields = [
+            ...reservation.idFields,
+            ...reservation.originalFields,
+            ...reservation.normalizedFields
+        ];
+        const compositeTag = reservation.eventStorageMode === 'aggregate' && reservation.selectionFields.length > 1
+            ? {
+                name: safeIdentifier(String(reservation.concept ?? reservation.selectionName).charAt(0).toLowerCase() + String(reservation.concept ?? reservation.selectionName).slice(1)),
+                property: 'consistencyKey',
+                expression: compositeKeyExpression(reservation.selectionFields.map((field) => field.name))
+            }
+            : undefined;
+        const eventImports = typeImports(fields);
+        const eventProperties = [
+            ...fields.map((field) => {
+                const tag = !compositeTag && reservation.normalizedFields.some((candidate) => candidate.name === field.name)
+                ? `    @EventTag(key = "${escapeKotlin(field.tagName)}")\n`
+                : '';
+                return `${tag}    val ${field.name}: ${mappedType(field, false)}`;
+            }),
+            ...(compositeTag ? [`    @EventTag(key = "${escapeKotlin(compositeTag.name)}")\n    val ${compositeTag.property}EventTag: String = ${compositeTag.expression}`] : [])
+        ].join(',\n');
+        this.fs.write(this._kotlinPath(`${context}/events/${reservation.eventName}.kt`), `package ${this.model.rootPackage}.${context}.events
+
+import org.axonframework.eventsourcing.annotation.EventTag
+import org.axonframework.messaging.eventhandling.annotation.Event
+${eventImports}
+
+@Event
+data class ${reservation.eventName}(
+${eventProperties}
+)
+`);
+
+        const selectionProperties = reservation.selectionFields.map((field) => `    val ${field.name}: String`).join(',\n');
+        const selectionBody = compositeTag
+            ? ` {\n    val ${compositeTag.property}: String = ${compositeTag.expression}\n}`
+            : '';
+        this.fs.write(this._kotlinPath(`${reservation.packagePath}/${reservation.selectionName}.kt`), `package ${reservation.packageName}
+
+data class ${reservation.selectionName}(
+${selectionProperties}
+)${selectionBody}
+
+object ${reservation.tagsName} {
+${(compositeTag ? [{tagName: compositeTag.name}] : reservation.normalizedFields).map((field) => `    const val ${constant(field.tagName)} = "${escapeKotlin(field.tagName)}"`).join('\n')}
+}
+`);
+
+        const criteria = compositeTag
+            ? `Tag.of(${reservation.tagsName}.${constant(compositeTag.name)}, selection.${compositeTag.property})`
+            : reservation.selectionFields
+                .map((field) => `Tag.of(${reservation.tagsName}.${constant(field.tagName)}, selection.${field.name})`)
+                .join(',\n                ');
+        const sourcingAssignments = [
+            '        reserved = true',
+            ...reservation.idFields.map((field) => `        ${field.name} = event.${field.name}`)
+        ].join('\n');
+        this.fs.write(this._kotlinPath(`${reservation.packagePath}/${reservation.stateName}.kt`), `package ${reservation.packageName}
+
+import org.axonframework.eventsourcing.annotation.EventCriteriaBuilder
+import org.axonframework.eventsourcing.annotation.EventSourcingHandler
+import org.axonframework.eventsourcing.annotation.reflection.EntityCreator
+import org.axonframework.extension.spring.stereotype.EventSourced
+import org.axonframework.messaging.eventstreaming.EventCriteria
+import org.axonframework.messaging.eventstreaming.Tag
+import ${this.model.rootPackage}.${context}.events.${reservation.eventName}
+${typeImports(reservation.idFields)}
+
+@EventSourced(idType = ${reservation.selectionName}::class)
+class ${reservation.stateName} @EntityCreator constructor() {
+
+    var reserved: Boolean = false
+${reservation.idFields.map((field) => `    var ${field.name}: ${stateFieldType(field)} = ${stateFieldDefault(field)}`).join('\n')}
+
+    companion object {
+        @JvmStatic
+        @EventCriteriaBuilder
+        fun resolveCriteria(selection: ${reservation.selectionName}): EventCriteria = EventCriteria.havingTags(
+                ${criteria}
+        )
+    }
+
+    @EventSourcingHandler
+    fun evolve(event: ${reservation.eventName}): ${reservation.stateName} = apply {
+${sourcingAssignments}
+    }
 }
 `);
     }
@@ -345,10 +456,7 @@ ${properties}
             const defaultValue = field.defaultValue ? ` = ${field.defaultValue}` : '';
             return `${annotations ? `${annotations}\n` : ''}    val ${field.name}: ${mappedType(field, field.optional)}${defaultValue}`;
         }).join(',\n');
-        const expectedTags = uniqueTags([
-            ...(selection.tags ?? []),
-            ...(ownerSlice.tags ?? [])
-        ]);
+        const expectedTags = uniqueTags(selection.tags ?? []);
         const unresolved = expectedTags.filter((tag) => !annotated.has(tag.name));
         const note = unresolved.length
             ? `\n/* TODO: provide values for selection tags: ${unresolved.map((tag) => tag.expression ? `${tag.name} = ${tag.expression}` : tag.name).join(', ')} */\n`
@@ -377,7 +485,7 @@ ${properties}
         const hasChildMemberState = childTransitions.length > 0;
         const fields = uniqueFields(events.flatMap((event) => event.fields))
             .filter((field) => !(hasChildMemberState && field.name === 'organizationId'));
-        const imports = typeImports(fields);
+        const imports = typeImports(uniqueFields([...fields, ...(selection.fields ?? [])]));
         const stateEnumName = concept ? conceptStateEnumName(concept) : undefined;
         const stateFields = [
             ...(concept ? [`    var currentState: ${stateEnumName}? = null`] : []),
@@ -400,14 +508,25 @@ ${properties}
         const stateImport = concept ? `import ${this.model.rootPackage}.${contextPackage(slice.context)}.domain.states.${stateEnumName}\n` : '';
         const singleTag = selection.fields.length === 1;
         const tagOwner = pascal(selection.metadataOwner ?? slice.name);
+        const idType = singleTag ? selection.fields[0].selectionType.replace(/\?$/, '') : undefined;
         const entityAnnotation = singleTag
-            ? `@EventSourced(tagKey = ${tagOwner}Tags.${constant(selection.fields[0].tag.name)})`
-            : '@EventSourcedEntity';
-        const criteria = selection.fields
-            .map((field) => `EventCriteria.havingTags(Tag.of(${tagOwner}Tags.${constant(field.tag.name)}, selection.${field.alias}.toString()))`)
-            .join(',\n                ');
+            ? `@EventSourced(idType = ${idType}::class, tagKey = ${tagOwner}Tags.${constant(selection.fields[0].tag.name)})`
+            : `@EventSourced(idType = ${selection.name}::class)`;
+        const criteria = selection.compositeTag
+            ? `EventCriteria.havingTags(Tag.of(${tagOwner}Tags.${constant(selection.compositeTag.tag.name)}, selection.${selection.compositeTag.property}))`
+            : selection.fields
+                .map((field) => `EventCriteria.havingTags(Tag.of(${tagOwner}Tags.${constant(field.tag.name)}, selection.${field.alias}.toString()))`)
+                .join(',\n                ');
         const criteriaFunction = singleTag
             ? ''
+            : selection.compositeTag
+            ? `    companion object {
+        @JvmStatic
+        @EventCriteriaBuilder
+        fun resolveCriteria(selection: ${selection.name}): EventCriteria = ${criteria}
+    }
+
+`
             : `    companion object {
         @JvmStatic
         @EventCriteriaBuilder
@@ -420,7 +539,6 @@ ${properties}
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${stateName}.kt`), `package ${packageName}
 
 import org.axonframework.eventsourcing.annotation.EventCriteriaBuilder
-import org.axonframework.eventsourcing.annotation.EventSourcedEntity
 import org.axonframework.eventsourcing.annotation.EventSourcingHandler
 import org.axonframework.eventsourcing.annotation.reflection.EntityCreator
 import org.axonframework.extension.spring.stereotype.EventSourced
@@ -440,23 +558,43 @@ ${sourcingHandlers}
 `);
     }
 
-    _writeDecision(packageName, context, slicePackage, slice, selection, events) {
+    _writeDecision(packageName, context, slicePackage, slice, selection, events, reservations = []) {
         const stateTarget = stateTargetFor(this.model, slice);
         const stateName = stateTarget.name;
         const decisionName = `${pascal(slice.name)}Decision`;
         const methods = slice.commands.map((command) => {
             const commandName = _commandTitle(command.title);
             const outputs = outboundEvents(command, events);
+            const commandReservations = command.startsLifecycle ? reservations : [];
+            const includeState = !command.startsLifecycle;
+            const stateParam = includeState ? `, state: ${stateName}` : '';
+            const reservationParams = commandReservations.map((reservation) => `, ${reservation.stateParam}: ${reservation.stateName}`).join('');
+            const reservationGuard = commandReservations.map((reservation) => [
+                `        require(!${reservation.stateParam}.reserved) {`,
+                `            "${escapeKotlin(reservation.message)}"`,
+                '        }'
+            ].join('\n')).join('\n');
+            const reservationEvents = commandReservations.map((reservation) =>
+                `            ${reservation.eventName}(${reservation.eventArgs.join(', ')})`
+            );
             const transition = transitionForCommand(this.model, command);
             const guard = command.startsLifecycle ? '' : `${renderStateGuard(this.model, transition)}\n`;
+            const eventLines = [
+                ...reservationEvents,
+                ...outputs.map((event) => `            ${_eventTitle(event.title)}(${eventArguments(event, command, selection)})`)
+            ];
             const returnStatement = outputs.length > 0
-                ? `return listOf(\n${outputs.map((event) => `            ${_eventTitle(event.title)}(${eventArguments(event, command, selection)})`).join(',\n')}\n        )`
+                ? `return listOf(\n${eventLines.join(',\n')}\n        )`
                 : 'return emptyList() // TODO: return the event produced by this command.';
-            return `    fun decide(command: ${commandName}, state: ${stateName}): List<Any> {\n${guard}        ${returnStatement}\n    }`;
+            return `    fun decide(command: ${commandName}${stateParam}${reservationParams}): List<Any> {\n${guard}${reservationGuard ? `${reservationGuard}\n` : ''}        ${returnStatement}\n    }`;
         }).join('\n\n');
         const commandImports = slice.commands.map((command) => `import ${packageName}.${_commandTitle(command.title)}`).join('\n');
-        const eventImports = events.map((event) => `import ${this._eventPackage(event, slice)}.${_eventTitle(event.title)}`).join('\n');
+        const eventImports = uniqueBy([
+            ...events.map((event) => `import ${this._eventPackage(event, slice)}.${_eventTitle(event.title)}`),
+            ...reservations.map((reservation) => `import ${this.model.rootPackage}.${context}.events.${reservation.eventName}`)
+        ], (value) => value).join('\n');
         const stateImport = stateTarget.packageName === packageName ? '' : `import ${stateTarget.packageName}.${stateName}\n`;
+        const reservationStateImports = reservations.map((reservation) => `import ${reservation.packageName}.${reservation.stateName}`).join('\n');
         const stateEnumImports = uniqueBy(slice.commands
             .map((command) => transitionForCommand(this.model, command))
             .filter((transition) => transitionUsesConceptState(this.model, transition))
@@ -468,6 +606,7 @@ import org.springframework.stereotype.Component
 ${commandImports}
 ${eventImports}
 ${stateImport}
+${reservationStateImports}
 ${stateEnumImports}
 
 @Component
@@ -477,17 +616,25 @@ ${methods}
 `);
     }
 
-    _writeCommandHandlers(packageName, context, slicePackage, slice, selection, events) {
+    _writeCommandHandlers(packageName, context, slicePackage, slice, selection, events, reservations = []) {
         const stateTarget = stateTargetFor(this.model, slice);
         const stateName = stateTarget.name;
         const decisionName = `${pascal(slice.name)}Decision`;
         const injectEntity = injectEntityExpression(selection);
         const handlers = slice.commands.map((command) => {
             const commandName = _commandTitle(command.title);
-            return `    @CommandHandler\n    fun handle(command: ${commandName}, @InjectEntity${injectEntity} state: ${stateName}, eventAppender: EventAppender) {\n        eventAppender.append(decision.decide(command, state))\n    }`;
+            const commandReservations = command.startsLifecycle ? reservations : [];
+            const includeState = !command.startsLifecycle;
+            const stateParam = includeState ? `, @InjectEntity${injectEntity} state: ${stateName}` : '';
+            const reservationParams = commandReservations.map((reservation) =>
+                `, @InjectEntity(idProperty = "${escapeKotlin(reservation.selectionProperty)}") ${reservation.stateParam}: ${reservation.stateName}`
+            ).join('');
+            const decisionArgs = ['command', ...(includeState ? ['state'] : []), ...commandReservations.map((reservation) => reservation.stateParam)].join(', ');
+            return `    @CommandHandler\n    fun handle(command: ${commandName}${stateParam}${reservationParams}, eventAppender: EventAppender) {\n        eventAppender.append(decision.decide(${decisionArgs}))\n    }`;
         }).join('\n\n');
         const commandImports = slice.commands.map((command) => `import ${packageName}.${_commandTitle(command.title)}`).join('\n');
         const stateImport = stateTarget.packageName === packageName ? '' : `import ${stateTarget.packageName}.${stateName}\n`;
+        const reservationStateImports = reservations.map((reservation) => `import ${reservation.packageName}.${reservation.stateName}`).join('\n');
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${pascal(slice.name)}CommandHandler.kt`), `package ${packageName}
 
 import org.axonframework.messaging.commandhandling.annotation.CommandHandler
@@ -496,6 +643,7 @@ import org.axonframework.modelling.annotation.InjectEntity
 import org.springframework.stereotype.Component
 ${commandImports}
 ${stateImport}
+${reservationStateImports}
 
 @Component
 class ${pascal(slice.name)}CommandHandler(private val decision: ${decisionName}) {
@@ -508,7 +656,7 @@ ${handlers}
         const groups = groupByMap(slices.filter((slice) => primaryConcept(slice) && slice.commands.length > 0), (slice) => primaryConcept(slice));
         for (const [, conceptSlices] of groups.entries()) {
             const first = conceptSlices[0];
-            const selection = selectionFor(first, this.model);
+            const selection = selectionFor(first, this.model, this.eventStorageMode);
             const target = stateTargetFor(this.model, first);
             const context = contextPackage(first.context);
             const conceptPackage = _sliceTitle(primaryConcept(first));
@@ -783,14 +931,125 @@ ${handlers}
     }
 };
 
-function selectionFor(slice, model) {
+function selectionFor(slice, model, eventStorageMode = 'dcb') {
     if (primaryConcept(slice)) {
-        return conceptSelectionFor(slice, model);
+        return conceptSelectionFor(slice, model, eventStorageMode);
     }
-    return sliceSelectionFor(slice);
+    return sliceSelectionFor(slice, eventStorageMode);
 }
 
-function conceptSelectionFor(slice, model) {
+function uniqueReservationsForSlice(slice, model, eventStorageMode = 'dcb') {
+    const command = slice.commands?.[0];
+    if (!command) return [];
+    const commandFields = command.fields ?? [];
+    const idFields = commandFields.filter((field) => field.idAttribute);
+    const expressions = (slice.specifications ?? [])
+        .flatMap((specification) => [...(specification.validates ?? []), ...(specification.expressions ?? [])])
+        .map((expression) => parseUniqueExpression(expression))
+        .filter(Boolean);
+    return uniqueBy(expressions, (expression) => `${expression.concept}:${expression.fields.join(',')}`)
+        .map((expression) => reservationForUniqueExpression(slice, model, command, commandFields, idFields, expression, eventStorageMode))
+        .filter(Boolean);
+}
+
+function parseUniqueExpression(expression) {
+    const value = String(expression ?? '').trim();
+    const match = value.match(/^unique\s+(.+)$/i);
+    if (!match) return undefined;
+    const body = match[1].trim();
+    const terms = body.startsWith('(') && body.endsWith(')')
+        ? body.slice(1, -1).split(',').map((term) => term.trim())
+        : [body];
+    const fields = terms.map((term) => {
+        const fieldMatch = term.match(/^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)$/);
+        return fieldMatch ? {concept: fieldMatch[1], field: fieldMatch[2]} : undefined;
+    });
+    if (fields.some((field) => !field)) return undefined;
+    const concept = fields[0].concept;
+    if (fields.some((field) => field.concept !== concept)) return undefined;
+    return {concept, fields: fields.map((field) => field.field)};
+}
+
+function reservationForUniqueExpression(slice, model, command, commandFields, idFields, expression, eventStorageMode = 'dcb') {
+    const concept = primaryConcept(slice) ?? expression.concept;
+    if (expression.concept !== concept) return undefined;
+    const sourceFields = expression.fields
+        .map((fieldName) => commandFields.find((field) => field.name === fieldName))
+        .filter(Boolean);
+    if (sourceFields.length !== expression.fields.length) return undefined;
+
+    const fieldLabels = sourceFields.map((field) => uniqueFieldLabel(concept, field.name));
+    const suffix = fieldLabels.join('');
+    const base = `${pascal(concept)}${suffix}`;
+    const context = contextPackage(slice.context);
+    const packagePath = `${context}/${_sliceTitle(concept)}`;
+    const selectionFields = sourceFields.map((field, index) => ({
+        ...field,
+        name: sourceFields.length === 1 ? 'normalizedName' : `normalized${fieldLabels[index]}`,
+        tagName: field.name,
+        selectionExpression: normalizedFieldExpression(field),
+        decisionExpression: normalizedFieldExpression(field, 'command')
+    }));
+    const normalizedFields = selectionFields.map((field) => ({
+        name: field.name,
+        type: 'String',
+        cardinality: 'Single',
+        optional: false,
+        tagName: field.tagName
+    }));
+    const originalFields = sourceFields.map((field) => ({
+        ...field,
+        tagName: field.name
+    }));
+    const selectionName = `${base}Selection`;
+    const stateName = `${base}ReservationState`;
+    const eventName = `${base}ReservedEvent`;
+    const selectionProperty = `${safeIdentifier(base.charAt(0).toLowerCase() + base.slice(1))}Selection`;
+    const stateParam = `${safeIdentifier(base.charAt(0).toLowerCase() + base.slice(1))}Reservation`;
+    const selectionArgs = selectionFields.map((field) => `${field.name} = ${field.selectionExpression}`);
+    const eventArgs = [
+        ...idFields.map((field) => `${field.name} = command.${field.name}`),
+        ...originalFields.map((field) => `${field.name} = command.${field.name}`),
+        ...selectionFields.map((field) => `${field.name} = ${field.decisionExpression}`)
+    ];
+    return {
+        concept,
+        packagePath,
+        packageName: `${model.rootPackage}.${context}.${_sliceTitle(concept)}`,
+        selectionName,
+        stateName,
+        eventName,
+        tagsName: `${base}ReservationTags`,
+        selectionProperty,
+        stateParam,
+        selectionFields,
+        originalFields,
+        normalizedFields,
+        idFields,
+        selectionArgs,
+        eventArgs,
+        eventStorageMode,
+        message: `${fieldLabels.join(' ')} already exists.`
+    };
+}
+
+function uniqueFieldLabel(concept, fieldName) {
+    const conceptPrefix = String(concept ?? '').charAt(0).toLowerCase() + String(concept ?? '').slice(1);
+    if (fieldName.toLowerCase().startsWith(conceptPrefix.toLowerCase()) && fieldName.length > conceptPrefix.length) {
+        return pascal(fieldName.slice(conceptPrefix.length));
+    }
+    return pascal(fieldName);
+}
+
+function normalizedFieldExpression(field, receiver) {
+    const value = receiver ? `${receiver}.${field.name}` : field.name;
+    const type = String(field.type).toLowerCase();
+    return type === 'string'
+        ? `${value}.trim().lowercase()`
+        : `${value}.toString().trim().lowercase()`;
+}
+
+function conceptSelectionFor(slice, model, eventStorageMode = 'dcb') {
     const concept = primaryConcept(slice);
     const conceptSlices = (model?.slices ?? [])
         .filter((candidate) => candidate.context === slice.context && primaryConcept(candidate) === concept && candidate.commands.length > 0);
@@ -803,17 +1062,17 @@ function conceptSelectionFor(slice, model) {
         ?? slice;
     const explicitTags = explicitConsistencyTags(sourceSlice);
     if (explicitTags.length > commandIdFields(sourceSlice).length) {
-        return selectionFromTags(sourceSlice, explicitTags, `${pascal(concept)}Selection`, concept, [concept]);
+        return selectionFromTags(sourceSlice, explicitTags, `${pascal(concept)}Selection`, concept, [concept], eventStorageMode);
     }
     const idFields = commandIdFields(sourceSlice);
     if (idFields.length > 0) {
         const tags = idFields.map((field) => ({name: field.name, expression: field.name}));
-        return selectionFromTags(sourceSlice, tags, `${pascal(concept)}Selection`, concept, [concept]);
+        return selectionFromTags(sourceSlice, tags, `${pascal(concept)}Selection`, concept, [concept], eventStorageMode);
     }
-    return selectionFromTags(sourceSlice, sourceSlice.tags.length > 0 ? sourceSlice.tags : fallbackTags(sourceSlice, sourceSlice.commands[0]?.fields ?? []), `${pascal(concept)}Selection`, concept, [concept]);
+    return selectionFromTags(sourceSlice, sourceSlice.tags.length > 0 ? sourceSlice.tags : fallbackTags(sourceSlice, sourceSlice.commands[0]?.fields ?? []), `${pascal(concept)}Selection`, concept, [concept], eventStorageMode);
 }
 
-function sliceSelectionFor(slice) {
+function sliceSelectionFor(slice, eventStorageMode = 'dcb') {
     const firstCommand = slice.commands[0];
     const commandFields = firstCommand?.fields ?? [];
     const idFields = commandFields.filter((field) => field.idAttribute);
@@ -823,14 +1082,14 @@ function sliceSelectionFor(slice) {
         : idFields.length > 0
         ? idFields.map((field) => ({name: field.name, expression: field.name}))
         : (slice.tags.length > 0 ? slice.tags : fallbackTags(slice, commandFields));
-    return selectionFromTags(slice, tags, `${pascal(slice.name)}Selection`, slice.name, slice.concepts);
+    return selectionFromTags(slice, tags, `${pascal(slice.name)}Selection`, slice.name, slice.concepts, eventStorageMode);
 }
 
 function explicitConsistencyTags(slice) {
     return slice.tags ?? [];
 }
 
-function selectionFromTags(slice, tags, name, metadataOwner, concepts) {
+function selectionFromTags(slice, tags, name, metadataOwner, concepts, eventStorageMode = 'dcb') {
     const commandFields = slice.commands[0]?.fields ?? [];
     const fields = tags.map((tag, index) => {
         const source = tagSource(tag, commandFields) ?? commandFields.find((field) => field.idAttribute)?.name ?? commandFields[0]?.name;
@@ -848,7 +1107,25 @@ function selectionFromTags(slice, tags, name, metadataOwner, concepts) {
             eventExpression: expression ?? sourceField.name
         };
     });
-    return {name, tags, fields, metadataOwner, concepts};
+    if (eventStorageMode === 'aggregate' && fields.length > 1) {
+        const tag = {name: safeIdentifier(String(metadataOwner ?? name).charAt(0).toLowerCase() + String(metadataOwner ?? name).slice(1))};
+        return {
+            name,
+            tags: [tag],
+            fields,
+            metadataOwner,
+            concepts,
+            eventStorageMode,
+            compositeTag: {
+                tag,
+                property: 'consistencyKey',
+                sources: fields.map((field) => field.source),
+                expression: compositeKeyExpression(fields.map((field) => field.alias)),
+                eventExpression: compositeKeyExpression(fields.map((field) => field.eventExpression))
+            }
+        };
+    }
+    return {name, tags, fields, metadataOwner, concepts, eventStorageMode};
 }
 
 function commandFieldsWithSelection(command, selection) {
@@ -886,7 +1163,7 @@ function eventFieldsWithTags(fields, tagFields) {
     const eventShape = {fields: result};
     (tagFields ?? [])
         .filter((tagField) => tagField.derived)
-        .filter((tagField) => fields.some((field) => field.name === tagField.source))
+        .filter((tagField) => (tagField.requiredSources ?? [tagField.source]).every((source) => fields.some((field) => field.name === source)))
         .forEach((tagField) => {
             const name = derivedEventTagProperty(tagField, eventShape);
             if (existing.has(name)) return;
@@ -909,8 +1186,26 @@ function eventFieldsWithTags(fields, tagFields) {
 }
 
 function eventTagFieldsFor(slice, event, selection, includeMissing = false) {
-    const explicitTagSelection = (slice.tags ?? []).length > 0
-        ? selectionFromTags(slice, slice.tags, `${pascal(slice.name)}ExplicitTags`, slice.name, slice.concepts)
+    if (selection.compositeTag) {
+        const sources = selection.compositeTag.sources ?? [];
+        if (!includeMissing && !sources.every((source) => (event.fields ?? []).some((eventField) => eventField.name === source))) {
+            return [];
+        }
+        return [{
+            name: selection.compositeTag.property,
+            alias: selection.compositeTag.property,
+            source: sources[0],
+            requiredSources: sources,
+            type: 'String',
+            cardinality: 'Single',
+            optional: false,
+            derived: true,
+            tag: selection.compositeTag.tag,
+            eventExpression: selection.compositeTag.eventExpression
+        }];
+    }
+    const explicitTagSelection = selection.eventStorageMode === 'dcb' && (slice.tags ?? []).length > 0
+        ? selectionFromTags(slice, slice.tags, `${pascal(slice.name)}ExplicitTags`, slice.name, slice.concepts, 'dcb')
         : {fields: []};
     const byTagName = new Map();
     [...(selection.fields ?? []), ...(explicitTagSelection.fields ?? [])]
@@ -1023,6 +1318,10 @@ function renderTagExpression(expression, sourceField, fields) {
         return `${textValue}.trim().lowercase()`;
     }
     return `${sourceField.name}.toString() /* TODO Medol tag expression: ${escapeKotlin(normalized)} */`;
+}
+
+function compositeKeyExpression(expressions) {
+    return `listOf(${expressions.map((expression) => `${expression}.toString()`).join(', ')}).joinToString("|")`;
 }
 
 function renderDerivedEventTags(fields, event) {

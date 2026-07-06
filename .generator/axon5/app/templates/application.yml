@@ -25,6 +25,10 @@ axon:
   axonserver:
     enabled: false
 
+medol:
+  axon:
+    event-storage-mode: dcb
+
 management:
   endpoints:
     web:

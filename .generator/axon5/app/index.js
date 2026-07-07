@@ -483,14 +483,15 @@ ${properties}
             .filter((transition) => transition.event?.id)
             .map((transition) => [transition.event.id, transition]));
         const hasChildMemberState = childTransitions.length > 0;
+        const childTransitionKeyFields = new Set(childTransitions.map((transition) => transition.keyField).filter(Boolean));
         const fields = uniqueFields(events.flatMap((event) => event.fields))
-            .filter((field) => !(hasChildMemberState && field.name === 'organizationId'));
+            .filter((field) => !(hasChildMemberState && childTransitionKeyFields.has(field.name)));
         const imports = typeImports(uniqueFields([...fields, ...(selection.fields ?? [])]));
         const stateEnumName = concept ? conceptStateEnumName(concept) : undefined;
         const stateFields = [
             ...(concept ? [`    var currentState: ${stateEnumName}? = null`] : []),
             ...fields.map((field) => `    private var ${field.name}: ${stateFieldType(field)} = ${stateFieldDefault(field)}`),
-            ...(hasChildMemberState ? ['    private val members: MutableMap<UUID, String> = mutableMapOf()'] : [])
+            ...(hasChildMemberState ? ['    private val members: MutableMap<String, String> = mutableMapOf()'] : [])
         ].join('\n');
         const sourcingHandlers = events.map((event) => {
             const transition = childTransitionByEventId.get(event.id);
@@ -498,9 +499,9 @@ ${properties}
             const assignments = [
                 ...(concept && stateTransition && !transition && conceptHasState(this.model, slice.context, concept, stateTransition.to) ? [`        currentState = ${stateEnumName}.${constant(stateTransition.to)}`] : []),
                 ...event.fields
-                    .filter((field) => !(transition && field.name === 'organizationId'))
+                    .filter((field) => !(transition?.keyField && field.name === transition.keyField))
                     .map((field) => `        ${field.name} = event.${field.name}`),
-                ...(transition ? [`        members[event.organizationId] = "${escapeKotlin(transition.to)}"`] : [])
+                ...(transition?.keyField ? [`        members[event.${transition.keyField}.toString()] = "${escapeKotlin(transition.to)}"`] : [])
             ].join('\n');
             return `    @EventSourcingHandler\n    fun evolve(event: ${_eventTitle(event.title)}): ${stateName} = apply {\n${assignments}\n    }`;
         }).join('\n\n');
@@ -827,12 +828,15 @@ ${idFields.length === 1 ? `
             .join('\n');
         const handlers = events.map((event) => {
             const eventFields = new Set((event.fields ?? []).map((field) => field.name));
-            const stateAssignment = this._readModelStateAssignment(readmodel, event);
+            const directFieldNames = new Set(readmodel.fields
+                .filter((field) => eventFields.has(field.name))
+                .map((field) => field.name));
+            const derivedAssignments = this._readModelDerivedAssignments(readmodel, event, directFieldNames);
             const assignments = [
                 ...readmodel.fields
                 .filter((field) => eventFields.has(field.name))
                 .map((field) => `            entity.${field.name} = event.${field.name}`),
-                ...(stateAssignment ? [`            ${stateAssignment}`] : [])
+                ...derivedAssignments.map((assignment) => `            ${assignment}`)
             ]
                 .join('\n');
             const availableIds = idFields.filter((field) => eventFields.has(field.name));
@@ -887,26 +891,26 @@ ${handlers}
 `);
     }
 
-    _readModelStateAssignment(readmodel, event) {
+    _readModelDerivedAssignments(readmodel, event, directFieldNames = new Set()) {
         const ownerSlice = this.model.slices.find((slice) =>
             (slice.events ?? []).some((candidate) => candidate.id === event.id)
         );
         const stateChange = ownerSlice?.stateChange?.eventId === event.id ? ownerSlice.stateChange : undefined;
         const concept = ownerSlice?.concepts?.[0];
         if (!stateChange || !concept) {
-            return undefined;
+            return [];
         }
-        if ((event.fields ?? []).some((field) => field.name === 'organizationId')) {
-            return undefined;
-        }
+        const assignments = [];
+        const eventFields = event.fields ?? [];
         const field = readmodel.fields.find((candidate) => candidate.type === `${concept}.State`);
-        if (!field || event.fields.some((candidate) => candidate.name === field.name)) {
-            return undefined;
+        if (field
+            && !directFieldNames.has(field.name)
+            && !eventFields.some((candidate) => candidate.name === field.name)
+            && conceptHasState(this.model, ownerSlice.context, concept, stateChange.to)) {
+            assignments.push(`entity.${field.name} = ${conceptStateEnumName(concept)}.${constant(stateChange.to)}`);
         }
-        if (!conceptHasState(this.model, ownerSlice.context, concept, stateChange.to)) {
-            return undefined;
-        }
-        return `entity.${field.name} = ${conceptStateEnumName(concept)}.${constant(stateChange.to)}`;
+
+        return assignments;
     }
 
     _eventPackage(event, fallbackSlice) {
@@ -1290,13 +1294,19 @@ function childStateTransitions(slices) {
         .filter((slice) => slice.stateChange?.eventId)
         .flatMap((slice) => {
             const events = relatedEventsForSlice({slices}, slice)
-                .filter((event) => event.id === slice.stateChange.eventId)
-                .filter((event) => (event.fields ?? []).some((field) => field.name === 'organizationId'));
+                .filter((event) => event.id === slice.stateChange.eventId);
             return events.map((event) => ({
                 eventId: event.id,
+                keyField: childTransitionKeyField(event),
                 to: slice.stateChange.to
-            }));
+            })).filter((transition) => transition.keyField);
         });
+}
+
+function childTransitionKeyField(event) {
+    const fields = event.fields ?? [];
+    const idFields = fields.filter((field) => field.idAttribute || /Id$/.test(field.name));
+    return (idFields.length > 1 ? idFields[idFields.length - 1] : idFields[0])?.name;
 }
 
 function tagSource(tag, fields) {

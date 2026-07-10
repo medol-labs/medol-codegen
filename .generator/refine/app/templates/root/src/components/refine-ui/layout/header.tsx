@@ -290,7 +290,8 @@ const UserDropdown = () => {
 };
 
 function normalizeLocale(locale: string | undefined): SupportedLocale {
-  return isSupportedLocale(locale ?? null) ? locale : supportedLocales[0];
+  const candidate = locale ?? null;
+  return isSupportedLocale(candidate) ? candidate : supportedLocales[0];
 }
 
 function localeLabel(locale: SupportedLocale) {

@@ -1,4 +1,4 @@
-import { useSelect } from "@refinedev/core";
+import { useSelect, type BaseRecord } from "@refinedev/core";
 import * as React from "react";
 
 import {
@@ -24,8 +24,8 @@ type ResourceSelectProps = Omit<
   loadingPlaceholder?: string;
   emptyPlaceholder?: string;
   disabled?: boolean;
-  optionLabel?: UseSelectParams["optionLabel"];
-  optionValue?: UseSelectParams["optionValue"];
+  optionLabel?: string | ((item: BaseRecord) => string);
+  optionValue?: string | ((item: BaseRecord) => string | number);
   defaultValue?: UseSelectParams["defaultValue"];
   dataProviderName?: UseSelectParams["dataProviderName"];
   filters?: UseSelectParams["filters"];
@@ -75,10 +75,10 @@ export const ResourceSelect = React.forwardRef<
     },
     ref,
   ) => {
-    const select = useSelect({
+    const select = useSelect<BaseRecord>({
       resource,
-      optionLabel,
-      optionValue,
+      optionLabel: optionLabel as UseSelectParams["optionLabel"],
+      optionValue: optionValue as UseSelectParams["optionValue"],
       defaultValue,
       dataProviderName,
       filters,

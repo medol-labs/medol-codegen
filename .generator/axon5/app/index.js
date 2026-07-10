@@ -6,6 +6,7 @@
 const Generator = require('yeoman-generator').default;
 const path = require('path');
 const {loadCodegenModel} = require('../../common/core/codegen-model-loader');
+const {collectFieldOptionEnums, fieldOptionsFor} = require('../../common/core/field-options');
 const {configureValueTypes, typeMapping, typeImports} = require('../../common/util/generator');
 const {contextPackage, resolvedBaseType, resolvedConstraints} = require('../../common/util/value-types');
 const {_commandTitle, _eventTitle, _readmodelTitle, _sliceTitle} = require('../../common/util/naming');
@@ -179,6 +180,7 @@ module.exports = class extends Generator {
             this._writeDevSeedScript();
         }
         this._writeValueTypes();
+        this._writeFieldOptionEnums();
         this._writeConceptStates();
         this._writeConceptCatalog();
         if (!this.modulePrefix) {
@@ -225,10 +227,21 @@ module.exports = class extends Generator {
                 valueType.kind === 'enum'
                     ? renderEnum(valueType)
                     : valueType.kind === 'object'
-                        ? renderObjectValueType(valueType)
+                        ? renderObjectValueType(valueType, this.model.rootPackage)
                         : renderScalarValueType(valueType, baseType)
             ].filter((line, index, lines) => line !== '' || lines[index - 1] !== '').join('\n');
             this.fs.write(this._kotlinPath(`${contextPackage(valueType.context)}/domain/types/${valueType.name}.kt`), `${lines}\n`);
+        }
+    }
+
+    _writeFieldOptionEnums() {
+        const optionSets = collectFieldOptionEnums(this.model);
+        for (const optionSet of optionSets) {
+            const values = optionSet.values.map((option) => `    ${option.enumConstant}`).join(',\n');
+            this.fs.write(
+                this._kotlinPath(`support/enums/${optionSet.enumName}.kt`),
+                `package ${this.model.rootPackage}.support.enums\n\nenum class ${optionSet.enumName} {\n${values}\n}\n`
+            );
         }
     }
 
@@ -286,7 +299,7 @@ module.exports = class extends Generator {
     }
 
     _writeSelection(packageName, pathPrefix, slice, selection) {
-        const imports = typeImports(selection.fields);
+        const imports = kotlinFieldImports(selection.fields, this.model.rootPackage);
         const properties = selection.fields.map((field) => `    val ${field.alias}: ${field.selectionType}`).join(',\n');
         const tags = uniqueTags(selection.tags ?? []);
         const tagConstants = tags.map((tag) => `    const val ${constant(tag.name)} = "${escapeKotlin(tag.name)}"`).join('\n');
@@ -318,7 +331,7 @@ object ${pascal(metadataOwner)}Metadata {
         const commandFields = commandFieldsWithSelection(command, selection);
         const commandReservations = command.startsLifecycle ? reservations : [];
         const imports = uniqueBy([
-            typeImports(commandFields),
+            kotlinFieldImports(commandFields, this.model.rootPackage),
             ...commandReservations.map((reservation) => `import ${reservation.packageName}.${reservation.selectionName}`)
         ].filter(Boolean), (value) => value).join('\n');
         const selectionImport = selectionPackageName === packageName ? '' : `import ${selectionPackageName}.${selection.name}\n`;
@@ -360,7 +373,7 @@ ${reservationSelections ? `\n${reservationSelections}` : ''}
                 expression: compositeKeyExpression(reservation.selectionFields.map((field) => field.name))
             }
             : undefined;
-        const eventImports = typeImports(fields);
+        const eventImports = kotlinFieldImports(fields, this.model.rootPackage);
         const eventProperties = [
             ...fields.map((field) => {
                 const tag = !compositeTag && reservation.normalizedFields.some((candidate) => candidate.name === field.name)
@@ -415,7 +428,7 @@ import org.axonframework.extension.spring.stereotype.EventSourced
 import org.axonframework.messaging.eventstreaming.EventCriteria
 import org.axonframework.messaging.eventstreaming.Tag
 import ${this.model.rootPackage}.${context}.events.${reservation.eventName}
-${typeImports(reservation.idFields)}
+${kotlinFieldImports(reservation.idFields, this.model.rootPackage)}
 
 @EventSourced(idType = ${reservation.selectionName}::class)
 class ${reservation.stateName} @EntityCreator constructor() {
@@ -446,7 +459,7 @@ ${sourcingAssignments}
         const eventName = _eventTitle(event.title);
         const eventTagFields = eventTagFieldsFor(ownerSlice, event, selection, true);
         const eventFields = eventFieldsWithTags(event.fields ?? [], eventTagFields);
-        const imports = typeImports(eventFields);
+        const imports = kotlinFieldImports(eventFields, this.model.rootPackage);
         const annotated = new Set();
         const properties = eventFields.map((field) => {
             const annotations = (field.eventTagKeys ?? []).map((tagName) => {
@@ -486,7 +499,7 @@ ${properties}
         const childTransitionKeyFields = new Set(childTransitions.map((transition) => transition.keyField).filter(Boolean));
         const fields = uniqueFields(events.flatMap((event) => event.fields))
             .filter((field) => !(hasChildMemberState && childTransitionKeyFields.has(field.name)));
-        const imports = typeImports(uniqueFields([...fields, ...(selection.fields ?? [])]));
+        const imports = kotlinFieldImports(uniqueFields([...fields, ...(selection.fields ?? [])]), this.model.rootPackage);
         const stateEnumName = concept ? conceptStateEnumName(concept) : undefined;
         const stateFields = [
             ...(concept ? [`    var currentState: ${stateEnumName}? = null`] : []),
@@ -601,6 +614,7 @@ ${sourcingHandlers}
             .filter((transition) => transitionUsesConceptState(this.model, transition))
             .map((transition) => `import ${this.model.rootPackage}.${contextPackage(transition.context ?? slice.context)}.domain.states.${conceptStateEnumName(transition.owner.name)}`), (value) => value)
             .join('\n');
+        const fieldOptionImports = kotlinEnumImports(events.flatMap((event) => event.fields ?? []), this.model.rootPackage);
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${decisionName}.kt`), `package ${packageName}
 
 import org.springframework.stereotype.Component
@@ -609,6 +623,7 @@ ${eventImports}
 ${stateImport}
 ${reservationStateImports}
 ${stateEnumImports}
+${fieldOptionImports}
 
 @Component
 class ${decisionName} {
@@ -702,14 +717,14 @@ ${methods}
 
     _writeReadModel(packageName, context, slicePackage, slice, readmodel) {
         const name = _readmodelTitle(readmodel.title);
-        const imports = typeImports(readmodel.fields);
+        const imports = kotlinFieldImports(readmodel.fields, this.model.rootPackage);
         const ids = readmodel.fields.filter((field) => field.idAttribute);
         const idFields = ids.length > 0 ? ids : readmodel.fields.slice(0, 1);
         const id = idFields[0];
         const compositeId = idFields.length > 1;
         const entityFields = readmodel.fields.map((field) => {
             const annotation = idFields.some((candidate) => candidate.name === field.name) ? '    @Id\n' : '';
-            const enumAnnotation = field.type?.endsWith('.State') ? '    @Enumerated(EnumType.STRING)\n' : '';
+            const enumAnnotation = field.type?.endsWith('.State') || fieldOptionsFor(field) ? '    @Enumerated(EnumType.STRING)\n' : '';
             return `${annotation}${enumAnnotation}    var ${field.name}: ${stateFieldType(field)} = ${stateFieldDefault(field)}`;
         }).join('\n');
         const keyName = `${name}Key`;
@@ -757,7 +772,7 @@ ${resultFields}
         const idType = idFields.length > 1 ? `${name}Key` : mappedType(id, false);
         const conceptRoute = httpRoute(slice.concepts[0] ?? slice.name);
         const readmodelRoute = httpRoute(readmodel.title);
-        const imports = typeImports(idFields);
+        const imports = kotlinFieldImports(idFields, this.model.rootPackage);
         const partialLookupMethods = idFields.length > 1
             ? idFields.map((field) =>
                 `    fun findAllBy${pascal(field.name)}(${field.name}: ${mappedType(field, false)}): List<${entityName}>`
@@ -766,6 +781,9 @@ ${resultFields}
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${resourceName}.kt`), `package ${packageName}
 
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.Pageable
+import org.springframework.data.web.PageableDefault
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.CrossOrigin
 import org.springframework.web.bind.annotation.GetMapping
@@ -783,7 +801,8 @@ ${partialLookupMethods}
 @RequestMapping("/${conceptRoute}/${readmodelRoute}")
 class ${resourceName}(private val repository: ${repositoryName}) {
     @GetMapping
-    fun findAll(): List<${entityName}> = repository.findAll()
+    fun findAll(@PageableDefault(size = 20) pageable: Pageable): Page<${entityName}> =
+        repository.findAll(pageable)
 
 ${idFields.length === 1 ? `
     @GetMapping("/{id}")
@@ -1413,7 +1432,7 @@ function renderStateGuard(model, transition) {
 }
 
 function eventArguments(event, command, selection) {
-    const eventFields = fieldsWithSelection(event.fields ?? [], selection?.fields ?? []);
+    const eventFields = event.fields ?? [];
     const commandFields = commandFieldsWithSelection(command, selection ?? {fields: []});
     return eventFields.map((field) => {
         if (commandFields.some((candidate) => candidate.name === field.name)) return `${field.name} = command.${field.name}`;
@@ -1426,6 +1445,8 @@ function eventArguments(event, command, selection) {
 function fallbackValue(field) {
     if (field.optional) return 'null';
     if (field.cardinality === 'Multiple') return 'emptyList()';
+    const optionSet = fieldOptionsFor(field);
+    if (optionSet) return `${optionSet.enumName}.${optionSet.values[0].enumConstant}`;
     switch (String(field.type).toLowerCase()) {
         case 'boolean': return 'false';
         case 'int': return '0';
@@ -1455,8 +1476,30 @@ function stateFieldDefault(field) {
 }
 
 function mappedType(field, optional = field.optional) {
+    const optionSet = fieldOptionsFor(field);
     const cardinality = field.cardinality === 'Multiple' ? 'List' : field.cardinality;
+    if (optionSet) {
+        const fieldType = optional ? `${optionSet.enumName}?` : optionSet.enumName;
+        return cardinality?.toLowerCase() === 'list'
+            ? field.mutable ? `MutableList<${fieldType}>` : `List<${fieldType}>`
+            : fieldType;
+    }
     return typeMapping(field.type, cardinality, optional, field.mutable);
+}
+
+function kotlinFieldImports(fields, rootPackage, additionalImports) {
+    return [
+        typeImports(fields, additionalImports),
+        kotlinEnumImports(fields, rootPackage)
+    ].filter(Boolean).join('\n');
+}
+
+function kotlinEnumImports(fields, rootPackage) {
+    return uniqueBy((fields ?? [])
+        .map(fieldOptionsFor)
+        .filter(Boolean)
+        .map((optionSet) => `import ${rootPackage}.support.enums.${optionSet.enumName}`), (value) => value)
+        .join('\n');
 }
 
 function uniqueFields(fields) {
@@ -1559,8 +1602,8 @@ function renderEnum(valueType) {
     return `enum class ${valueType.name} {\n${(valueType.values ?? []).map((value) => `    ${constant(value)}`).join(',\n')}\n}`;
 }
 
-function renderObjectValueType(valueType) {
-    const imports = typeImports(valueType.fields ?? []);
+function renderObjectValueType(valueType, rootPackage) {
+    const imports = kotlinFieldImports(valueType.fields ?? [], rootPackage);
     const fields = (valueType.fields ?? []).map((field) => `    val ${field.name}: ${mappedType(field, field.optional)}`).join(',\n');
     return `${imports ? `${imports}\n\n` : ''}data class ${valueType.name}(\n${fields}\n)`;
 }

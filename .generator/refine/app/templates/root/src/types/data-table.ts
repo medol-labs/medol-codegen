@@ -1,3 +1,4 @@
+import type { CrudOperators } from "@refinedev/core";
 import type { ColumnSort, Row, RowData } from "@tanstack/react-table";
 import type { DataTableConfig } from "@/config/data-table";
 import type { FilterItemSchema } from "@/lib/parsers";
@@ -17,6 +18,7 @@ declare module "@tanstack/react-table" {
     range?: [number, number];
     unit?: string;
     icon?: React.FC<React.SVGProps<SVGSVGElement>>;
+    filterOperator?: CrudOperators;
   }
 }
 

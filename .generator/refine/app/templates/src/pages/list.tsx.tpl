@@ -24,7 +24,7 @@ import type { <%= resource.valueTypeImports.join(', ') %> } from "@/domain/value
 
 type <%= resource.component %>Record = {
 <% resource.fields.forEach((field) => { -%>
-  <%= field.name %><%= field.optional ? "?" : "" %>: <%= field.tsType %>;
+  <%= field.name %><%= field.optional ? "?" : "" %>: <%- field.tsType %>;
 <% }) -%>
 };
 
@@ -93,9 +93,9 @@ export const <%= resource.component %>List = () => {
               command="<%= resource.deleteCommand.name %>"
               recordItemId={row.original.<%= resource.idField %>}
               size="sm"
-<% if (resource.deleteCommand.prefillFields.length > 0) { -%>
+<% if (resource.deleteCommand.rowPrefillFields.length > 0) { -%>
               query={{
-<% resource.deleteCommand.prefillFields.forEach((field) => { -%>
+<% resource.deleteCommand.rowPrefillFields.forEach((field) => { -%>
                 <%= field.name %>: row.original.<%= field.name %>,
 <% }) -%>
               }}
@@ -125,9 +125,9 @@ export const <%= resource.component %>List = () => {
                     command="<%= command.name %>"
                     recordItemId={row.original.<%= resource.idField %>}
                     size="sm"
-<% if (command.prefillFields.length > 0) { -%>
+<% if (command.rowPrefillFields.length > 0) { -%>
                     query={{
-<% command.prefillFields.forEach((field) => { -%>
+<% command.rowPrefillFields.forEach((field) => { -%>
                       <%= field.name %>: row.original.<%= field.name %>,
 <% }) -%>
                     }}

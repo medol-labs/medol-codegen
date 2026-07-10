@@ -46,6 +46,7 @@ type ScalarArrayFieldProps = {
   label: string;
   inputType?: string | null;
   itemDefaultValue: string | number | boolean;
+  options?: Array<{ value: string; label: string }>;
 };
 
 function ScalarArrayField({
@@ -54,13 +55,16 @@ function ScalarArrayField({
   label,
   inputType,
   itemDefaultValue,
+  options,
 }: ScalarArrayFieldProps) {
+  const optionItems = options ?? [];
+
   return (
     <FormField
       control={control}
       name={name as never}
       render={({ field }) => {
-        const values = Array.isArray(field.value) ? field.value : [];
+        const values = (Array.isArray(field.value) ? field.value : []) as Array<string | number | boolean>;
 
         return (
           <FormItem>
@@ -78,9 +82,31 @@ function ScalarArrayField({
             <div className="space-y-2">
               {values.map((value, index) => (
                 <div key={index} className="flex items-center gap-2">
+<%_ /* Runtime branch: enum-like scalar arrays render each item as a Select. */ _%>
+                  {optionItems.length > 0 ? (
+                    <Select
+                      value={value === undefined || value === null ? undefined : String(value)}
+                      onValueChange={(nextValue) => {
+                        const next = [...values];
+                        next[index] = nextValue;
+                        field.onChange(next);
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder={label} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {optionItems.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
                   <Input
                     type={inputType ?? undefined}
-                    value={value ?? ""}
+                    value={typeof value === "boolean" ? String(value) : value ?? ""}
                     onChange={(event) => {
                       const next = [...values];
                       next[index] = inputType === "number"
@@ -89,6 +115,7 @@ function ScalarArrayField({
                       field.onChange(next);
                     }}
                   />
+                  )}
                   <Button
                     type="button"
                     variant="ghost"
@@ -116,12 +143,12 @@ export const <%= command.pageComponent %> = () => {
   const { id } = useParsed();
   const defaultValues = {
 <% command.prefillFields.forEach((field) => { -%>
-    <%= field.name %>: searchParams.get("<%= field.name %>") ?? undefined,
+    <%= field.name %>: <%- field.searchParamDefault %>,
 <% }) -%>
 <% command.defaultValueFields.forEach((field) => { -%>
     <%= field.name %>: <%- field.defaultValue %>,
 <% }) -%>
-  };
+  } as Partial<<%= command.inputTypeName %>>;
 
   const { refineCore: { onFinish }, ...form } = useCommandForm<<%= command.inputTypeName %>, <%= command.inputTypeName %>>({
     resource: "<%= resource.name %>",
@@ -148,7 +175,7 @@ export const <%= command.pageComponent %> = () => {
     },
     formProps: {
       defaultValues,
-      resolver: zodResolver(<%= command.schemaName %>),
+      resolver: zodResolver(<%= command.schemaName %>) as never,
     },
   });
 <% command.fields.filter((field) => field.object && field.list).forEach((field) => { -%>
@@ -206,6 +233,7 @@ export const <%= command.pageComponent %> = () => {
                     label={t("<%= nestedField.i18nKey %>", "<%= nestedField.label %>")}
                     inputType={<%- nestedField.inputType ? JSON.stringify(nestedField.inputType) : 'null' %>}
                     itemDefaultValue={<%- nestedField.scalarListItemDefaultValue %>}
+                    options={<%- nestedField.enumOptions && nestedField.enumOptions.length ? JSON.stringify(nestedField.enumOptions.map((option) => ({ value: option.value, label: option.label }))) : 'undefined' %>}
                   />
 <% } else { -%>
                   <FormField
@@ -228,6 +256,22 @@ export const <%= command.pageComponent %> = () => {
                           <SelectContent>
                             <SelectItem value="true">{t("values.boolean.true", "True")}</SelectItem>
                             <SelectItem value="false">{t("values.boolean.false", "False")}</SelectItem>
+                          </SelectContent>
+                        </Select>
+<% } else if (nestedField.enumOptions && nestedField.enumOptions.length) { -%>
+                        <Select
+                          value={field.value === undefined || field.value === null ? undefined : String(field.value)}
+                          onValueChange={field.onChange}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder={t("<%= nestedField.placeholderKey %>", "Select <%= nestedField.label %>")} />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+<% nestedField.enumOptions.forEach((option) => { -%>
+                            <SelectItem value="<%= option.value %>">{t("<%= option.i18nKey %>", "<%= option.label %>")}</SelectItem>
+<% }) -%>
                           </SelectContent>
                         </Select>
 <% } else { -%>
@@ -267,6 +311,7 @@ export const <%= command.pageComponent %> = () => {
                 label={t("<%= nestedField.i18nKey %>", "<%= nestedField.label %>")}
                 inputType={<%- nestedField.inputType ? JSON.stringify(nestedField.inputType) : 'null' %>}
                 itemDefaultValue={<%- nestedField.scalarListItemDefaultValue %>}
+                options={<%- nestedField.enumOptions && nestedField.enumOptions.length ? JSON.stringify(nestedField.enumOptions.map((option) => ({ value: option.value, label: option.label }))) : 'undefined' %>}
               />
 <% } else { -%>
               <FormField
@@ -289,6 +334,22 @@ export const <%= command.pageComponent %> = () => {
                       <SelectContent>
                         <SelectItem value="true">{t("values.boolean.true", "True")}</SelectItem>
                         <SelectItem value="false">{t("values.boolean.false", "False")}</SelectItem>
+                      </SelectContent>
+                    </Select>
+<% } else if (nestedField.enumOptions && nestedField.enumOptions.length) { -%>
+                    <Select
+                      value={field.value === undefined || field.value === null ? undefined : String(field.value)}
+                      onValueChange={field.onChange}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder={t("<%= nestedField.placeholderKey %>", "Select <%= nestedField.label %>")} />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+<% nestedField.enumOptions.forEach((option) => { -%>
+                        <SelectItem value="<%= option.value %>">{t("<%= option.i18nKey %>", "<%= option.label %>")}</SelectItem>
+<% }) -%>
                       </SelectContent>
                     </Select>
 <% } else { -%>
@@ -321,6 +382,7 @@ export const <%= command.pageComponent %> = () => {
             label={t("<%= field.i18nKey %>", "<%= field.label %>")}
             inputType={<%- field.inputType ? JSON.stringify(field.inputType) : 'null' %>}
             itemDefaultValue={<%- field.scalarListItemDefaultValue %>}
+            options={<%- field.enumOptions && field.enumOptions.length ? JSON.stringify(field.enumOptions.map((option) => ({ value: option.value, label: option.label }))) : 'undefined' %>}
           />
 <% } else { -%>
           <FormField
@@ -347,6 +409,22 @@ export const <%= command.pageComponent %> = () => {
                     queryRoute: "<%= field.select.meta.queryRoute %>",
                   }}
                 />
+<% } else if (field.enumOptions && field.enumOptions.length) { -%>
+                <Select
+                  value={field.value === undefined || field.value === null ? undefined : String(field.value)}
+                  onValueChange={field.onChange}
+                >
+                  <FormControl>
+                    <SelectTrigger>
+                      <SelectValue placeholder={t("<%= field.placeholderKey %>", "Select <%= field.label %>")} />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+<% field.enumOptions.forEach((option) => { -%>
+                    <SelectItem value="<%= option.value %>">{t("<%= option.i18nKey %>", "<%= option.label %>")}</SelectItem>
+<% }) -%>
+                  </SelectContent>
+                </Select>
 <% } else if (field.boolean) { -%>
                 <Select
                   value={field.value === undefined || field.value === null ? undefined : String(field.value)}

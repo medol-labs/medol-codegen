@@ -68,6 +68,22 @@ export const <%= command.pageComponent %> = () => {
                     <SelectItem value="false">False</SelectItem>
                   </SelectContent>
                 </Select>
+<% } else if (field.enumOptions && field.enumOptions.length) { -%>
+                <Select
+                  value={field.value === undefined || field.value === null ? undefined : String(field.value)}
+                  onValueChange={field.onChange}
+                >
+                  <FormControl>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select <%= field.label %>" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+<% field.enumOptions.forEach((option) => { -%>
+                    <SelectItem value="<%= option.value %>"><%= option.label %></SelectItem>
+<% }) -%>
+                  </SelectContent>
+                </Select>
 <% } else { -%>
                 <FormControl>
                   <<%= field.inputComponent %>

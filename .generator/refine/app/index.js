@@ -7,6 +7,7 @@ var Generator = require('yeoman-generator').default;
 var path = require('path');
 var slugify = require('slugify');
 const {loadGeneratorModel} = require("../../common/core/config-loader");
+const {fieldOptionsFor} = require("../../common/core/field-options");
 
 let config = {};
 let codegenModel = {};
@@ -300,13 +301,16 @@ function withModuleResourceRoutes(modules, resources) {
 
 function buildDomainModel(source) {
     source = withResolvedValueTypes(source);
+    const slices = source.slices ?? [];
+    const automationCommandKeys = buildAutomationCommandKeys(slices);
     const valueTypes = (source.valueTypes ?? []).map((valueType) => ({
         ...valueType,
         tsBaseType: tsValueType(valueType),
         schema: zodValueTypeExpression(valueType)
     }));
-    const commands = uniqueCommands((source.slices ?? []).flatMap((slice) => slice.commands ?? []))
+    const commands = uniqueCommands(slices.flatMap((slice) => slice.commands ?? []))
         .filter((command) => command?.title)
+        .filter((command) => !isAutomationCommand(command, automationCommandKeys))
         .map((command) => {
             const component = pascal(cleanTitle(command.title));
             return {
@@ -368,6 +372,7 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
     const producerCommandsByReadModelId = new Map();
     const nextCommandsByReadModelId = new Map();
     const transitionsByCommandId = new Map();
+    const automationCommandKeys = buildAutomationCommandKeys(slices);
 
     transitions
         .filter((transition) => transition?.command)
@@ -382,6 +387,7 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
 
     slices.flatMap((slice) => slice.commands ?? [])
         .filter((command) => command?.title)
+        .filter((command) => !isAutomationCommand(command, automationCommandKeys))
         .filter((command) => !selectedCommands || selectedCommands.has(commandKey(command)))
         .forEach((command) => {
             commandsById.set(commandKey(command), command);
@@ -473,6 +479,42 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
             return stateControlForTransition(transition, readModel);
         }
     };
+}
+
+function buildAutomationCommandKeys(slices) {
+    const keys = new Set();
+    const addReference = (reference) => {
+        [reference?.id, reference?.name, reference?.title]
+            .filter(Boolean)
+            .forEach((value) => {
+                keys.add(String(value));
+                keys.add(cleanTitle(value));
+            });
+    };
+
+    slices.forEach((slice) => {
+        [...normalizeArray(slice.processors), ...normalizeArray(slice.automations)]
+            .flatMap((processor) => processor.dependencies ?? [])
+            .filter((dependency) => dependencyDirection(dependency) === 'OUTBOUND' && dependency.elementType === 'COMMAND')
+            .forEach(addReference);
+
+        (slice.commands ?? [])
+            .filter((command) => (command.dependencies ?? [])
+                .some((dependency) => dependencyDirection(dependency) === 'INBOUND' && dependency.elementType === 'PROCESSOR'))
+            .forEach(addReference);
+    });
+
+    return keys;
+}
+
+function isAutomationCommand(command, automationCommandKeys) {
+    return [
+        commandKey(command),
+        command.id,
+        command.name,
+        command.title,
+        cleanTitle(command.title)
+    ].filter(Boolean).some((key) => automationCommandKeys.has(String(key)));
 }
 
 function commandWorkflowFields(command, readModel, allEvents, workflow) {
@@ -647,6 +689,7 @@ function withCommandI18n(command, resourceKey) {
         i18nKey: `${commandKey}.label`,
         fields: command.fields.map((field) => withFieldI18n(field, `${commandKey}.fields.${field.name}`)),
         prefillFields: command.prefillFields.map((field) => withFieldI18n(field, `${commandKey}.fields.${field.name}`)),
+        rowPrefillFields: (command.rowPrefillFields ?? []).map((field) => withFieldI18n(field, `${commandKey}.fields.${field.name}`)),
         workflowPrefillFields: command.workflowPrefillFields.map((field) => withFieldI18n(field, `${commandKey}.fields.${field.name}`))
     };
 }
@@ -657,6 +700,10 @@ function withFieldI18n(field, fieldKey) {
         i18nKey: `${fieldKey}.label`,
         placeholderKey: `${fieldKey}.placeholder`,
         requiredKey: `${fieldKey}.required`,
+        enumOptions: (field.enumOptions ?? []).map((option) => ({
+            ...option,
+            i18nKey: `${fieldKey}.options.${option.value}`
+        })),
         nestedFields: (field.nestedFields ?? []).map((nestedField) => withFieldI18n(nestedField, `${fieldKey}.fields.${nestedField.name}`))
     };
 }
@@ -724,6 +771,7 @@ function withPrefillFields(commands, resourceFields) {
     const resourceFieldNames = new Set(resourceFields.map((field) => field.name));
     return commands.map((command) => ({
         ...command,
+        rowPrefillFields: command.fields.filter((field) => resourceFieldNames.has(field.name)),
         prefillFields: uniqueFields([
             ...command.fields.filter((field) => resourceFieldNames.has(field.name)),
             ...(command.workflowPrefillFields ?? [])
@@ -804,10 +852,12 @@ function actionControls(fields) {
 function buildCommandChoices(source) {
     const slices = source.slices ?? [];
     const choicesByKey = new Map();
+    const automationCommandKeys = buildAutomationCommandKeys(slices);
 
     slices.forEach((slice) => {
         (slice.commands ?? [])
             .filter((command) => command?.title)
+            .filter((command) => !isAutomationCommand(command, automationCommandKeys))
             .forEach((command) => {
                 const key = commandKey(command);
                 if (!choicesByKey.has(key)) {
@@ -1003,6 +1053,9 @@ function addFieldI18nEntries(entries, field) {
     entries.push([field.i18nKey, field.label]);
     entries.push([field.placeholderKey, field.placeholder]);
     entries.push([field.requiredKey, `${field.label} is required`]);
+    (field.enumOptions ?? []).forEach((option) => {
+        entries.push([option.i18nKey, option.label]);
+    });
     (field.nestedFields ?? []).forEach((nestedField) => addFieldI18nEntries(entries, nestedField));
 }
 
@@ -1111,6 +1164,7 @@ function decorateField(field) {
     const object = isObjectField(field);
     const list = isListField(field);
     const json = object;
+    const optionSet = !object ? fieldOptionsFor(field) : undefined;
     const textArea = !object && (field.name.toLowerCase().includes('content')
         || field.name.toLowerCase().includes('description')
         || field.name.toLowerCase().includes('notes'));
@@ -1130,14 +1184,17 @@ function decorateField(field) {
         inputComponent: textArea ? 'Textarea' : 'Input',
         inputType: inputType(field),
         boolean,
+        enumName: optionSet?.enumName ?? null,
+        enumOptions: optionSet?.values ?? [],
         object,
         list,
         scalarList: list && !object,
         json,
         jsonEmptyValue: isListField(field) ? '[]' : '{}',
-        placeholder: json ? jsonPlaceholder(field) : `Enter ${field.label}`,
+        placeholder: optionSet ? `Select ${field.label}` : json ? jsonPlaceholder(field) : `Enter ${field.label}`,
         fieldArrayName: `${camel(field.name)}Fields`,
         defaultValue: defaultValueExpression(field),
+        searchParamDefault: searchParamDefaultExpression(field),
         scalarListItemDefaultValue: scalarListItemDefaultExpression(field),
         nestedFields,
         rows: json ? 10 : textArea ? 8 : null,
@@ -1189,10 +1246,26 @@ function defaultValueExpression(field) {
     if (isObjectField(field)) {
         return defaultObjectValueExpression(field.valueType);
     }
+    if (fieldOptionsFor(field)) return 'undefined';
     const type = (field.valueType?.resolvedBaseType ?? field.type ?? 'String').toLowerCase();
     if (type === 'boolean') return 'false';
     if (['int', 'integer', 'long', 'double', 'float', 'decimal', 'bigdecimal', 'number'].includes(type)) return 'undefined';
     return '""';
+}
+
+function searchParamDefaultExpression(field) {
+    const name = JSON.stringify(field.name);
+    if (isListField(field)) {
+        return `searchParams.get(${name})?.split(",").map((value) => value.trim()).filter(Boolean) ?? undefined`;
+    }
+    const type = (field.valueType?.resolvedBaseType ?? field.type ?? 'String').toLowerCase();
+    if (type === 'boolean') {
+        return `(() => { const value = searchParams.get(${name}); return value === null ? undefined : value === "true"; })()`;
+    }
+    if (['int', 'integer', 'long', 'double', 'float', 'decimal', 'bigdecimal', 'number'].includes(type)) {
+        return `(() => { const value = searchParams.get(${name}); return value === null ? undefined : Number(value); })()`;
+    }
+    return `searchParams.get(${name}) ?? undefined`;
 }
 
 function defaultObjectValueExpression(valueType) {
@@ -1206,6 +1279,8 @@ function hasNestedArrayField(field) {
 }
 
 function scalarListItemDefaultExpression(field) {
+    const optionSet = fieldOptionsFor(field);
+    if (optionSet) return JSON.stringify(optionSet.values[0]?.value ?? '');
     const type = (field.valueType?.resolvedBaseType ?? field.type ?? 'String').toLowerCase();
     if (type === 'boolean') return 'false';
     if (['int', 'integer', 'long', 'double', 'float', 'decimal', 'bigdecimal', 'number'].includes(type)) return '0';
@@ -1229,6 +1304,11 @@ function isDeleteCommand(command) {
 }
 
 function tsType(field) {
+    const optionSet = fieldOptionsFor(field);
+    if (optionSet) {
+        const type = optionSet.values.map((option) => JSON.stringify(option.value)).join(' | ');
+        return isListField(field) ? `(${type})[]` : type;
+    }
     if (field.valueType) {
         const valueType = field.valueType.name;
         return isListField(field) ? `${valueType}[]` : valueType;
@@ -1292,7 +1372,10 @@ function zodValueTypeExpression(valueType) {
 }
 
 function zodFieldExpression(field) {
-    let expression = field.valueType ? `${field.valueType.name}Schema` : zodPrimitive(field.type);
+    const optionSet = fieldOptionsFor(field);
+    let expression = optionSet
+        ? `z.enum([${optionSet.values.map((option) => JSON.stringify(option.value)).join(', ')}])`
+        : field.valueType ? `${field.valueType.name}Schema` : zodPrimitive(field.type);
     if (isListField(field)) expression = `z.array(${expression})`;
     if (isJsonField(field)) {
         expression = `z.preprocess((value) => {

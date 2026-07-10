@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAsRef } from "@/hooks/use-as-ref";
 import { useDebouncedCallback } from "@/hooks/use-debounced-callback";
-import type { SearchState } from "@/components/data-grid/data-grid";
+import type { SearchState } from "@/types/data-grid";
 
 interface DataGridSearchProps extends SearchState {}
 

@@ -26,6 +26,21 @@ type AxonMeta = Record<string, unknown> & {
   queryRoute?: string;
 };
 
+type SpringPagePayload = {
+  content?: unknown[];
+  last?: boolean;
+  number?: number;
+  size?: number;
+  totalElements?: number;
+  totalPages?: number;
+};
+
+type ListPayload<TData extends BaseRecord> = {
+  data: TData[];
+  page?: SpringPagePayload;
+  total: number;
+};
+
 const axonSegment = (value: string): string =>
   value.replace(/[-_]/g, "").toLowerCase();
 
@@ -116,15 +131,54 @@ const unwrapAxonReadModel = (payload: unknown): unknown => {
   return payload;
 };
 
+const isSpringPagePayload = (payload: unknown): payload is SpringPagePayload =>
+  Boolean(
+    payload &&
+      typeof payload === "object" &&
+      Array.isArray((payload as SpringPagePayload).content),
+  );
+
+const withQuery = (path: string, params?: URLSearchParams): string => {
+  const query = params?.toString();
+
+  if (!query) {
+    return path;
+  }
+
+  return `${path}${path.includes("?") ? "&" : "?"}${query}`;
+};
+
 const toRecords = <TData extends BaseRecord = BaseRecord>(
   payload: unknown,
 ): TData[] => {
   const data = unwrapAxonReadModel(payload);
-  const records = Array.isArray(data) ? data : data ? [data] : [];
+  const recordsPayload = isSpringPagePayload(data) ? data.content : data;
+  const records = Array.isArray(recordsPayload)
+    ? recordsPayload
+    : recordsPayload
+      ? [recordsPayload]
+      : [];
 
   return camelcaseKeys(records as Record<string, unknown>[], {
     deep: true,
   }) as TData[];
+};
+
+const toListPayload = <TData extends BaseRecord = BaseRecord>(
+  payload: unknown,
+): ListPayload<TData> => {
+  const data = unwrapAxonReadModel(payload);
+  const page = isSpringPagePayload(data) ? data : undefined;
+  const records = toRecords<TData>(payload);
+
+  return {
+    data: records,
+    page,
+    total:
+      typeof page?.totalElements === "number"
+        ? page.totalElements
+        : records.length,
+  };
 };
 
 const applyFilters = <TData extends BaseRecord>(
@@ -190,6 +244,29 @@ const applySorting = <TData extends BaseRecord>(
   });
 };
 
+const appendSorters = (
+  params: URLSearchParams,
+  sorters?: CrudSorting,
+): URLSearchParams => {
+  sorters?.forEach((sorter) => {
+    params.append("sort", `${sorter.field},${sorter.order ?? "asc"}`);
+  });
+
+  return params;
+};
+
+const pageQuery = (
+  current: number,
+  pageSize: number,
+  sorters?: CrudSorting,
+): URLSearchParams => {
+  const params = new URLSearchParams();
+  params.set("page", String(Math.max(current - 1, 0)));
+  params.set("size", String(Math.max(pageSize, 1)));
+
+  return appendSorters(params, sorters);
+};
+
 export const commandDataProvider = (
   supabaseClient: SupabaseClient<any, any, any>,
   options: { baseUrl?: string } = {},
@@ -212,11 +289,57 @@ export const commandDataProvider = (
     return res.json();
   };
 
+  const getCatalogPage = async <TData extends BaseRecord = BaseRecord>(
+    resource: string,
+    meta?: AxonMeta,
+    query?: URLSearchParams,
+  ): Promise<ListPayload<TData>> =>
+    toListPayload<TData>(
+      await getJson(withQuery(catalogPath(resource, meta), query)),
+    );
+
   const getCatalogRecords = async <TData extends BaseRecord = BaseRecord>(
     resource: string,
     meta?: AxonMeta,
-  ): Promise<TData[]> =>
-    toRecords<TData>(await getJson(catalogPath(resource, meta)));
+    sorters?: CrudSorting,
+  ): Promise<TData[]> => {
+    const pageSize = 200;
+    const firstPage = await getCatalogPage<TData>(
+      resource,
+      meta,
+      pageQuery(1, pageSize, sorters),
+    );
+
+    if (!firstPage.page) {
+      return firstPage.data;
+    }
+
+    const records = [...firstPage.data];
+    let nextPage = (firstPage.page.number ?? 0) + 2;
+    let reachedLastPage = firstPage.page.last === true;
+    const totalPages =
+      typeof firstPage.page.totalPages === "number"
+        ? firstPage.page.totalPages
+        : Math.ceil(firstPage.total / pageSize);
+
+    while (nextPage <= totalPages && !reachedLastPage) {
+      const page = await getCatalogPage<TData>(
+        resource,
+        meta,
+        pageQuery(nextPage, pageSize, sorters),
+      );
+      records.push(...page.data);
+      reachedLastPage = page.page?.last === true;
+
+      if (!page.page || reachedLastPage) {
+        break;
+      }
+
+      nextPage = (page.page.number ?? nextPage - 1) + 2;
+    }
+
+    return records;
+  };
 
   return {
     ...supabaseDataProvider,
@@ -227,10 +350,39 @@ export const commandDataProvider = (
       sorters,
       meta,
     }: GetListParams): Promise<GetListResponse<TData>> => {
-      const allRecords = await getCatalogRecords<TData>(resource, meta);
+      if (pagination?.mode !== "off" && !filters?.length) {
+        const current = pagination?.currentPage ?? 1;
+        const pageSize = pagination?.pageSize ?? 10;
+        const page = await getCatalogPage<TData>(
+          resource,
+          meta,
+          pageQuery(current, pageSize, sorters),
+        );
+
+        if (page.page) {
+          return {
+            data: page.data,
+            total: page.total,
+          };
+        }
+
+        const sorted = applySorting(page.data, sorters);
+        const start = (current - 1) * pageSize;
+
+        return {
+          data: sorted.slice(start, start + pageSize),
+          total: sorted.length,
+        };
+      }
+
+      const allRecords = await getCatalogRecords<TData>(
+        resource,
+        meta,
+        sorters,
+      );
       const filtered = applyFilters(allRecords, filters);
       const sorted = applySorting(filtered, sorters);
-      const current = pagination?.current ?? 1;
+      const current = pagination?.currentPage ?? 1;
       const pageSize = pagination?.pageSize ?? sorted.length;
       const start = (current - 1) * pageSize;
 

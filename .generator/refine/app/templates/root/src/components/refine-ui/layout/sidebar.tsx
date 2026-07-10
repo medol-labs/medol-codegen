@@ -109,7 +109,8 @@ function filterMenuItemForModule(item: TreeMenuItem, activeRoutes: Set<string>):
     return item;
   }
 
-  if (item.route && Array.from(activeRoutes).some((route) => item.route === route || item.route.startsWith(`${route}/`))) {
+  const itemRoute = item.route;
+  if (itemRoute && Array.from(activeRoutes).some((route) => itemRoute === route || itemRoute.startsWith(`${route}/`))) {
     return item;
   }
 
@@ -141,6 +142,7 @@ function SidebarItem({ item, selectedKey }: MenuItemProps) {
 function SidebarItemGroup({ item, selectedKey }: MenuItemProps) {
   const { children } = item;
   const { open } = useShadcnSidebar();
+  const translate = useTranslate();
 
   return (
     <div className={cn("border-t", "border-sidebar-border", "pt-4")}>
@@ -164,7 +166,7 @@ function SidebarItemGroup({ item, selectedKey }: MenuItemProps) {
           }
         )}
       >
-        {getDisplayName(item)}
+        {getDisplayName(item, translate)}
       </span>
       {children && children.length > 0 && (
         <div className={cn("flex", "flex-col")}>
@@ -219,6 +221,7 @@ function SidebarItemCollapsible({ item, selectedKey }: MenuItemProps) {
 function SidebarItemDropdown({ item, selectedKey }: MenuItemProps) {
   const { children } = item;
   const Link = useLink();
+  const translate = useTranslate();
 
   return (
     <DropdownMenu>
@@ -242,7 +245,7 @@ function SidebarItemDropdown({ item, selectedKey }: MenuItemProps) {
                   icon={child.meta?.icon ?? child.icon}
                   isSelected={isSelected}
                 />
-                <span>{getDisplayName(child)}</span>
+                <span>{getDisplayName(child, translate)}</span>
               </Link>
             </DropdownMenuItem>
           );

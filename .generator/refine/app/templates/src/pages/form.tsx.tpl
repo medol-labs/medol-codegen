@@ -24,6 +24,9 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useCommandForm } from "@/hooks/command/useCommandForm";
+<% if (command.hasSelectFields) { -%>
+import { ResourceSelect } from "@/components/refine-ui/form/resource-select";
+<% } -%>
 
 export const <%= command.pageComponent %> = () => {
   const navigate = useNavigate();
@@ -53,7 +56,30 @@ export const <%= command.pageComponent %> = () => {
             render={({ field }) => (
               <FormItem>
                 <FormLabel><%= field.label %></FormLabel>
-<% if (field.boolean) { -%>
+<% if (field.select) { -%>
+                <ResourceSelect
+                  withFormControl
+                  resource="<%= field.select.resource %>"
+                  dataProviderName="<%= field.select.dataProviderName %>"
+                  optionLabel="<%= field.select.optionLabel %>"
+                  optionValue="<%= field.select.optionValue %>"
+                  value={field.value || ""}
+                  onValueChange={field.onChange}
+                  placeholder="Select <%= field.label %>"
+<% if (field.select.filters?.length) { -%>
+                  filters={<%- JSON.stringify(field.select.filters) %>}
+<% } -%>
+<% if (field.select.sorters?.length) { -%>
+                  sorters={<%- JSON.stringify(field.select.sorters) %>}
+<% } -%>
+                  meta={{
+                    idField: "<%= field.select.meta.idField %>",
+                    label: "<%= field.select.meta.label %>",
+                    aggregateRoute: "<%= field.select.meta.aggregateRoute %>",
+                    queryRoute: "<%= field.select.meta.queryRoute %>",
+                  }}
+                />
+<% } else if (field.boolean) { -%>
                 <Select
                   value={field.value === undefined || field.value === null ? undefined : String(field.value)}
                   onValueChange={(value) => field.onChange(value === "true")}

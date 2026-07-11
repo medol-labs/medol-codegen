@@ -402,6 +402,12 @@ export const <%= command.pageComponent %> = () => {
                   value={field.value || ""}
                   onValueChange={field.onChange}
                   placeholder={t("<%= field.placeholderKey %>", "Select <%= field.label %>")}
+<% if (field.select.filters?.length) { -%>
+                  filters={<%- JSON.stringify(field.select.filters) %>}
+<% } -%>
+<% if (field.select.sorters?.length) { -%>
+                  sorters={<%- JSON.stringify(field.select.sorters) %>}
+<% } -%>
                   meta={{
                     idField: "<%= field.select.meta.idField %>",
                     label: t("<%= field.i18nKey %>", "<%= field.select.meta.label %>"),

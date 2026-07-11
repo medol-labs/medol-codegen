@@ -41,14 +41,14 @@ After the backend modules are running, seed demo data from the generated backend
 node scripts/seed-dev-data.mjs
 ```
 
-The seed tool reads `codegen-model.json`, calls generated command REST endpoints, and uses module-specific base URLs when deployments are present. Override URLs with environment variables such as `FLPLATFORM_BACKEND_URL=http://localhost:8080` or `FLRUNTIME_AGENT_URL=http://localhost:8081`.
+The seed tool reads `codegen-model.json`, calls generated command REST endpoints, and uses module-specific base URLs when deployments are present. Override URLs with environment variables named after deployment ids, for example `MY_BACKEND_URL=http://localhost:8080`.
 
 Useful options:
 
 ```bash
 node scripts/seed-dev-data.mjs --count 3
 node scripts/seed-dev-data.mjs --mode workflow
-node scripts/seed-dev-data.mjs --deployment FLPlatformBackend
+node scripts/seed-dev-data.mjs --deployment MyBackend
 node scripts/seed-dev-data.mjs --dry-run
 ```
 

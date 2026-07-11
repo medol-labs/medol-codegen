@@ -112,7 +112,7 @@ Create/edit/delete capabilities are generated only when matching event-modeling 
 
 When generating `all`, `resources`, `router`, or `pages`, the refine generator prompts for the commands to generate. Unselected commands are omitted from resource metadata, routes, list action buttons, and command form pages.
 
-Some common string fields are treated as generated dictionaries before Medol has first-class enum syntax. The hardcoded dictionary lives in `.generator/common/core/field-options.js`. Matching fields generate Kotlin enum classes under `support.enums`, Zod `z.enum(...)` schemas, and Refine `Select` controls in command forms.
+Constrained values should be modeled explicitly in Medol with `enum` or scalar `oneOf` value types. The Refine generator renders those static fields as `Select` controls and emits matching Zod schemas. For runtime-maintained option sets, mark a string field with `dictionary "DICTIONARY_CODE"` and provide a standard `DictionaryValueCatalog` read model with `dictionaryCode`, `valueCode`, `displayName`, optional `displayOrder`, and either `state` or `active`. The generated form submits the selected `valueCode` and queries the catalog by `dictionaryCode`. `.generator/common/core/field-options.js` only preserves compatibility with explicit option metadata in the codegen model; it no longer carries business-specific field-name dictionaries.
 
 You can still invoke other generators explicitly:
 
@@ -321,7 +321,7 @@ You do not need to run `npm install` manually on the host. Generator dependencie
 
 The `axon5` generator consumes Medol's `codegen-model.json` directly. It does not read or create the legacy `config.json` compatibility model.
 
-It generates Axon Framework 5.1.1 code using event-sourced entities, `EventAppender`, explicit event tags, composite `EventCriteria` derived from Medol slice tags, and JPA read-model projectors updated by inbound events. Concept states generate Kotlin enums, hardcoded dictionary fields generate Kotlin enums under `support.enums`, and fields such as `TrainingJob.State` are mapped to `TrainingJobState` with assignments derived from `stateChange`. Medol expressions such as `normalize(code)` become computed tag values on commands and events.
+It generates Axon Framework 5.1.1 code using event-sourced entities, `EventAppender`, explicit event tags, composite `EventCriteria` derived from Medol slice tags, and JPA read-model projectors updated by inbound events. Concept states and Medol enum value types generate Kotlin enums, and fields such as `TrainingJob.State` are mapped to `TrainingJobState` with assignments derived from `stateChange`. Medol expressions such as `normalize(code)` become computed tag values on commands and events.
 
 ```bash
 cd example

@@ -367,6 +367,7 @@ function uniqueCommands(commands) {
 
 function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, backendModules, transitions = []) {
     const selectableReadModels = new Map();
+    let dictionaryValueCatalog = null;
     const commandsById = new Map();
     const eventsById = new Map();
     const producerCommandsByReadModelId = new Map();
@@ -416,7 +417,7 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
             const aggregate = aggregateName(readModel, { title: readModel.slice }, aggregates, contexts);
             const deployment = backendModuleForContext(slice.context ?? slice.chapter, backendModules);
             const optionLabel = optionLabelField(readModel);
-            selectableReadModels.set(id, {
+            const selectModel = {
                 resource: snake(cleanTitle(readModel.title)),
                 dataProviderName: deployment.dataProviderName,
                 optionValue: id,
@@ -427,7 +428,19 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
                     aggregateRoute: axonRoute(aggregate.title),
                     queryRoute: axonRoute(readModel.title)
                 }
-            });
+            };
+            selectableReadModels.set(id, selectModel);
+            if (isDictionaryValueCatalog(readModel)) {
+                dictionaryValueCatalog = {
+                    ...selectModel,
+                    optionValue: dictionaryValueField(readModel, 'valueCode') ?? id,
+                    optionLabel: dictionaryValueField(readModel, 'displayName') ?? optionLabel,
+                    dictionaryCodeField: dictionaryValueField(readModel, 'dictionaryCode'),
+                    stateField: dictionaryValueField(readModel, 'state'),
+                    activeField: dictionaryValueField(readModel, 'active'),
+                    sortField: dictionaryValueField(readModel, 'displayOrder') ?? dictionaryValueField(readModel, 'sortOrder')
+                };
+            }
         });
 
     slices.flatMap((slice) => slice.readmodels ?? [])
@@ -477,6 +490,36 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
                 ?? transitionsByCommandId.get(String(command.name ?? ''))
                 ?? transitionsByCommandId.get(String(command.title ?? ''));
             return stateControlForTransition(transition, readModel);
+        },
+        dictionaryValueSelect(dictionaryCode) {
+            if (!dictionaryValueCatalog || !dictionaryValueCatalog.dictionaryCodeField || !dictionaryCode) {
+                return null;
+            }
+            const filters = [{
+                field: dictionaryValueCatalog.dictionaryCodeField,
+                operator: 'eq',
+                value: dictionaryCode
+            }];
+            if (dictionaryValueCatalog.stateField) {
+                filters.push({
+                    field: dictionaryValueCatalog.stateField,
+                    operator: 'eq',
+                    value: 'Active'
+                });
+            } else if (dictionaryValueCatalog.activeField) {
+                filters.push({
+                    field: dictionaryValueCatalog.activeField,
+                    operator: 'eq',
+                    value: true
+                });
+            }
+            return {
+                ...dictionaryValueCatalog,
+                filters,
+                sorters: dictionaryValueCatalog.sortField
+                    ? [{ field: dictionaryValueCatalog.sortField, order: 'asc' }]
+                    : []
+            };
         }
     };
 }
@@ -539,6 +582,11 @@ function commandWorkflowFields(command, readModel, allEvents, workflow) {
             const select = workflow.selectableReadModels.get(field.name);
             if (select && !field.idAttribute && isReferenceSelectField(field)) {
                 selects.set(field.name, select);
+            }
+
+            const dictionarySelect = workflow.dictionaryValueSelect(field.dictionary);
+            if (dictionarySelect && !field.idAttribute && !isJsonField(field)) {
+                selects.set(field.name, dictionarySelect);
             }
         });
 
@@ -723,6 +771,7 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
     const title = cleanTitle(command.title);
     const component = pascal(title);
     const normalizedFields = normalizeFields(command.fields).filter((field) => !field.generated);
+    const formFields = normalizedFields.filter(isCommandFormField);
     const workflowFields = commandWorkflowFields(command, readModel, allEvents, workflow);
     const stateControl = workflow.stateControlForCommand(command, readModel);
     const commandAggregateTitle = cleanTitle(
@@ -749,22 +798,29 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
         allowedStates: stateControl.allowedStates,
         targetState: stateControl.targetState,
         stateField: stateControl.stateField,
-        fields: normalizedFields.map((field) => ({
+        fields: formFields.map((field) => ({
             ...field,
             select: workflowFields.selects.get(field.name) ?? null
         })),
-        workflowPrefillFields: normalizedFields.filter((field) => workflowFields.prefill.has(field.name)),
-        defaultValueFields: normalizedFields
+        workflowPrefillFields: formFields.filter((field) => workflowFields.prefill.has(field.name)),
+        defaultValueFields: formFields
             .filter((field) => !workflowFields.prefill.has(field.name))
             .filter((field) => field.object || field.list)
             .map((field) => ({
                 name: field.name,
                 defaultValue: defaultValueExpression(field)
             })),
-        hasSelectFields: workflowFields.selects.size > 0,
-        hasObjectFields: normalizedFields.some((field) => field.object),
-        hasArrayFields: normalizedFields.some((field) => field.list || hasNestedArrayField(field))
+        hasSelectFields: formFields.some((field) => workflowFields.selects.has(field.name)),
+        hasObjectFields: formFields.some((field) => field.object),
+        hasArrayFields: formFields.some((field) => field.list || hasNestedArrayField(field))
     };
+}
+
+function isCommandFormField(field) {
+    if (field.excludeFromForm || field.hidden || field.readOnly || field.technicalAttribute) {
+        return false;
+    }
+    return true;
 }
 
 function withPrefillFields(commands, resourceFields) {
@@ -1145,6 +1201,17 @@ function optionLabelField(readModel) {
     })?.name ?? idFieldName(readModel);
 }
 
+function isDictionaryValueCatalog(readModel) {
+    const name = pascal(cleanTitle(readModel?.title ?? readModel?.name ?? ''));
+    return name === 'DictionaryValueCatalog'
+        && Boolean(dictionaryValueField(readModel, 'dictionaryCode'))
+        && Boolean(dictionaryValueField(readModel, 'valueCode'));
+}
+
+function dictionaryValueField(readModel, name) {
+    return readModel?.fields?.find((field) => field.name === name)?.name;
+}
+
 function normalizeFields(fields = []) {
     return fields
         .filter((field) => field?.name && !field.excludeFromApi && !field.generated)
@@ -1152,8 +1219,13 @@ function normalizeFields(fields = []) {
             name: field.name,
             label: titleCase(field.name),
             type: field.type ?? 'String',
+            dictionary: field.dictionary,
             optional: !!field.optional,
             generated: !!field.generated,
+            excludeFromForm: !!field.excludeFromForm,
+            hidden: !!field.hidden,
+            readOnly: !!field.readOnly,
+            technicalAttribute: !!field.technicalAttribute,
             idAttribute: !!field.idAttribute,
             cardinality: field.cardinality ?? 'Single',
             valueType: field.valueType
@@ -1164,7 +1236,7 @@ function decorateField(field) {
     const object = isObjectField(field);
     const list = isListField(field);
     const json = object;
-    const optionSet = !object ? fieldOptionsFor(field) : undefined;
+    const optionSet = !object ? optionSetForField(field) : undefined;
     const textArea = !object && (field.name.toLowerCase().includes('content')
         || field.name.toLowerCase().includes('description')
         || field.name.toLowerCase().includes('notes'));
@@ -1200,6 +1272,52 @@ function decorateField(field) {
         rows: json ? 10 : textArea ? 8 : null,
         rules: field.optional || boolean ? '{}' : `{ required: "${escapeString(field.label)} is required" }`
     };
+}
+
+function optionSetForField(field) {
+    const explicit = fieldOptionsFor(field);
+    if (explicit) {
+        return explicit;
+    }
+    if (field.valueType?.kind === 'enum' && (field.valueType.values ?? []).length > 0) {
+        return optionSetFromValues(field.valueType.name, field.valueType.values, 'valueType');
+    }
+    const oneOf = (field.valueType?.resolvedConstraints ?? field.valueType?.constraints ?? [])
+        .find((constraint) => constraint.kind === 'oneOf' && (constraint.values ?? []).length > 0);
+    if (oneOf) {
+        return optionSetFromValues(field.valueType.name, oneOf.values, 'oneOf');
+    }
+    return undefined;
+}
+
+function optionSetFromValues(enumName, values, source) {
+    return {
+        enumName,
+        source,
+        values: values.map((value) => {
+            const stringValue = String(value);
+            return {
+                value: stringValue,
+                label: optionLabel(stringValue),
+                enumConstant: constant(stringValue)
+            };
+        })
+    };
+}
+
+function optionLabel(value) {
+    return String(value ?? '')
+        .split(/[\s_-]+/)
+        .filter(Boolean)
+        .map((part) => {
+            const upper = part.toUpperCase();
+            if (/^[A-Z0-9]+$/.test(upper) && /\d/.test(upper)) return upper;
+            if (['VM', 'GPU', 'CPU', 'HA', 'VPN', 'TLS', 'API', 'IP', 'URL', 'UUID', 'CIDR'].includes(upper)) {
+                return upper;
+            }
+            return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+        })
+        .join(' ');
 }
 
 function isReferenceSelectField(field) {
@@ -1246,7 +1364,7 @@ function defaultValueExpression(field) {
     if (isObjectField(field)) {
         return defaultObjectValueExpression(field.valueType);
     }
-    if (fieldOptionsFor(field)) return 'undefined';
+    if (optionSetForField(field)) return 'undefined';
     const type = (field.valueType?.resolvedBaseType ?? field.type ?? 'String').toLowerCase();
     if (type === 'boolean') return 'false';
     if (['int', 'integer', 'long', 'double', 'float', 'decimal', 'bigdecimal', 'number'].includes(type)) return 'undefined';
@@ -1279,7 +1397,7 @@ function hasNestedArrayField(field) {
 }
 
 function scalarListItemDefaultExpression(field) {
-    const optionSet = fieldOptionsFor(field);
+    const optionSet = optionSetForField(field);
     if (optionSet) return JSON.stringify(optionSet.values[0]?.value ?? '');
     const type = (field.valueType?.resolvedBaseType ?? field.type ?? 'String').toLowerCase();
     if (type === 'boolean') return 'false';
@@ -1304,14 +1422,14 @@ function isDeleteCommand(command) {
 }
 
 function tsType(field) {
-    const optionSet = fieldOptionsFor(field);
-    if (optionSet) {
-        const type = optionSet.values.map((option) => JSON.stringify(option.value)).join(' | ');
-        return isListField(field) ? `(${type})[]` : type;
-    }
     if (field.valueType) {
         const valueType = field.valueType.name;
         return isListField(field) ? `${valueType}[]` : valueType;
+    }
+    const optionSet = optionSetForField(field);
+    if (optionSet) {
+        const type = optionSet.values.map((option) => JSON.stringify(option.value)).join(' | ');
+        return isListField(field) ? `(${type})[]` : type;
     }
     const lower = field.type?.toLowerCase();
     const base = ['int', 'long', 'double', 'number'].includes(lower) ? 'number' : lower === 'boolean' ? 'boolean' : 'string';
@@ -1372,10 +1490,10 @@ function zodValueTypeExpression(valueType) {
 }
 
 function zodFieldExpression(field) {
-    const optionSet = fieldOptionsFor(field);
-    let expression = optionSet
-        ? `z.enum([${optionSet.values.map((option) => JSON.stringify(option.value)).join(', ')}])`
-        : field.valueType ? `${field.valueType.name}Schema` : zodPrimitive(field.type);
+    const optionSet = optionSetForField(field);
+    let expression = field.valueType
+        ? `${field.valueType.name}Schema`
+        : optionSet ? `z.enum([${optionSet.values.map((option) => JSON.stringify(option.value)).join(', ')}])` : zodPrimitive(field.type);
     if (isListField(field)) expression = `z.array(${expression})`;
     if (isJsonField(field)) {
         expression = `z.preprocess((value) => {
@@ -1405,7 +1523,7 @@ function zodPrimitive(type) {
         case 'boolean': return 'z.boolean()';
         case 'uuid': return 'z.string().uuid()';
         case 'date': return 'z.string().date()';
-        case 'datetime': return 'z.string().datetime()';
+        case 'datetime': return 'z.string().datetime({ local: true })';
         default: return 'z.string()';
     }
 }
@@ -1481,6 +1599,17 @@ function camel(value) {
 
 function pascal(value) {
     return titleCase(value).replace(/\s/g, '');
+}
+
+function constant(value) {
+    return String(value ?? '')
+        .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+        .replace(/([a-z])([A-Z])/g, '$1_$2')
+        .replace(/([0-9])([A-Z][a-z])/g, '$1_$2')
+        .replace(/[^A-Za-z0-9]+/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .toUpperCase();
 }
 
 function escapeString(value) {

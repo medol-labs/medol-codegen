@@ -20,7 +20,7 @@ event-sourced state.
 - A single aggregate-style concept may keep child membership state as a map on
   the aggregate state when MEDOL models it that way.
 - Independent membership concepts should use tags that include the consistency
-  boundary, for example `federationId` plus `organizationId`, when each
+  boundary, for example `parentId` plus `memberId`, when each
   membership must have its own lifecycle.
 - Do not model multiple children with a state object that stores only one child
   id unless the business really allows only one child.

@@ -166,6 +166,7 @@ module.exports = class extends Generator {
         this.fs.copyTpl(this.templatePath('ApiExceptionHandler.kt.tpl'), this._kotlinPath('support/ApiExceptionHandler.kt'), {
             rootPackage: this.model.rootPackage
         });
+        this._writeMetadataSupport();
         if (this.eventStorageMode === 'dcb') {
             this.fs.copyTpl(this.templatePath('AxonEventStorageConfig.kt.tpl'), this._kotlinPath('support/AxonEventStorageConfig.kt'), {
                 rootPackage: this.model.rootPackage
@@ -186,6 +187,272 @@ module.exports = class extends Generator {
         if (!this.modulePrefix) {
             this._writeAgentSkills();
         }
+    }
+
+    _writeMetadataSupport() {
+        this.fs.write(this._kotlinPath('support/metadata/MetadataKeys.kt'), `package ${this.model.rootPackage}.support.metadata
+
+object MetadataKeys {
+    const val USER_ID = "userId"
+    const val SESSION_ID = "sessionId"
+    const val CORRELATION_ID = "correlationId"
+    const val CAUSATION_ID = "causationId"
+    const val TRACE_ID = "traceId"
+    const val TENANT_ID = "tenantId"
+
+    val PROPAGATED_KEYS = arrayOf(
+        CORRELATION_ID,
+        CAUSATION_ID,
+        USER_ID,
+        SESSION_ID,
+        TRACE_ID,
+        TENANT_ID
+    )
+}
+
+object MetadataHeaders {
+    const val USER_ID = "X-User-Id"
+    const val SESSION_ID = "X-Session-Id"
+    const val CORRELATION_ID = "X-Correlation-Id"
+    const val CAUSATION_ID = "X-Causation-Id"
+    const val TRACE_ID = "X-Trace-Id"
+    const val TRACE_PARENT = "traceparent"
+    const val TENANT_ID = "X-Tenant-Id"
+}
+`);
+        this.fs.write(this._kotlinPath('support/metadata/MetadataFactory.kt'), `package ${this.model.rootPackage}.support.metadata
+
+import jakarta.servlet.http.HttpServletRequest
+import org.axonframework.messaging.core.Metadata
+import java.util.UUID
+
+object MetadataFactory {
+    const val DEFAULT_USER_ID = "anonymous"
+
+    fun from(request: HttpServletRequest): Metadata {
+        val correlationId = header(request, MetadataHeaders.CORRELATION_ID) ?: UUID.randomUUID().toString()
+        val values = linkedMapOf<String, String?>()
+
+        put(values, MetadataKeys.USER_ID, header(request, MetadataHeaders.USER_ID) ?: request.userPrincipal?.name ?: DEFAULT_USER_ID)
+        put(values, MetadataKeys.SESSION_ID, header(request, MetadataHeaders.SESSION_ID) ?: request.requestedSessionId ?: request.getSession(false)?.id ?: UUID.randomUUID().toString())
+        put(values, MetadataKeys.CORRELATION_ID, correlationId)
+        put(values, MetadataKeys.CAUSATION_ID, header(request, MetadataHeaders.CAUSATION_ID) ?: correlationId)
+        put(values, MetadataKeys.TRACE_ID, header(request, MetadataHeaders.TRACE_ID) ?: traceIdFromTraceParent(request) ?: correlationId)
+        put(values, MetadataKeys.TENANT_ID, header(request, MetadataHeaders.TENANT_ID))
+
+        return Metadata.from(values)
+    }
+
+    fun fromValues(
+        userId: String?,
+        sessionId: String?,
+        correlationId: String?,
+        causationId: String?,
+        traceId: String?,
+        tenantId: String?
+    ): Metadata {
+        val resolvedCorrelationId = value(correlationId) ?: UUID.randomUUID().toString()
+        val values = linkedMapOf<String, String?>()
+
+        put(values, MetadataKeys.USER_ID, value(userId) ?: DEFAULT_USER_ID)
+        put(values, MetadataKeys.SESSION_ID, value(sessionId) ?: UUID.randomUUID().toString())
+        put(values, MetadataKeys.CORRELATION_ID, resolvedCorrelationId)
+        put(values, MetadataKeys.CAUSATION_ID, value(causationId) ?: resolvedCorrelationId)
+        put(values, MetadataKeys.TRACE_ID, value(traceId) ?: resolvedCorrelationId)
+        put(values, MetadataKeys.TENANT_ID, value(tenantId))
+
+        return Metadata.from(values)
+    }
+
+    fun value(value: String?): String? =
+        value?.trim()?.takeIf { it.isNotEmpty() }
+
+    private fun header(request: HttpServletRequest, name: String): String? =
+        value(request.getHeader(name))
+
+    private fun put(values: MutableMap<String, String?>, key: String, value: String?) {
+        value?.let { values[key] = it }
+    }
+
+    private fun traceIdFromTraceParent(request: HttpServletRequest): String? =
+        header(request, MetadataHeaders.TRACE_PARENT)
+            ?.split("-")
+            ?.getOrNull(1)
+            ?.takeIf { it.length == 32 }
+}
+`);
+        this.fs.write(this._kotlinPath('support/metadata/CorrelationConfig.kt'), `package ${this.model.rootPackage}.support.metadata
+
+import org.axonframework.messaging.commandhandling.CommandMessage
+import org.axonframework.messaging.core.correlation.MessageOriginProvider
+import org.axonframework.messaging.core.correlation.SimpleCorrelationDataProvider
+import org.axonframework.messaging.core.interception.CorrelationDataInterceptor
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
+
+@Configuration
+class CorrelationConfig {
+    @Bean
+    fun metadataCorrelationDataProvider(): SimpleCorrelationDataProvider =
+        SimpleCorrelationDataProvider(*MetadataKeys.PROPAGATED_KEYS)
+
+    @Bean
+    fun messageOriginProvider(): MessageOriginProvider =
+        MessageOriginProvider(MetadataKeys.CORRELATION_ID, MetadataKeys.CAUSATION_ID)
+
+    @Bean
+    fun correlationDataInterceptor(): CorrelationDataInterceptor<CommandMessage> =
+        CorrelationDataInterceptor(messageOriginProvider(), metadataCorrelationDataProvider())
+}
+`);
+        this.fs.write(this._kotlinPath('support/metadata/MetadataCommandInterceptor.kt'), `package ${this.model.rootPackage}.support.metadata
+
+import org.axonframework.messaging.commandhandling.CommandMessage
+import org.axonframework.messaging.core.MessageDispatchInterceptor
+import org.axonframework.messaging.core.MessageDispatchInterceptorChain
+import org.axonframework.messaging.core.MessageStream
+import org.axonframework.messaging.core.unitofwork.ProcessingContext
+import org.springframework.stereotype.Component
+
+@Component
+class MetadataCommandInterceptor : MessageDispatchInterceptor<CommandMessage> {
+    override fun interceptOnDispatch(
+        message: CommandMessage,
+        context: ProcessingContext?,
+        chain: MessageDispatchInterceptorChain<CommandMessage>
+    ): MessageStream<*> {
+        val metadata = MetadataFactory.fromValues(
+            userId = message.metadata()[MetadataKeys.USER_ID],
+            sessionId = message.metadata()[MetadataKeys.SESSION_ID],
+            correlationId = message.metadata()[MetadataKeys.CORRELATION_ID],
+            causationId = message.metadata()[MetadataKeys.CAUSATION_ID] ?: message.identifier(),
+            traceId = message.metadata()[MetadataKeys.TRACE_ID],
+            tenantId = message.metadata()[MetadataKeys.TENANT_ID]
+        )
+
+        require(!metadata[MetadataKeys.SESSION_ID].isNullOrBlank()) {
+            "Missing required metadata: " + MetadataKeys.SESSION_ID
+        }
+
+        return chain.proceed(message.andMetadata(metadata), context)
+    }
+}
+`);
+        this.fs.write(this._kotlinPath('support/metadata/AuditLogEntry.kt'), `package ${this.model.rootPackage}.support.metadata
+
+import jakarta.persistence.Column
+import jakarta.persistence.Entity
+import jakarta.persistence.GeneratedValue
+import jakarta.persistence.GenerationType
+import jakarta.persistence.Id
+import jakarta.persistence.Lob
+import jakarta.persistence.Table
+import java.time.Instant
+
+@Entity
+@Table(name = "audit_log")
+class AuditLogEntry {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    var id: Long? = null
+
+    var userId: String? = null
+    var sessionId: String? = null
+    var correlationId: String? = null
+    var causationId: String? = null
+    var traceId: String? = null
+    var tenantId: String? = null
+
+    @Column(name = "event_type")
+    var eventType: String? = null
+
+    @Column(name = "event_timestamp")
+    var timestamp: Instant? = null
+
+    @Lob
+    @Column(columnDefinition = "TEXT")
+    var payload: String? = null
+}
+`);
+        this.fs.write(this._kotlinPath('support/metadata/AuditLogRepository.kt'), `package ${this.model.rootPackage}.support.metadata
+
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.Pageable
+import org.springframework.data.jpa.repository.JpaRepository
+
+interface AuditLogRepository : JpaRepository<AuditLogEntry, Long> {
+    fun findAllByCorrelationId(correlationId: String, pageable: Pageable): Page<AuditLogEntry>
+    fun findAllByUserId(userId: String, pageable: Pageable): Page<AuditLogEntry>
+    fun findAllBySessionId(sessionId: String, pageable: Pageable): Page<AuditLogEntry>
+    fun findAllByTraceId(traceId: String, pageable: Pageable): Page<AuditLogEntry>
+    fun findAllByTenantId(tenantId: String, pageable: Pageable): Page<AuditLogEntry>
+}
+`);
+        this.fs.write(this._kotlinPath('support/metadata/AuditTrailProjection.kt'), `package ${this.model.rootPackage}.support.metadata
+
+import com.fasterxml.jackson.databind.ObjectMapper
+import org.axonframework.messaging.eventhandling.EventMessage
+import org.axonframework.messaging.eventhandling.annotation.EventHandler
+import org.springframework.stereotype.Component
+
+@Component
+class AuditTrailProjection(
+    private val repository: AuditLogRepository,
+    private val objectMapper: ObjectMapper
+) {
+    @EventHandler
+    fun on(event: Any, message: EventMessage) {
+        val metadata = message.metadata()
+        val entry = AuditLogEntry().apply {
+            userId = metadata[MetadataKeys.USER_ID]
+            sessionId = metadata[MetadataKeys.SESSION_ID]
+            correlationId = metadata[MetadataKeys.CORRELATION_ID]
+            causationId = metadata[MetadataKeys.CAUSATION_ID]
+            traceId = metadata[MetadataKeys.TRACE_ID]
+            tenantId = metadata[MetadataKeys.TENANT_ID]
+            eventType = event::class.simpleName ?: event.javaClass.simpleName
+            timestamp = message.timestamp()
+            payload = objectMapper.writeValueAsString(event)
+        }
+
+        repository.save(entry)
+    }
+}
+`);
+        this.fs.write(this._kotlinPath('support/metadata/AuditTrailResource.kt'), `package ${this.model.rootPackage}.support.metadata
+
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.Pageable
+import org.springframework.data.web.PageableDefault
+import org.springframework.web.bind.annotation.CrossOrigin
+import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
+import org.springframework.web.bind.annotation.RestController
+
+@CrossOrigin
+@RestController
+@RequestMapping("/audit-trail")
+class AuditTrailResource(private val repository: AuditLogRepository) {
+    @GetMapping
+    fun findAll(
+        @RequestParam(required = false) correlationId: String?,
+        @RequestParam(required = false) userId: String?,
+        @RequestParam(required = false) sessionId: String?,
+        @RequestParam(required = false) traceId: String?,
+        @RequestParam(required = false) tenantId: String?,
+        @PageableDefault(size = 20) pageable: Pageable
+    ): Page<AuditLogEntry> =
+        when {
+            !correlationId.isNullOrBlank() -> repository.findAllByCorrelationId(correlationId, pageable)
+            !userId.isNullOrBlank() -> repository.findAllByUserId(userId, pageable)
+            !sessionId.isNullOrBlank() -> repository.findAllBySessionId(sessionId, pageable)
+            !traceId.isNullOrBlank() -> repository.findAllByTraceId(traceId, pageable)
+            !tenantId.isNullOrBlank() -> repository.findAllByTenantId(tenantId, pageable)
+            else -> repository.findAll(pageable)
+        }
+}
+`);
     }
 
     _runtimeConfig(appName) {
@@ -641,12 +908,40 @@ ${methods}
             const commandName = _commandTitle(command.title);
             const commandReservations = command.startsLifecycle ? reservations : [];
             const includeState = !command.startsLifecycle;
-            const stateParam = includeState ? `, @InjectEntity${injectEntity} state: ${stateName}` : '';
-            const reservationParams = commandReservations.map((reservation) =>
-                `, @InjectEntity(idProperty = "${escapeKotlin(reservation.selectionProperty)}") ${reservation.stateParam}: ${reservation.stateName}`
-            ).join('');
+            const methodParameters = [
+                `command: ${commandName}`,
+                includeState ? `@InjectEntity${injectEntity} state: ${stateName}` : undefined,
+                ...commandReservations.map((reservation) =>
+                    `@InjectEntity(idProperty = "${escapeKotlin(reservation.selectionProperty)}") ${reservation.stateParam}: ${reservation.stateName}`
+                ),
+                '@MetadataValue(MetadataKeys.USER_ID) userId: String?',
+                '@MetadataValue(MetadataKeys.SESSION_ID) sessionId: String?',
+                '@MetadataValue(MetadataKeys.CORRELATION_ID) correlationId: String?',
+                '@MetadataValue(MetadataKeys.TRACE_ID) traceId: String?',
+                '@MetadataValue(MetadataKeys.TENANT_ID) tenantId: String?',
+                'commandMessage: CommandMessage',
+                'eventAppender: EventAppender'
+            ]
+                .filter(Boolean)
+                .map((parameter) => `        ${parameter}`)
+                .join(',\n');
             const decisionArgs = ['command', ...(includeState ? ['state'] : []), ...commandReservations.map((reservation) => reservation.stateParam)].join(', ');
-            return `    @CommandHandler\n    fun handle(command: ${commandName}${stateParam}${reservationParams}, eventAppender: EventAppender) {\n        eventAppender.append(decision.decide(${decisionArgs}))\n    }`;
+            return `    @CommandHandler
+    fun handle(
+${methodParameters}
+    ) {
+        eventAppender.append(
+            decision.decide(${decisionArgs}),
+            MetadataFactory.fromValues(
+                userId = userId,
+                sessionId = sessionId,
+                correlationId = correlationId,
+                causationId = commandMessage.identifier(),
+                traceId = traceId,
+                tenantId = tenantId
+            )
+        )
+    }`;
         }).join('\n\n');
         const commandImports = slice.commands.map((command) => `import ${packageName}.${_commandTitle(command.title)}`).join('\n');
         const stateImport = stateTarget.packageName === packageName ? '' : `import ${stateTarget.packageName}.${stateName}\n`;
@@ -654,9 +949,13 @@ ${methods}
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${pascal(slice.name)}CommandHandler.kt`), `package ${packageName}
 
 import org.axonframework.messaging.commandhandling.annotation.CommandHandler
+import org.axonframework.messaging.commandhandling.CommandMessage
+import org.axonframework.messaging.core.annotation.MetadataValue
 import org.axonframework.messaging.eventhandling.gateway.EventAppender
 import org.axonframework.modelling.annotation.InjectEntity
 import org.springframework.stereotype.Component
+import ${this.model.rootPackage}.support.metadata.MetadataFactory
+import ${this.model.rootPackage}.support.metadata.MetadataKeys
 ${commandImports}
 ${stateImport}
 ${reservationStateImports}
@@ -692,11 +991,15 @@ ${handlers}
         const methods = slice.commands.map((command) => {
             const commandName = _commandTitle(command.title);
             return `    @PostMapping("/${httpRoute(command.title)}")
-    fun ${safeIdentifier(command.name)}(@Valid @RequestBody command: ${commandName}): CompletableFuture<${commandName}> =
-        commandGateway.send(command).resultMessage.thenApply { command }`;
+    fun ${safeIdentifier(command.name)}(
+        @Valid @RequestBody command: ${commandName},
+        request: HttpServletRequest
+    ): CompletableFuture<${commandName}> =
+        commandGateway.send(command, MetadataFactory.from(request)).resultMessage.thenApply { command }`;
         }).join('\n\n');
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${resourceName}.kt`), `package ${packageName}
 
+import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.Valid
 import org.axonframework.messaging.commandhandling.gateway.CommandGateway
 import org.springframework.web.bind.annotation.CrossOrigin
@@ -704,6 +1007,7 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
+import ${this.model.rootPackage}.support.metadata.MetadataFactory
 import java.util.concurrent.CompletableFuture
 
 @CrossOrigin
@@ -718,21 +1022,29 @@ ${methods}
     _writeReadModel(packageName, context, slicePackage, slice, readmodel) {
         const name = _readmodelTitle(readmodel.title);
         const imports = kotlinFieldImports(readmodel.fields, this.model.rootPackage);
+        const metadataFields = readModelMetadataFields(readmodel);
+        const allImports = [imports].filter(Boolean).join('\n');
         const ids = readmodel.fields.filter((field) => field.idAttribute);
         const idFields = ids.length > 0 ? ids : readmodel.fields.slice(0, 1);
         const id = idFields[0];
         const compositeId = idFields.length > 1;
-        const entityFields = readmodel.fields.map((field) => {
-            const annotation = idFields.some((candidate) => candidate.name === field.name) ? '    @Id\n' : '';
-            const enumAnnotation = field.type?.endsWith('.State') || fieldOptionsFor(field) ? '    @Enumerated(EnumType.STRING)\n' : '';
-            return `${annotation}${enumAnnotation}    var ${field.name}: ${stateFieldType(field)} = ${stateFieldDefault(field)}`;
-        }).join('\n');
+        const entityFields = [
+            ...readmodel.fields.map((field) => {
+                const annotation = idFields.some((candidate) => candidate.name === field.name) ? '    @Id\n' : '';
+                const enumAnnotation = isJpaEnumField(field) ? '    @Enumerated(EnumType.STRING)\n' : '';
+                return `${annotation}${enumAnnotation}    var ${field.name}: ${stateFieldType(field)} = ${stateFieldDefault(field)}`;
+            }),
+            ...metadataFields.map((field) => `    var ${field.name}: ${field.type} = null`)
+        ].join('\n');
         const keyName = `${name}Key`;
         const keyDeclaration = compositeId
             ? `@Embeddable\ndata class ${keyName}(\n${idFields.map((field) => `    var ${field.name}: ${mappedType(field, true)} = null`).join(',\n')}\n) : java.io.Serializable\n\n`
             : '';
         const idClassAnnotation = compositeId ? `@IdClass(${keyName}::class)\n` : '';
-        const resultFields = readmodel.fields.map((field) => `    val ${field.name}: ${mappedType(field, true)}`).join(',\n');
+        const resultFields = [
+            ...readmodel.fields.map((field) => `    val ${field.name}: ${mappedType(field, true)}`),
+            ...metadataFields.map((field) => `    val ${field.name}: ${field.type}`)
+        ].join(',\n');
         const queryDeclaration = readmodel.listElement || !id
             ? `class ${name}Query`
             : `data class ${name}Query(val ${id.name}: ${mappedType(id, false)})`;
@@ -744,7 +1056,7 @@ import jakarta.persistence.EnumType
 import jakarta.persistence.Enumerated
 import jakarta.persistence.Id
 import jakarta.persistence.IdClass
-${imports}
+${allImports}
 
 ${queryDeclaration}
 
@@ -829,6 +1141,12 @@ ${idFields.length === 1 ? `
         const entityName = `${name}Entity`;
         const repositoryName = `${name}Repository`;
         const keyName = `${name}Key`;
+        const metadataFields = readModelMetadataFields(readmodel);
+        const includeMetadata = metadataFields.length > 0;
+        const metadataAssignments = readModelMetadataAssignments(metadataFields, '            ');
+        const metadataParameters = includeMetadata
+            ? `,\n${readModelMetadataParameters(metadataFields, '        ')}`
+            : '';
         const eventImports = events
             .map((event) => `import ${this._eventPackage(event, slice)}.${_eventTitle(event.title)}`)
             .join('\n');
@@ -858,6 +1176,7 @@ ${idFields.length === 1 ? `
                 ...derivedAssignments.map((assignment) => `            ${assignment}`)
             ]
                 .join('\n');
+            const saveAssignments = [assignments, metadataAssignments].filter(Boolean).join('\n');
             const availableIds = idFields.filter((field) => eventFields.has(field.name));
 
             if (availableIds.length === idFields.length) {
@@ -868,13 +1187,15 @@ ${idFields.length === 1 ? `
                     .map((field) => `                this.${field.name} = event.${field.name}`)
                     .join('\n');
                 return `    @EventHandler
-    fun on(event: ${_eventTitle(event.title)}) {
+    fun on(
+        event: ${_eventTitle(event.title)}${metadataParameters}
+    ) {
         val entity = repository.findById(${keyExpression}).orElseGet {
             ${entityName}().apply {
 ${initializeIds}
             }
         }
-${assignments || '        // No read-model fields are present on this event.'}
+${saveAssignments || '        // No read-model fields are present on this event.'}
         repository.save(entity)
     }`;
             }
@@ -882,9 +1203,11 @@ ${assignments || '        // No read-model fields are present on this event.'}
             if (availableIds.length === 1 && idFields.length > 1) {
                 const lookupField = availableIds[0];
                 return `    @EventHandler
-    fun on(event: ${_eventTitle(event.title)}) {
+    fun on(
+        event: ${_eventTitle(event.title)}${metadataParameters}
+    ) {
         repository.findAllBy${pascal(lookupField.name)}(event.${lookupField.name}).forEach { entity ->
-${assignments || '            // No read-model fields are present on this event.'}
+${saveAssignments || '            // No read-model fields are present on this event.'}
             repository.save(entity)
         }
     }`;
@@ -899,8 +1222,8 @@ ${assignments || '            // No read-model fields are present on this event.
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${name}Projector.kt`), `package ${packageName}
 
 import org.axonframework.messaging.eventhandling.annotation.EventHandler
-import org.springframework.stereotype.Component
-${eventImports}
+${includeMetadata ? 'import org.axonframework.messaging.core.annotation.MetadataValue\n' : ''}import org.springframework.stereotype.Component
+${includeMetadata ? `import ${this.model.rootPackage}.support.metadata.MetadataFactory\nimport ${this.model.rootPackage}.support.metadata.MetadataKeys\n` : ''}${eventImports}
 ${stateImports}
 
 @Component
@@ -1445,6 +1768,9 @@ function eventArguments(event, command, selection) {
 function fallbackValue(field) {
     if (field.optional) return 'null';
     if (field.cardinality === 'Multiple') return 'emptyList()';
+    if (field.valueType?.kind === 'enum' && (field.valueType.values ?? []).length > 0) {
+        return `${field.valueType.name}.${constant(field.valueType.values[0])}`;
+    }
     const optionSet = fieldOptionsFor(field);
     if (optionSet) return `${optionSet.enumName}.${optionSet.values[0].enumConstant}`;
     switch (String(field.type).toLowerCase()) {
@@ -1475,6 +1801,32 @@ function stateFieldDefault(field) {
     return field.cardinality === 'Multiple' ? 'emptyList()' : 'null';
 }
 
+const METADATA_FIELD_DEFINITIONS = [
+    {name: 'userId', key: 'USER_ID', type: 'String?'},
+    {name: 'sessionId', key: 'SESSION_ID', type: 'String?'},
+    {name: 'correlationId', key: 'CORRELATION_ID', type: 'String?'},
+    {name: 'causationId', key: 'CAUSATION_ID', type: 'String?'},
+    {name: 'traceId', key: 'TRACE_ID', type: 'String?'},
+    {name: 'tenantId', key: 'TENANT_ID', type: 'String?'}
+];
+
+function readModelMetadataFields(readmodel) {
+    const existingNames = new Set((readmodel.fields ?? []).map((field) => field.name));
+    return METADATA_FIELD_DEFINITIONS.filter((field) => !existingNames.has(field.name));
+}
+
+function readModelMetadataParameters(metadataFields, indent = '        ') {
+    return metadataFields
+        .map((field) => `${indent}@MetadataValue(MetadataKeys.${field.key}) ${field.name}: String?`)
+        .join(',\n');
+}
+
+function readModelMetadataAssignments(metadataFields, indent = '            ') {
+    return metadataFields
+        .map((field) => `${indent}entity.${field.name} = MetadataFactory.value(${field.name})`)
+        .join('\n');
+}
+
 function mappedType(field, optional = field.optional) {
     const optionSet = fieldOptionsFor(field);
     const cardinality = field.cardinality === 'Multiple' ? 'List' : field.cardinality;
@@ -1500,6 +1852,10 @@ function kotlinEnumImports(fields, rootPackage) {
         .filter(Boolean)
         .map((optionSet) => `import ${rootPackage}.support.enums.${optionSet.enumName}`), (value) => value)
         .join('\n');
+}
+
+function isJpaEnumField(field) {
+    return field.type?.endsWith('.State') || field.valueType?.kind === 'enum' || Boolean(fieldOptionsFor(field));
 }
 
 function uniqueFields(fields) {
@@ -1563,7 +1919,14 @@ function httpRoute(value) {
 }
 
 function constant(value) {
-    return String(value ?? '').replace(/([a-z0-9])([A-Z])/g, '$1_$2').replace(/[^A-Za-z0-9]+/g, '_').toUpperCase();
+    return String(value ?? '')
+        .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+        .replace(/([a-z])([A-Z])/g, '$1_$2')
+        .replace(/([0-9])([A-Z][a-z])/g, '$1_$2')
+        .replace(/[^A-Za-z0-9]+/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .toUpperCase();
 }
 
 function kotlinPrimitive(type) {

@@ -1,6 +1,5 @@
 import { Button } from "@/components/ui/button";
 import { useCommandButton } from "@/hooks/command/useCommandButton";
-import { cn } from "@/lib/utils";
 import { BaseKey } from "@refinedev/core";
 import { Check } from "lucide-react";
 import React from "react";
@@ -37,7 +36,7 @@ export const CommandButton = React.forwardRef<
   CommandButtonProps
 >(
   (
-    { resource, command, recordItemId, query, accessControl, meta, children, onClick, variant = "secondary", size = "sm", className, ...rest },
+    { resource, command, recordItemId, query, accessControl, meta, children, onClick, variant = "secondary", size = "sm", ...rest },
     ref
   ) => {
     const navigate = useNavigate();
@@ -60,11 +59,6 @@ export const CommandButton = React.forwardRef<
         disabled={isDisabled}
         variant={variant}
         size={size}
-        className={cn(
-          "border border-border bg-secondary text-secondary-foreground shadow-xs hover:bg-secondary/80 hover:text-secondary-foreground",
-          "focus-visible:ring-ring/50 focus-visible:ring-[3px]",
-          className,
-        )}
         onClick={(e) => {
           if (isDisabled) {
             e.preventDefault();

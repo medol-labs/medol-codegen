@@ -76,7 +76,7 @@ export const CategoryList = () => {
   return (
     <ListView>
       <ListViewHeader>
-        <ListButton className="bg-amber-600">
+        <ListButton variant="outline">
           <RefreshButton></RefreshButton>
           <RefreshButton></RefreshButton>
           <RefreshButton></RefreshButton>

@@ -89,7 +89,7 @@ export const <%= resource.component %>List = () => {
 <% if (resource.deleteCommand) { -%>
             {isCommandVisible(row.original, <%- JSON.stringify(resource.deleteCommand.enabledField ?? '') %>, <%- JSON.stringify(resource.deleteCommand.stateField ?? '') %>, <%- JSON.stringify(resource.deleteCommand.allowedStates ?? []) %>) && (
             <CommandButton
-              variant="ghost"
+              variant="outline"
               command="<%= resource.deleteCommand.name %>"
               recordItemId={row.original.<%= resource.idField %>}
               size="sm"
@@ -174,12 +174,12 @@ export const <%= resource.component %>List = () => {
     <ListView>
       <ListViewHeader canCreate={false}>
 <% if (resource.createCommand) { -%>
-        <CommandButton variant="ghost" command="<%= resource.createCommand.name %>" size="sm" />
+        <CommandButton variant="default" command="<%= resource.createCommand.name %>" />
 <% } -%>
       </ListViewHeader>
       <RefineDataTable table={table} actionBar={
 <% if (resource.deleteCommand) { -%>
-        <CommandButton variant="ghost" command="<%= resource.deleteCommand.name %>" size="sm" />
+        <CommandButton variant="destructive" command="<%= resource.deleteCommand.name %>" size="sm" />
 <% } else { -%>
         null
 <% } -%>

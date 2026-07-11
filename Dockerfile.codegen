@@ -1,9 +1,8 @@
-FROM nebulit/codegen
+FROM node:22-bookworm-slim
 
 USER root
 
-RUN npm install -g yo@5.1.0 \
-  && mkdir -p /tmp/yo-home \
+RUN mkdir -p /tmp/yo-home \
   && chmod -R 777 /tmp/yo-home
 
 ENV HOME=/tmp/yo-home
@@ -12,10 +11,10 @@ WORKDIR /workspace
 
 COPY .generator /opt/codegen/.generator
 
-RUN cd /opt/codegen/.generator && npm install
-
-RUN GEN_PATH="$(command -v gen)" \
-  && mv "$GEN_PATH" /usr/local/bin/gen-original
+RUN cd /opt/codegen/.generator && npm ci --omit=dev
 
 COPY gen.sh /usr/local/bin/gen
-RUN chmod +x /usr/local/bin/gen
+COPY fetch-codegen-model.js /usr/local/bin/fetch-codegen-model
+RUN chmod +x /usr/local/bin/gen /usr/local/bin/fetch-codegen-model
+
+CMD ["/bin/bash"]

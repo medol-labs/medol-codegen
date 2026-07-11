@@ -1,8 +1,8 @@
 # ES Code Generator
 
-Custom Nebulit/Yeoman code generator for generating Axon-based Kotlin/Spring Boot and Refine code from Medol's `CodegenModel`.
+Custom Yeoman code generator for generating Axon-based Kotlin/Spring Boot and Refine code from Medol's `CodegenModel`.
 
-The project wraps `nebulit/codegen` with a custom Docker image. The custom image bakes `.generator` and its `node_modules` into the image, then overrides `gen` so the default command runs the local generator.
+The project ships a standalone Docker image built from the official Node slim base image. The image bakes `.generator` into `/opt/codegen/.generator` and exposes a small local `gen` runner that executes the bundled generator directly.
 
 ## Image Layout
 
@@ -19,10 +19,10 @@ Running `gen` with no arguments is equivalent to:
 gen /opt/codegen/.generator/app/
 ```
 
-Running `gen` with arguments delegates to the original `nebulit/codegen` command:
+The container default command is `/bin/bash`; enter the container first, then run `gen` manually. Running `gen` with a generator path executes that generator through the local Yeoman runner:
 
 ```bash
-gen <args>
+gen /opt/codegen/.generator/app/ --generator axon5 --generator-type Skeleton
 ```
 
 ## Build Image
@@ -35,16 +35,16 @@ docker build -f Dockerfile.codegen -t es-codegen .
 
 The image build:
 
-- starts from `nebulit/codegen`
-- installs `yo@5.1.0`
+- starts from `node:22-bookworm-slim`
 - sets `HOME=/tmp/yo-home`
 - copies `.generator` to `/opt/codegen/.generator`
-- runs `npm install` inside `/opt/codegen/.generator`
-- wraps the original `gen` command as `gen-original`
+- runs `npm ci --omit=dev` inside `/opt/codegen/.generator`
+- installs the local `gen` runner at `/usr/local/bin/gen`
+- starts an interactive bash shell by default
 
 ## Run Container
 
-From the project directory that contains `config.json`:
+From the project directory that contains `codegen-model.json`:
 
 ```bash
 docker run -it \
@@ -55,7 +55,7 @@ docker run -it \
   es-codegen
 ```
 
-The mounted `/workspace` is where generated files are written.
+This opens a bash shell in the container. The mounted `/workspace` is where generated files are written.
 
 ## Generate Code
 
@@ -114,11 +114,10 @@ When generating `all`, `resources`, `router`, or `pages`, the refine generator p
 
 Constrained values should be modeled explicitly in Medol with `enum` or scalar `oneOf` value types. The Refine generator renders those static fields as `Select` controls and emits matching Zod schemas. For runtime-maintained option sets, mark a string field with `dictionary "DICTIONARY_CODE"` and provide a standard `DictionaryValueCatalog` read model with `dictionaryCode`, `valueCode`, `displayName`, optional `displayOrder`, and either `state` or `active`. The generated form submits the selected `valueCode` and queries the catalog by `dictionaryCode`. `.generator/common/core/field-options.js` only preserves compatibility with explicit option metadata in the codegen model; it no longer carries business-specific field-name dictionaries.
 
-You can still invoke other generators explicitly:
+You can invoke the bundled generator explicitly:
 
 ```bash
-gen @dilgerma/nebulit
-gen /some/other/generator
+gen /opt/codegen/.generator/app/ --generator refine --generator-type all
 ```
 
 ## Configuration
@@ -128,6 +127,41 @@ The preferred generator input is the `CodegenModel` exported by Event Modeling T
 ```text
 /workspace/codegen-model.json
 ```
+
+When the Medol app is running, it exposes the current workspace as CodegenModel JSON:
+
+```bash
+GET /api/modeling/codegen-model?workspaceId=<workspace-id>
+```
+
+If `workspaceId` is omitted, Medol exports the latest updated workspace. The endpoint also accepts `locale` or `language` to include stored model translations.
+
+Inside the code generator container, download that JSON into the mounted workspace:
+
+```bash
+fetch-codegen-model --workspace-id <workspace-id>
+```
+
+The default Medol base URL from the container is `http://host.docker.internal:5172`. Override it when needed:
+
+```bash
+MEDOL_BASE_URL=http://host.docker.internal:5187 fetch-codegen-model --workspace-id <workspace-id>
+```
+
+To inspect available workspace ids from inside the container:
+
+```bash
+fetch-codegen-model --list-workspaces
+```
+
+The example test script exposes the same Docker-based download step:
+
+```bash
+cd example
+./test-codegen-model.sh model <workspace-id>
+```
+
+Set `CODEGEN_MODEL_LOCALE` or `MEDOL_WORKSPACE_ID` for translated or environment-driven exports.
 
 Model translations are a separate optional input. Put the exported translation
 bundle next to the model as:
@@ -256,7 +290,7 @@ To test Refine generation with a separate translation bundle:
 CODEGEN_TRANSLATIONS_PATH=/path/to/model-translations.zh-CN.json ./test-codegen-model.sh refine
 ```
 
-To open the original interactive container shell:
+To open an interactive generator container shell:
 
 ```bash
 ./test-codegen-model.sh shell
@@ -268,7 +302,7 @@ Expected `codeGen` fields include:
 {
   "codeGen": {
     "application": "Quiz",
-    "rootPackage": "de.nebulit.quiz"
+    "rootPackage": "tech.medo.quiz"
   }
 }
 ```

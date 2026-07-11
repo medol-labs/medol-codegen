@@ -3,7 +3,8 @@
  * Licensed under the MIT License.
  */
 
-var Generator = require('yeoman-generator').default;
+const YeomanGenerator = require('yeoman-generator');
+const Generator = YeomanGenerator.default ?? YeomanGenerator;
 var slugify = require('slugify')
 const {v4: uuidv4} = require('uuid');
 const {

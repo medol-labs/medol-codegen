@@ -3,12 +3,13 @@
  * Licensed under the MIT License.
  */
 
-const Generator = require('yeoman-generator').default;
+const YeomanGenerator = require('yeoman-generator');
+const Generator = YeomanGenerator.default ?? YeomanGenerator;
 const path = require('path');
 const {loadCodegenModel} = require('../../common/core/codegen-model-loader');
 const {collectFieldOptionEnums, fieldOptionsFor} = require('../../common/core/field-options');
 const {configureValueTypes, typeMapping, typeImports} = require('../../common/util/generator');
-const {contextPackage, resolvedBaseType, resolvedConstraints} = require('../../common/util/value-types');
+const {contextPackage, findValueType, resolvedBaseType, resolvedConstraints} = require('../../common/util/value-types');
 const {_commandTitle, _eventTitle, _readmodelTitle, _sliceTitle} = require('../../common/util/naming');
 
 module.exports = class extends Generator {
@@ -1021,7 +1022,7 @@ ${methods}
 
     _writeReadModel(packageName, context, slicePackage, slice, readmodel) {
         const name = _readmodelTitle(readmodel.title);
-        const imports = kotlinFieldImports(readmodel.fields, this.model.rootPackage);
+        const imports = readModelStorageImports(readmodel.fields, this.model.rootPackage);
         const metadataFields = readModelMetadataFields(readmodel);
         const allImports = [imports].filter(Boolean).join('\n');
         const ids = readmodel.fields.filter((field) => field.idAttribute);
@@ -1032,22 +1033,22 @@ ${methods}
             ...readmodel.fields.map((field) => {
                 const annotation = idFields.some((candidate) => candidate.name === field.name) ? '    @Id\n' : '';
                 const enumAnnotation = isJpaEnumField(field) ? '    @Enumerated(EnumType.STRING)\n' : '';
-                return `${annotation}${enumAnnotation}    var ${field.name}: ${stateFieldType(field)} = ${stateFieldDefault(field)}`;
+                return `${annotation}${enumAnnotation}    var ${field.name}: ${readModelStorageFieldType(field)} = ${readModelStorageFieldDefault(field)}`;
             }),
             ...metadataFields.map((field) => `    var ${field.name}: ${field.type} = null`)
         ].join('\n');
         const keyName = `${name}Key`;
         const keyDeclaration = compositeId
-            ? `@Embeddable\ndata class ${keyName}(\n${idFields.map((field) => `    var ${field.name}: ${mappedType(field, true)} = null`).join(',\n')}\n) : java.io.Serializable\n\n`
+            ? `@Embeddable\ndata class ${keyName}(\n${idFields.map((field) => `    var ${field.name}: ${readModelStorageType(field, true)} = null`).join(',\n')}\n) : java.io.Serializable\n\n`
             : '';
         const idClassAnnotation = compositeId ? `@IdClass(${keyName}::class)\n` : '';
         const resultFields = [
-            ...readmodel.fields.map((field) => `    val ${field.name}: ${mappedType(field, true)}`),
+            ...readmodel.fields.map((field) => `    val ${field.name}: ${readModelStorageType(field, true)}`),
             ...metadataFields.map((field) => `    val ${field.name}: ${field.type}`)
         ].join(',\n');
         const queryDeclaration = readmodel.listElement || !id
             ? `class ${name}Query`
-            : `data class ${name}Query(val ${id.name}: ${mappedType(id, false)})`;
+            : `data class ${name}Query(val ${id.name}: ${readModelStorageType(id, false)})`;
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${name}.kt`), `package ${packageName}
 
 import jakarta.persistence.Embeddable
@@ -1081,13 +1082,13 @@ ${resultFields}
         const repositoryName = `${name}Repository`;
         const resourceName = `${name}Resource`;
         const id = idFields[0];
-        const idType = idFields.length > 1 ? `${name}Key` : mappedType(id, false);
+        const idType = idFields.length > 1 ? `${name}Key` : readModelStorageType(id, false);
         const conceptRoute = httpRoute(slice.concepts[0] ?? slice.name);
         const readmodelRoute = httpRoute(readmodel.title);
-        const imports = kotlinFieldImports(idFields, this.model.rootPackage);
+        const imports = readModelStorageImports(idFields, this.model.rootPackage);
         const partialLookupMethods = idFields.length > 1
             ? idFields.map((field) =>
-                `    fun findAllBy${pascal(field.name)}(${field.name}: ${mappedType(field, false)}): List<${entityName}>`
+                `    fun findAllBy${pascal(field.name)}(${field.name}: ${readModelStorageType(field, false)}): List<${entityName}>`
             ).join('\n')
             : '';
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${resourceName}.kt`), `package ${packageName}
@@ -1172,7 +1173,7 @@ ${idFields.length === 1 ? `
             const assignments = [
                 ...readmodel.fields
                 .filter((field) => eventFields.has(field.name))
-                .map((field) => `            entity.${field.name} = event.${field.name}`),
+                .map((field) => `            entity.${field.name} = ${readModelStorageExpression(field, `event.${field.name}`)}`),
                 ...derivedAssignments.map((assignment) => `            ${assignment}`)
             ]
                 .join('\n');
@@ -1181,10 +1182,10 @@ ${idFields.length === 1 ? `
 
             if (availableIds.length === idFields.length) {
                 const keyExpression = idFields.length > 1
-                    ? `${keyName}(${idFields.map((field) => `${field.name} = event.${field.name}`).join(', ')})`
-                    : `event.${idFields[0].name}`;
+                    ? `${keyName}(${idFields.map((field) => `${field.name} = ${readModelStorageExpression(field, `event.${field.name}`)}`).join(', ')})`
+                    : readModelStorageExpression(idFields[0], `event.${idFields[0].name}`);
                 const initializeIds = idFields
-                    .map((field) => `                this.${field.name} = event.${field.name}`)
+                    .map((field) => `                this.${field.name} = ${readModelStorageExpression(field, `event.${field.name}`)}`)
                     .join('\n');
                 return `    @EventHandler
     fun on(
@@ -1206,7 +1207,7 @@ ${saveAssignments || '        // No read-model fields are present on this event.
     fun on(
         event: ${_eventTitle(event.title)}${metadataParameters}
     ) {
-        repository.findAllBy${pascal(lookupField.name)}(event.${lookupField.name}).forEach { entity ->
+        repository.findAllBy${pascal(lookupField.name)}(${readModelStorageExpression(lookupField, `event.${lookupField.name}`)}).forEach { entity ->
 ${saveAssignments || '            // No read-model fields are present on this event.'}
             repository.save(entity)
         }
@@ -1801,6 +1802,52 @@ function stateFieldDefault(field) {
     return field.cardinality === 'Multiple' ? 'emptyList()' : 'null';
 }
 
+function readModelStorageImports(fields, rootPackage) {
+    return kotlinFieldImports((fields ?? []).map(readModelStorageField), rootPackage);
+}
+
+function readModelStorageField(field) {
+    if (!isScalarValueTypeField(field)) return field;
+    const valueType = valueTypeForField(field);
+    return {
+        ...field,
+        type: resolvedBaseType(valueType),
+        valueType: undefined
+    };
+}
+
+function readModelStorageType(field, optional = field.optional) {
+    return mappedType(readModelStorageField(field), optional);
+}
+
+function readModelStorageFieldType(field) {
+    return field.cardinality === 'Multiple'
+        ? readModelStorageType(field, false)
+        : readModelStorageType(field, true).replace(/\?\?$/, '?');
+}
+
+function readModelStorageFieldDefault(field) {
+    return field.cardinality === 'Multiple' ? 'emptyList()' : 'null';
+}
+
+function readModelStorageExpression(field, expression) {
+    if (!isScalarValueTypeField(field)) return expression;
+    if (field.cardinality === 'Multiple') {
+        return field.optional
+            ? `${expression}?.map { it.value }`
+            : `${expression}.map { it.value }`;
+    }
+    return field.optional ? `${expression}?.value` : `${expression}.value`;
+}
+
+function isScalarValueTypeField(field) {
+    return valueTypeForField(field)?.kind === 'scalar';
+}
+
+function valueTypeForField(field) {
+    return field?.valueType ?? findValueType(field?.type);
+}
+
 const METADATA_FIELD_DEFINITIONS = [
     {name: 'userId', key: 'USER_ID', type: 'String?'},
     {name: 'sessionId', key: 'SESSION_ID', type: 'String?'},
@@ -1855,7 +1902,7 @@ function kotlinEnumImports(fields, rootPackage) {
 }
 
 function isJpaEnumField(field) {
-    return field.type?.endsWith('.State') || field.valueType?.kind === 'enum' || Boolean(fieldOptionsFor(field));
+    return field.type?.endsWith('.State') || valueTypeForField(field)?.kind === 'enum' || Boolean(fieldOptionsFor(field));
 }
 
 function uniqueFields(fields) {

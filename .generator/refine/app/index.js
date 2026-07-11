@@ -3,7 +3,8 @@
  * Licensed under the MIT License.
  */
 
-var Generator = require('yeoman-generator').default;
+const YeomanGenerator = require('yeoman-generator');
+const Generator = YeomanGenerator.default ?? YeomanGenerator;
 var path = require('path');
 var slugify = require('slugify');
 const {loadGeneratorModel} = require("../../common/core/config-loader");

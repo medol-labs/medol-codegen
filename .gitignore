@@ -38,6 +38,8 @@ node
 .DS_Store
 
 ### Example generated files ###
+codegen-model.json
+translations.json
 example/**
 !example/
 !example/config.json

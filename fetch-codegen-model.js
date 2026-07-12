@@ -12,6 +12,7 @@ Options:
       --base-url <url>       Medol service base URL. Default: ${DEFAULT_BASE_URL}
       --url <url>            Full CodegenModel endpoint URL.
       --workspace-id <id>    Medol workspace id. Defaults to the latest workspace.
+      --version-id <id>      Medol workspace version id.
       --locale <locale>      Include stored Medol translations for the locale.
       --language <locale>    Alias for --locale.
   -o, --output <path>        Output file. Default: /workspace/codegen-model.json
@@ -22,6 +23,7 @@ Options:
 Environment:
   MEDOL_BASE_URL             Default --base-url.
   MEDOL_WORKSPACE_ID         Default --workspace-id.
+  MEDOL_VERSION_ID           Default --version-id.
   CODEGEN_MODEL_LOCALE       Default --locale.
   CODEGEN_MODEL_OUTPUT       Default --output.
 `);
@@ -40,6 +42,7 @@ function parseArgs(argv) {
     baseUrl: process.env.MEDOL_BASE_URL || DEFAULT_BASE_URL,
     url: process.env.CODEGEN_MODEL_URL,
     workspaceId: process.env.MEDOL_WORKSPACE_ID || process.env.CODEGEN_WORKSPACE_ID,
+    versionId: process.env.MEDOL_VERSION_ID || process.env.CODEGEN_MODEL_VERSION_ID,
     locale: process.env.CODEGEN_MODEL_LOCALE || process.env.MEDOL_LOCALE,
     output: process.env.CODEGEN_MODEL_OUTPUT || "/workspace/codegen-model.json",
     stdout: false,
@@ -65,6 +68,11 @@ function parseArgs(argv) {
       index += 1;
     } else if (arg.startsWith("--workspace-id=")) {
       options.workspaceId = arg.slice("--workspace-id=".length);
+    } else if (arg === "--version-id") {
+      options.versionId = requireValue(argv, index, arg);
+      index += 1;
+    } else if (arg.startsWith("--version-id=")) {
+      options.versionId = arg.slice("--version-id=".length);
     } else if (arg === "--locale" || arg === "--language") {
       options.locale = requireValue(argv, index, arg);
       index += 1;
@@ -100,6 +108,7 @@ function endpointUrl(options) {
   );
   if (!options.listWorkspaces) {
     if (options.workspaceId) url.searchParams.set("workspaceId", options.workspaceId);
+    if (options.versionId) url.searchParams.set("versionId", options.versionId);
     if (options.locale) url.searchParams.set("locale", options.locale);
   }
   return url;

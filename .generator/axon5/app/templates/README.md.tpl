@@ -13,12 +13,21 @@ Generated from Medol CodegenModel for Axon Framework 5.1.1.
 ./mvnw spring-boot:run
 ```
 
+<% if (modulePrefix) { -%>
+Spring Boot starts PostgreSQL and Axon Server from `../docker-compose.yml` automatically in the default Axon Server mode. To manage them manually from this module directory:
+
+```bash
+docker compose -f ../docker-compose.yml --profile axon-server up -d
+./mvnw spring-boot:run
+```
+<% } else { -%>
 Spring Boot starts PostgreSQL and Axon Server from `docker-compose.yml` automatically in the default Axon Server mode. To manage them manually:
 
 ```bash
 docker compose --profile axon-server up -d
 ./mvnw spring-boot:run
 ```
+<% } -%>
 
 Health endpoint: `http://localhost:<%= appPort %>/actuator/health`
 
@@ -46,7 +55,11 @@ The default event storage is Axon Server, which supports multiple Axon event tag
 Use the in-memory event store for local experiments or tests that should not connect to Axon Server:
 
 ```bash
+<% if (modulePrefix) { -%>
+docker compose -f ../docker-compose.yml up -d
+<% } else { -%>
 docker compose up -d
+<% } -%>
 SPRING_PROFILES_ACTIVE=inmemory ./mvnw spring-boot:run
 ```
 

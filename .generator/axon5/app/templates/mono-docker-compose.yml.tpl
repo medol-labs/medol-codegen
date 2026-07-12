@@ -1,6 +1,6 @@
 services:
   axon-server:
-    image: axoniq/axonserver:latest-jdk-17
+    image: axoniq/axonserver:latest-jdk-21
     hostname: axon-server
     profiles:
       - axon-server

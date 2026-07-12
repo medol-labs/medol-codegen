@@ -123,7 +123,9 @@ const applicationWriterMethods = {
         });
         this.fs.copyTpl(this.templatePath('application.yml'), this._destPath('src/main/resources/application.yml'), runtime);
         this.fs.copy(this.templatePath('application-inmemory.yml'), this._destPath('src/main/resources/application-inmemory.yml'));
-        this.fs.copyTpl(this.templatePath('docker-compose.yml'), this._destPath('docker-compose.yml'), runtime);
+        if (!this.modulePrefix) {
+            this.fs.copyTpl(this.templatePath('docker-compose.yml'), this._destPath('docker-compose.yml'), runtime);
+        }
         this.fs.copy(this.templatePath('V1__baseline.sql'), this._destPath('src/main/resources/db/migration/V1__baseline.sql'));
         this.fs.copy(this.templatePath('gitignore'), this._destPath('.gitignore'));
         if (!this.modulePrefix) {

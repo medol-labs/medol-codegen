@@ -9,8 +9,8 @@ const {
     unique,
     idFieldName,
     optionLabelField,
-    isDictionaryValueCatalog,
-    dictionaryValueField,
+    dictionaryProviderFor,
+    dictionaryProviderField,
     normalizeFields,
     optionLabel,
     isReferenceSelectField,
@@ -27,7 +27,7 @@ const {aggregateName} = require('./resource-naming');
 
 function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, backendModules, transitions = []) {
     const selectableReadModels = new Map();
-    let dictionaryValueCatalog = null;
+    let dictionaryProviderSelect = null;
     const commandsById = new Map();
     const eventsById = new Map();
     const producerCommandsByReadModelId = new Map();
@@ -90,15 +90,16 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
                 }
             };
             selectableReadModels.set(id, selectModel);
-            if (isDictionaryValueCatalog(readModel)) {
-                dictionaryValueCatalog = {
+            const dictionaryProvider = dictionaryProviderFor(readModel);
+            if (dictionaryProvider) {
+                dictionaryProviderSelect = {
                     ...selectModel,
-                    optionValue: dictionaryValueField(readModel, 'valueCode') ?? id,
-                    optionLabel: dictionaryValueField(readModel, 'displayName') ?? optionLabel,
-                    dictionaryCodeField: dictionaryValueField(readModel, 'dictionaryCode'),
-                    stateField: dictionaryValueField(readModel, 'state'),
-                    activeField: dictionaryValueField(readModel, 'active'),
-                    sortField: dictionaryValueField(readModel, 'displayOrder') ?? dictionaryValueField(readModel, 'sortOrder')
+                    optionValue: dictionaryProviderField(readModel, 'value') ?? id,
+                    optionLabel: dictionaryProviderField(readModel, 'label') ?? optionLabel,
+                    dictionaryCodeField: dictionaryProviderField(readModel, 'code'),
+                    stateField: dictionaryProviderField(readModel, 'state'),
+                    activeField: dictionaryProviderField(readModel, 'active'),
+                    sortField: dictionaryProviderField(readModel, 'order')
                 };
             }
         });
@@ -152,32 +153,32 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
             return stateControlForTransition(transition, readModel);
         },
         dictionaryValueSelect(dictionaryCode) {
-            if (!dictionaryValueCatalog || !dictionaryValueCatalog.dictionaryCodeField || !dictionaryCode) {
+            if (!dictionaryProviderSelect || !dictionaryProviderSelect.dictionaryCodeField || !dictionaryCode) {
                 return null;
             }
             const filters = [{
-                field: dictionaryValueCatalog.dictionaryCodeField,
+                field: dictionaryProviderSelect.dictionaryCodeField,
                 operator: 'eq',
                 value: dictionaryCode
             }];
-            if (dictionaryValueCatalog.stateField) {
+            if (dictionaryProviderSelect.stateField) {
                 filters.push({
-                    field: dictionaryValueCatalog.stateField,
+                    field: dictionaryProviderSelect.stateField,
                     operator: 'eq',
                     value: 'Active'
                 });
-            } else if (dictionaryValueCatalog.activeField) {
+            } else if (dictionaryProviderSelect.activeField) {
                 filters.push({
-                    field: dictionaryValueCatalog.activeField,
+                    field: dictionaryProviderSelect.activeField,
                     operator: 'eq',
                     value: true
                 });
             }
             return {
-                ...dictionaryValueCatalog,
+                ...dictionaryProviderSelect,
                 filters,
-                sorters: dictionaryValueCatalog.sortField
-                    ? [{ field: dictionaryValueCatalog.sortField, order: 'asc' }]
+                sorters: dictionaryProviderSelect.sortField
+                    ? [{ field: dictionaryProviderSelect.sortField, order: 'asc' }]
                     : []
             };
         }

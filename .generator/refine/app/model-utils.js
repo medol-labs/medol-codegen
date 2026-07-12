@@ -226,54 +226,16 @@ function optionLabelField(readModel) {
     })?.name ?? idFieldName(readModel);
 }
 
-function isDictionaryValueCatalog(readModel) {
-    return Boolean(dictionaryProviderFor(readModel));
-}
-
-function dictionaryValueField(readModel, name) {
-    const provider = dictionaryProviderFor(readModel);
-    const providerKey = {
-        dictionaryCode: 'code',
-        valueCode: 'value',
-        displayName: 'label',
-        active: 'active',
-        state: 'state',
-        displayOrder: 'order',
-        sortOrder: 'order'
-    }[name];
-    const explicitField = providerKey ? provider?.[providerKey] : undefined;
-    return explicitField ?? readModelField(readModel, name);
-}
-
 function dictionaryProviderFor(readModel) {
     if (readModel?.dictionaryProvider?.code && readModel?.dictionaryProvider?.value) {
         return readModel.dictionaryProvider;
     }
 
-    const name = pascal(cleanTitle(readModel?.title ?? readModel?.name ?? ''));
-    if (name !== 'DictionaryValueCatalog') {
-        return null;
-    }
-
-    const code = readModelField(readModel, 'dictionaryCode');
-    const value = readModelField(readModel, 'valueCode');
-    if (!code || !value) {
-        return null;
-    }
-
-    return {
-        name: 'DictionaryValueCatalog',
-        code,
-        value,
-        label: readModelField(readModel, 'displayName'),
-        active: readModelField(readModel, 'active'),
-        state: readModelField(readModel, 'state'),
-        order: readModelField(readModel, 'displayOrder') ?? readModelField(readModel, 'sortOrder')
-    };
+    return null;
 }
 
-function readModelField(readModel, name) {
-    return readModel?.fields?.find((field) => field.name === name)?.name;
+function dictionaryProviderField(readModel, role) {
+    return dictionaryProviderFor(readModel)?.[role];
 }
 
 function normalizeFields(fields = []) {
@@ -696,8 +658,8 @@ module.exports = {
     identifierFields,
     rowIdExpression,
     optionLabelField,
-    isDictionaryValueCatalog,
-    dictionaryValueField,
+    dictionaryProviderFor,
+    dictionaryProviderField,
     normalizeFields,
     decorateField,
     optionSetForField,

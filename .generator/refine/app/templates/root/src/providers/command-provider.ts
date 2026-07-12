@@ -24,6 +24,7 @@ type AxonMeta = Record<string, unknown> & {
   idField?: string;
   label?: string;
   queryRoute?: string;
+  queryFields?: string[];
 };
 
 type SpringPagePayload = {
@@ -267,6 +268,68 @@ const pageQuery = (
   return appendSorters(params, sorters);
 };
 
+const currentPage = (pagination: GetListParams["pagination"]): number =>
+  Number(
+    (pagination as { current?: number } | undefined)?.current ??
+      (pagination as { currentPage?: number } | undefined)?.currentPage ??
+      1,
+  );
+
+const pageSize = (pagination: GetListParams["pagination"]): number =>
+  Number(pagination?.pageSize ?? 10);
+
+type FieldCrudFilter = CrudFilter & {
+  field: string;
+  operator: string;
+  value: unknown;
+};
+
+const isConditionalFilter = (filter: CrudFilter): filter is FieldCrudFilter =>
+  "field" in filter &&
+  typeof (filter as { field?: unknown }).field === "string";
+
+const serverFilterFields = (meta?: AxonMeta): Set<string> =>
+  new Set(Array.isArray(meta?.queryFields) ? meta.queryFields : []);
+
+const canUseServerFilters = (
+  meta?: AxonMeta,
+  filters?: CrudFilter[],
+): boolean => {
+  if (!filters?.length) {
+    return false;
+  }
+
+  const fields = serverFilterFields(meta);
+  if (fields.size === 0) {
+    return false;
+  }
+
+  return filters.every((filter) => {
+    if (!isConditionalFilter(filter)) {
+      return false;
+    }
+
+    return fields.has(filter.field) && filter.operator === "eq";
+  });
+};
+
+const appendFilters = (
+  params: URLSearchParams,
+  filters?: CrudFilter[],
+): URLSearchParams => {
+  filters?.forEach((filter) => {
+    if (!isConditionalFilter(filter)) {
+      return;
+    }
+
+    if (filter.operator === "eq") {
+      params.set(filter.field, String(filter.value));
+    }
+  });
+
+  return params;
+};
+
 export const commandDataProvider = (
   supabaseClient: SupabaseClient<any, any, any>,
   options: { baseUrl?: string } = {},
@@ -350,13 +413,18 @@ export const commandDataProvider = (
       sorters,
       meta,
     }: GetListParams): Promise<GetListResponse<TData>> => {
-      if (pagination?.mode !== "off" && !filters?.length) {
-        const current = pagination?.currentPage ?? 1;
-        const pageSize = pagination?.pageSize ?? 10;
+      const useServerFilters = canUseServerFilters(meta, filters);
+      if (pagination?.mode !== "off" && (!filters?.length || useServerFilters)) {
+        const current = currentPage(pagination);
+        const size = pageSize(pagination);
+        const query = pageQuery(current, size, sorters);
+        if (useServerFilters) {
+          appendFilters(query, filters);
+        }
         const page = await getCatalogPage<TData>(
           resource,
           meta,
-          pageQuery(current, pageSize, sorters),
+          query,
         );
 
         if (page.page) {
@@ -367,10 +435,10 @@ export const commandDataProvider = (
         }
 
         const sorted = applySorting(page.data, sorters);
-        const start = (current - 1) * pageSize;
+        const start = (current - 1) * size;
 
         return {
-          data: sorted.slice(start, start + pageSize),
+          data: sorted.slice(start, start + size),
           total: sorted.length,
         };
       }
@@ -382,15 +450,15 @@ export const commandDataProvider = (
       );
       const filtered = applyFilters(allRecords, filters);
       const sorted = applySorting(filtered, sorters);
-      const current = pagination?.currentPage ?? 1;
-      const pageSize = pagination?.pageSize ?? sorted.length;
-      const start = (current - 1) * pageSize;
+      const current = currentPage(pagination);
+      const size = pagination?.mode === "off" ? sorted.length : pageSize(pagination);
+      const start = (current - 1) * size;
 
       return {
         data:
           pagination?.mode === "off"
             ? sorted
-            : sorted.slice(start, start + pageSize),
+            : sorted.slice(start, start + size),
         total: sorted.length,
       };
     },

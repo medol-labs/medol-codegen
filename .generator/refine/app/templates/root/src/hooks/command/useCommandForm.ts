@@ -36,7 +36,7 @@ export const useCommandForm = <
     resource,
     command,
     aggregateId,
-    redirect = false,
+    redirect = "list",
     dataProviderName = "command",
     queryDataProviderName,
     meta,

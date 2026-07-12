@@ -8,14 +8,14 @@ const {typeMapping, typeImports} = require('../../common/util/generator');
 const {contextPackage, findValueType, resolvedBaseType, resolvedConstraints} = require('../../common/util/value-types');
 const {_sliceTitle} = require('../../common/util/naming');
 
-function selectionFor(slice, model, eventStorageMode = 'dcb') {
+function selectionFor(slice, model, eventStorageMode = 'aggregate') {
     if (primaryConcept(slice)) {
         return conceptSelectionFor(slice, model, eventStorageMode);
     }
     return sliceSelectionFor(slice, eventStorageMode);
 }
 
-function uniqueReservationsForSlice(slice, model, eventStorageMode = 'dcb') {
+function uniqueReservationsForSlice(slice, model, eventStorageMode = 'aggregate') {
     const command = slice.commands?.[0];
     if (!command) return [];
     const commandFields = command.fields ?? [];
@@ -47,7 +47,7 @@ function parseUniqueExpression(expression) {
     return {concept, fields: fields.map((field) => field.field)};
 }
 
-function reservationForUniqueExpression(slice, model, command, commandFields, idFields, expression, eventStorageMode = 'dcb') {
+function reservationForUniqueExpression(slice, model, command, commandFields, idFields, expression, eventStorageMode = 'aggregate') {
     const concept = primaryConcept(slice) ?? expression.concept;
     if (expression.concept !== concept) return undefined;
     const sourceFields = expression.fields
@@ -126,7 +126,7 @@ function normalizedFieldExpression(field, receiver) {
         : `${value}.toString().trim().lowercase()`;
 }
 
-function conceptSelectionFor(slice, model, eventStorageMode = 'dcb') {
+function conceptSelectionFor(slice, model, eventStorageMode = 'aggregate') {
     const concept = primaryConcept(slice);
     const conceptSlices = (model?.slices ?? [])
         .filter((candidate) => candidate.context === slice.context && primaryConcept(candidate) === concept && candidate.commands.length > 0);
@@ -149,7 +149,7 @@ function conceptSelectionFor(slice, model, eventStorageMode = 'dcb') {
     return selectionFromTags(sourceSlice, sourceSlice.tags.length > 0 ? sourceSlice.tags : fallbackTags(sourceSlice, sourceSlice.commands[0]?.fields ?? []), `${pascal(concept)}Selection`, concept, [concept], eventStorageMode);
 }
 
-function sliceSelectionFor(slice, eventStorageMode = 'dcb') {
+function sliceSelectionFor(slice, eventStorageMode = 'aggregate') {
     const firstCommand = slice.commands[0];
     const commandFields = firstCommand?.fields ?? [];
     const idFields = commandFields.filter((field) => field.idAttribute);
@@ -166,7 +166,7 @@ function explicitConsistencyTags(slice) {
     return slice.tags ?? [];
 }
 
-function selectionFromTags(slice, tags, name, metadataOwner, concepts, eventStorageMode = 'dcb') {
+function selectionFromTags(slice, tags, name, metadataOwner, concepts, eventStorageMode = 'aggregate') {
     const commandFields = slice.commands[0]?.fields ?? [];
     const fields = tags.map((tag, index) => {
         const source = tagSource(tag, commandFields) ?? commandFields.find((field) => field.idAttribute)?.name ?? commandFields[0]?.name;
@@ -593,17 +593,13 @@ function readModelMetadataFields(readmodel) {
 }
 
 function readModelMetadataParameters(metadataFields, indent = '        ') {
-    return metadataFields
-        .map((field) => `${indent}@MetadataValue(MetadataKeys.${field.key}) ${field.name}: String?`)
-        .join(',\n');
+    if (metadataFields.length === 0) return '';
+    return `${indent}message: EventMessage`;
 }
 
 function readModelMetadataAssignments(metadataFields, indent = '            ') {
     if (metadataFields.length === 0) return '';
-    const parameters = metadataFields
-        .map((field) => `${indent}    ${field.name} = ${field.name}`)
-        .join(',\n');
-    return `${indent}ProjectionMetadata.assign(\n${indent}    target = entity,\n${parameters}\n${indent})`;
+    return `${indent}ProjectionMetadata.assign(entity, message)`;
 }
 
 function mappedType(field, optional = field.optional) {

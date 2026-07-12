@@ -154,7 +154,7 @@ export const <%= command.pageComponent %> = () => {
     resource: "<%= resource.name %>",
     command: "<%= command.name %>",
     aggregateId: id?.toString(),
-    redirect: false,
+    redirect: "list",
     dataProviderName: "<%= command.dataProviderName %>",
     queryDataProviderName: "<%= resource.dataProviderName %>",
     meta: {
@@ -186,7 +186,7 @@ export const <%= command.pageComponent %> = () => {
 <% }) -%>
 
   function onSubmit(values: <%= command.inputTypeName %>) {
-    onFinish({
+    return onFinish({
       ...defaultValues,
       ...values,
     });
@@ -408,11 +408,17 @@ export const <%= command.pageComponent %> = () => {
 <% if (field.select.sorters?.length) { -%>
                   sorters={<%- JSON.stringify(field.select.sorters) %>}
 <% } -%>
+<% if (field.select.pagination) { -%>
+                  pagination={<%- JSON.stringify(field.select.pagination) %>}
+<% } -%>
                   meta={{
                     idField: "<%= field.select.meta.idField %>",
                     label: t("<%= field.i18nKey %>", "<%= field.select.meta.label %>"),
                     aggregateRoute: "<%= field.select.meta.aggregateRoute %>",
                     queryRoute: "<%= field.select.meta.queryRoute %>",
+<% if (field.select.meta.queryFields?.length) { -%>
+                    queryFields: <%- JSON.stringify(field.select.meta.queryFields) %>,
+<% } -%>
                   }}
                 />
 <% } else if (field.enumOptions && field.enumOptions.length) { -%>

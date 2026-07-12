@@ -86,7 +86,8 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
                     idField: id,
                     label: cleanTitle(readModel.title),
                     aggregateRoute: axonRoute(aggregate.title),
-                    queryRoute: axonRoute(readModel.title)
+                    queryRoute: axonRoute(readModel.title),
+                    queryFields: queryFieldsForReadModel(readModel)
                 }
             };
             selectableReadModels.set(id, selectModel);
@@ -165,7 +166,7 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
                 filters.push({
                     field: dictionaryProviderSelect.stateField,
                     operator: 'eq',
-                    value: 'Active'
+                    value: 'ACTIVE'
                 });
             } else if (dictionaryProviderSelect.activeField) {
                 filters.push({
@@ -176,13 +177,34 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
             }
             return {
                 ...dictionaryProviderSelect,
+                meta: {
+                    ...dictionaryProviderSelect.meta,
+                    queryFields: unique([
+                        ...(dictionaryProviderSelect.meta?.queryFields ?? []),
+                        dictionaryProviderSelect.dictionaryCodeField,
+                        dictionaryProviderSelect.stateField,
+                        dictionaryProviderSelect.activeField
+                    ])
+                },
                 filters,
+                pagination: {
+                    current: 1,
+                    currentPage: 1,
+                    pageSize: 100,
+                    mode: 'server'
+                },
                 sorters: dictionaryProviderSelect.sortField
                     ? [{ field: dictionaryProviderSelect.sortField, order: 'asc' }]
                     : []
             };
         }
     };
+}
+
+function queryFieldsForReadModel(readModel) {
+    return unique((readModel?.fields ?? [])
+        .filter((field) => field?.query)
+        .map((field) => field.name));
 }
 
 function buildAutomationCommandKeys(slices) {

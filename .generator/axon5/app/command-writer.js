@@ -133,12 +133,6 @@ ${reservationSelections ? `\n${reservationSelections}` : ''}
                 ...commandReservations.map((reservation) =>
                     `@InjectEntity(idProperty = "${escapeKotlin(reservation.selectionProperty)}") ${reservation.stateParam}: ${reservation.stateName}`
                 ),
-                '@MetadataValue(MetadataKeys.USER_ID) userId: String?',
-                '@MetadataValue(MetadataKeys.SESSION_ID) sessionId: String?',
-                '@MetadataValue(MetadataKeys.CORRELATION_ID) correlationId: String?',
-                '@MetadataValue(MetadataKeys.TRACE_ID) traceId: String?',
-                '@MetadataValue(MetadataKeys.TENANT_ID) tenantId: String?',
-                'commandMessage: CommandMessage',
                 'eventAppender: EventAppender'
             ]
                 .filter(Boolean)
@@ -149,32 +143,22 @@ ${reservationSelections ? `\n${reservationSelections}` : ''}
     fun handle(
 ${methodParameters}
     ) {
-        eventAppender.append(
-            decision.decide(${decisionArgs}),
-            MetadataFactory.fromValues(
-                userId = userId,
-                sessionId = sessionId,
-                correlationId = correlationId,
-                causationId = commandMessage.identifier(),
-                traceId = traceId,
-                tenantId = tenantId
-            )
-        )
+        eventAppender.append(decision.decide(${decisionArgs}))
     }`;
         }).join('\n\n');
         const commandImports = slice.commands.map((command) => `import ${packageName}.${_commandTitle(command.title)}`).join('\n');
-        const stateImport = stateTarget.packageName === packageName ? '' : `import ${stateTarget.packageName}.${stateName}\n`;
+        const usesState = slice.commands.some((command) => !command.startsLifecycle);
+        const stateImport = usesState && stateTarget.packageName !== packageName ? `import ${stateTarget.packageName}.${stateName}\n` : '';
         const reservationStateImports = reservations.map((reservation) => `import ${reservation.packageName}.${reservation.stateName}`).join('\n');
+        const injectEntityImport = slice.commands.some((command) => !command.startsLifecycle || reservations.length > 0)
+            ? 'import org.axonframework.modelling.annotation.InjectEntity\n'
+            : '';
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${pascal(slice.name)}CommandHandler.kt`), `package ${packageName}
 
 import org.axonframework.messaging.commandhandling.annotation.CommandHandler
-import org.axonframework.messaging.commandhandling.CommandMessage
-import org.axonframework.messaging.core.annotation.MetadataValue
 import org.axonframework.messaging.eventhandling.gateway.EventAppender
-import org.axonframework.modelling.annotation.InjectEntity
+${injectEntityImport}\
 import org.springframework.stereotype.Component
-import ${this.model.rootPackage}.support.metadata.MetadataFactory
-import ${this.model.rootPackage}.support.metadata.MetadataKeys
 ${commandImports}
 ${stateImport}
 ${reservationStateImports}

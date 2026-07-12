@@ -34,11 +34,11 @@ export const <%= command.pageComponent %> = () => {
   const { refineCore: { onFinish }, ...form } = useCommandForm({
     resource: "<%= resource.name %>",
     command: "<%= command.name %>",
-    redirect: false,
+    redirect: "list",
   });
 
   function onSubmit(values: Record<string, unknown>) {
-    onFinish({
+    return onFinish({
       ...values,
     });
   }
@@ -72,11 +72,17 @@ export const <%= command.pageComponent %> = () => {
 <% if (field.select.sorters?.length) { -%>
                   sorters={<%- JSON.stringify(field.select.sorters) %>}
 <% } -%>
+<% if (field.select.pagination) { -%>
+                  pagination={<%- JSON.stringify(field.select.pagination) %>}
+<% } -%>
                   meta={{
                     idField: "<%= field.select.meta.idField %>",
                     label: "<%= field.select.meta.label %>",
                     aggregateRoute: "<%= field.select.meta.aggregateRoute %>",
                     queryRoute: "<%= field.select.meta.queryRoute %>",
+<% if (field.select.meta.queryFields?.length) { -%>
+                    queryFields: <%- JSON.stringify(field.select.meta.queryFields) %>,
+<% } -%>
                   }}
                 />
 <% } else if (field.boolean) { -%>

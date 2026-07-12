@@ -24,6 +24,14 @@ spring:
 axon:
   axonserver:
     enabled: false
+  eventstorage:
+    jpa:
+      batch-size: 100
+      gap-cleaning-threshold: 250
+      gap-timeout: 10000
+      lowest-global-sequence: 1
+      max-gap-offset: 60000
+      polling-interval: 1000
 
 medol:
   axon:

@@ -107,11 +107,6 @@ const applicationWriterMethods = {
             rootPackage: this.model.rootPackage
         });
         this._writeMetadataSupport();
-        if (this.eventStorageMode === 'dcb') {
-            this.fs.copyTpl(this.templatePath('AxonEventStorageConfig.kt.tpl'), this._kotlinPath('support/AxonEventStorageConfig.kt'), {
-                rootPackage: this.model.rootPackage
-            });
-        }
         this.fs.copyTpl(this.templatePath('application.yml'), this._destPath('src/main/resources/application.yml'), runtime);
         this.fs.copyTpl(this.templatePath('docker-compose.yml'), this._destPath('docker-compose.yml'), runtime);
         this.fs.copy(this.templatePath('V1__baseline.sql'), this._destPath('src/main/resources/db/migration/V1__baseline.sql'));

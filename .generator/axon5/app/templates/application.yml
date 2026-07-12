@@ -8,6 +8,8 @@ spring:
     compose:
       file: ${DOCKER_COMPOSE_FILE:<%= composeFile %>}
       lifecycle-management: start-and-stop
+      profiles:
+        active: axon-server
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:<%= dbPort %>/<%= dbName %>}
     username: ${DB_USERNAME:medol}
@@ -23,19 +25,15 @@ spring:
 
 axon:
   axonserver:
-    enabled: false
-  eventstorage:
-    jpa:
-      batch-size: 100
-      gap-cleaning-threshold: 250
-      gap-timeout: 10000
-      lowest-global-sequence: 1
-      max-gap-offset: 60000
-      polling-interval: 1000
+    enabled: ${AXON_SERVER_ENABLED:true}
+    servers: ${AXON_SERVER_SERVERS:localhost:8124}
+    context: ${AXON_SERVER_CONTEXT:default}
+    event-store:
+      enabled: ${AXON_SERVER_EVENT_STORE_ENABLED:true}
 
 medol:
   axon:
-    event-storage-mode: dcb
+    event-storage: ${MEDOL_AXON_EVENT_STORAGE:axon-server}
 
 management:
   endpoints:

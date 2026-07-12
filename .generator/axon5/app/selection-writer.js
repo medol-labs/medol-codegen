@@ -29,7 +29,6 @@ const {
     childTransitionKeyField,
     tagSource,
     renderTagExpression,
-    compositeKeyExpression,
     renderDerivedEventTags,
     derivedEventTagProperty,
     relatedEventsForSlice,
@@ -91,16 +90,13 @@ const selectionWriterMethods = {
         const tagConstants = tags.map((tag) => `    const val ${constant(tag.name)} = "${escapeKotlin(tag.name)}"`).join('\n');
         const metadataOwner = selection.metadataOwner ?? slice.name;
         const concepts = selection.concepts ?? slice.concepts;
-        const body = selection.compositeTag
-            ? ` {\n    val ${selection.compositeTag.property}: String = ${selection.compositeTag.expression}\n}`
-            : '';
         this.fs.write(this._kotlinPath(`${pathPrefix}/${selection.name}.kt`), `package ${packageName}
 
 ${imports}
 
 data class ${selection.name}(
 ${properties}
-)${body}
+)
 
 object ${pascal(metadataOwner)}Tags {
 ${tagConstants}
@@ -118,22 +114,14 @@ object ${pascal(metadataOwner)}Metadata {
             ...reservation.originalFields,
             ...reservation.normalizedFields
         ];
-        const compositeTag = reservation.eventStorageMode === 'aggregate' && reservation.selectionFields.length > 1
-            ? {
-                name: safeIdentifier(String(reservation.concept ?? reservation.selectionName).charAt(0).toLowerCase() + String(reservation.concept ?? reservation.selectionName).slice(1)),
-                property: 'consistencyKey',
-                expression: compositeKeyExpression(reservation.selectionFields.map((field) => field.name))
-            }
-            : undefined;
         const eventImports = kotlinFieldImports(fields, this.model.rootPackage);
         const eventProperties = [
             ...fields.map((field) => {
-                const tag = !compositeTag && reservation.normalizedFields.some((candidate) => candidate.name === field.name)
+                const tag = reservation.normalizedFields.some((candidate) => candidate.name === field.name)
                 ? `    @EventTag(key = "${escapeKotlin(field.tagName)}")\n`
                 : '';
                 return `${tag}    val ${field.name}: ${mappedType(field, false)}`;
-            }),
-            ...(compositeTag ? [`    @EventTag(key = "${escapeKotlin(compositeTag.name)}")\n    val ${compositeTag.property}EventTag: String = ${compositeTag.expression}`] : [])
+            })
         ].join(',\n');
         this.fs.write(this._kotlinPath(`${context}/events/${reservation.eventName}.kt`), `package ${this.model.rootPackage}.${context}.events
 
@@ -148,25 +136,20 @@ ${eventProperties}
 `);
 
         const selectionProperties = reservation.selectionFields.map((field) => `    val ${field.name}: String`).join(',\n');
-        const selectionBody = compositeTag
-            ? ` {\n    val ${compositeTag.property}: String = ${compositeTag.expression}\n}`
-            : '';
         this.fs.write(this._kotlinPath(`${reservation.packagePath}/${reservation.selectionName}.kt`), `package ${reservation.packageName}
 
 data class ${reservation.selectionName}(
 ${selectionProperties}
-)${selectionBody}
+)
 
 object ${reservation.tagsName} {
-${(compositeTag ? [{tagName: compositeTag.name}] : reservation.normalizedFields).map((field) => `    const val ${constant(field.tagName)} = "${escapeKotlin(field.tagName)}"`).join('\n')}
+${reservation.normalizedFields.map((field) => `    const val ${constant(field.tagName)} = "${escapeKotlin(field.tagName)}"`).join('\n')}
 }
 `);
 
-        const criteria = compositeTag
-            ? `Tag.of(${reservation.tagsName}.${constant(compositeTag.name)}, selection.${compositeTag.property})`
-            : reservation.selectionFields
-                .map((field) => `Tag.of(${reservation.tagsName}.${constant(field.tagName)}, selection.${field.name})`)
-                .join(',\n                ');
+        const criteria = reservation.selectionFields
+            .map((field) => `Tag.of(${reservation.tagsName}.${constant(field.tagName)}, selection.${field.name})`)
+            .join(',\n                ');
         const sourcingAssignments = [
             '        reserved = true',
             ...reservation.idFields.map((field) => `        ${field.name} = event.${field.name}`)

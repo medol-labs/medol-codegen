@@ -8,14 +8,14 @@ const {typeMapping, typeImports} = require('../../common/util/generator');
 const {contextPackage, findValueType, resolvedBaseType, resolvedConstraints} = require('../../common/util/value-types');
 const {_sliceTitle} = require('../../common/util/naming');
 
-function selectionFor(slice, model, eventStorageMode = 'aggregate') {
+function selectionFor(slice, model) {
     if (primaryConcept(slice)) {
-        return conceptSelectionFor(slice, model, eventStorageMode);
+        return conceptSelectionFor(slice, model);
     }
-    return sliceSelectionFor(slice, eventStorageMode);
+    return sliceSelectionFor(slice);
 }
 
-function uniqueReservationsForSlice(slice, model, eventStorageMode = 'aggregate') {
+function uniqueReservationsForSlice(slice, model) {
     const command = slice.commands?.[0];
     if (!command) return [];
     const commandFields = command.fields ?? [];
@@ -25,7 +25,7 @@ function uniqueReservationsForSlice(slice, model, eventStorageMode = 'aggregate'
         .map((expression) => parseUniqueExpression(expression))
         .filter(Boolean);
     return uniqueBy(expressions, (expression) => `${expression.concept}:${expression.fields.join(',')}`)
-        .map((expression) => reservationForUniqueExpression(slice, model, command, commandFields, idFields, expression, eventStorageMode))
+        .map((expression) => reservationForUniqueExpression(slice, model, command, commandFields, idFields, expression))
         .filter(Boolean);
 }
 
@@ -47,7 +47,7 @@ function parseUniqueExpression(expression) {
     return {concept, fields: fields.map((field) => field.field)};
 }
 
-function reservationForUniqueExpression(slice, model, command, commandFields, idFields, expression, eventStorageMode = 'aggregate') {
+function reservationForUniqueExpression(slice, model, command, commandFields, idFields, expression) {
     const concept = primaryConcept(slice) ?? expression.concept;
     if (expression.concept !== concept) return undefined;
     const sourceFields = expression.fields
@@ -105,7 +105,6 @@ function reservationForUniqueExpression(slice, model, command, commandFields, id
         idFields,
         selectionArgs,
         eventArgs,
-        eventStorageMode,
         message: `${fieldLabels.join(' ')} already exists.`
     };
 }
@@ -126,7 +125,7 @@ function normalizedFieldExpression(field, receiver) {
         : `${value}.toString().trim().lowercase()`;
 }
 
-function conceptSelectionFor(slice, model, eventStorageMode = 'aggregate') {
+function conceptSelectionFor(slice, model) {
     const concept = primaryConcept(slice);
     const conceptSlices = (model?.slices ?? [])
         .filter((candidate) => candidate.context === slice.context && primaryConcept(candidate) === concept && candidate.commands.length > 0);
@@ -139,17 +138,17 @@ function conceptSelectionFor(slice, model, eventStorageMode = 'aggregate') {
         ?? slice;
     const explicitTags = explicitConsistencyTags(sourceSlice);
     if (explicitTags.length > commandIdFields(sourceSlice).length) {
-        return selectionFromTags(sourceSlice, explicitTags, `${pascal(concept)}Selection`, concept, [concept], eventStorageMode);
+        return selectionFromTags(sourceSlice, explicitTags, `${pascal(concept)}Selection`, concept, [concept]);
     }
     const idFields = commandIdFields(sourceSlice);
     if (idFields.length > 0) {
         const tags = idFields.map((field) => ({name: field.name, expression: field.name}));
-        return selectionFromTags(sourceSlice, tags, `${pascal(concept)}Selection`, concept, [concept], eventStorageMode);
+        return selectionFromTags(sourceSlice, tags, `${pascal(concept)}Selection`, concept, [concept]);
     }
-    return selectionFromTags(sourceSlice, sourceSlice.tags.length > 0 ? sourceSlice.tags : fallbackTags(sourceSlice, sourceSlice.commands[0]?.fields ?? []), `${pascal(concept)}Selection`, concept, [concept], eventStorageMode);
+    return selectionFromTags(sourceSlice, sourceSlice.tags.length > 0 ? sourceSlice.tags : fallbackTags(sourceSlice, sourceSlice.commands[0]?.fields ?? []), `${pascal(concept)}Selection`, concept, [concept]);
 }
 
-function sliceSelectionFor(slice, eventStorageMode = 'aggregate') {
+function sliceSelectionFor(slice) {
     const firstCommand = slice.commands[0];
     const commandFields = firstCommand?.fields ?? [];
     const idFields = commandFields.filter((field) => field.idAttribute);
@@ -159,14 +158,14 @@ function sliceSelectionFor(slice, eventStorageMode = 'aggregate') {
         : idFields.length > 0
         ? idFields.map((field) => ({name: field.name, expression: field.name}))
         : (slice.tags.length > 0 ? slice.tags : fallbackTags(slice, commandFields));
-    return selectionFromTags(slice, tags, `${pascal(slice.name)}Selection`, slice.name, slice.concepts, eventStorageMode);
+    return selectionFromTags(slice, tags, `${pascal(slice.name)}Selection`, slice.name, slice.concepts);
 }
 
 function explicitConsistencyTags(slice) {
     return slice.tags ?? [];
 }
 
-function selectionFromTags(slice, tags, name, metadataOwner, concepts, eventStorageMode = 'aggregate') {
+function selectionFromTags(slice, tags, name, metadataOwner, concepts) {
     const commandFields = slice.commands[0]?.fields ?? [];
     const fields = tags.map((tag, index) => {
         const source = tagSource(tag, commandFields) ?? commandFields.find((field) => field.idAttribute)?.name ?? commandFields[0]?.name;
@@ -184,25 +183,7 @@ function selectionFromTags(slice, tags, name, metadataOwner, concepts, eventStor
             eventExpression: expression ?? sourceField.name
         };
     });
-    if (eventStorageMode === 'aggregate' && fields.length > 1) {
-        const tag = {name: safeIdentifier(String(metadataOwner ?? name).charAt(0).toLowerCase() + String(metadataOwner ?? name).slice(1))};
-        return {
-            name,
-            tags: [tag],
-            fields,
-            metadataOwner,
-            concepts,
-            eventStorageMode,
-            compositeTag: {
-                tag,
-                property: 'consistencyKey',
-                sources: fields.map((field) => field.source),
-                expression: compositeKeyExpression(fields.map((field) => field.alias)),
-                eventExpression: compositeKeyExpression(fields.map((field) => field.eventExpression))
-            }
-        };
-    }
-    return {name, tags, fields, metadataOwner, concepts, eventStorageMode};
+    return {name, tags, fields, metadataOwner, concepts};
 }
 
 function commandFieldsWithSelection(command, selection) {
@@ -263,26 +244,8 @@ function eventFieldsWithTags(fields, tagFields) {
 }
 
 function eventTagFieldsFor(slice, event, selection, includeMissing = false) {
-    if (selection.compositeTag) {
-        const sources = selection.compositeTag.sources ?? [];
-        if (!includeMissing && !sources.every((source) => (event.fields ?? []).some((eventField) => eventField.name === source))) {
-            return [];
-        }
-        return [{
-            name: selection.compositeTag.property,
-            alias: selection.compositeTag.property,
-            source: sources[0],
-            requiredSources: sources,
-            type: 'String',
-            cardinality: 'Single',
-            optional: false,
-            derived: true,
-            tag: selection.compositeTag.tag,
-            eventExpression: selection.compositeTag.eventExpression
-        }];
-    }
-    const explicitTagSelection = selection.eventStorageMode === 'dcb' && (slice.tags ?? []).length > 0
-        ? selectionFromTags(slice, slice.tags, `${pascal(slice.name)}ExplicitTags`, slice.name, slice.concepts, 'dcb')
+    const explicitTagSelection = (slice.tags ?? []).length > 0
+        ? selectionFromTags(slice, slice.tags, `${pascal(slice.name)}ExplicitTags`, slice.name, slice.concepts)
         : {fields: []};
     const byTagName = new Map();
     [...(selection.fields ?? []), ...(explicitTagSelection.fields ?? [])]

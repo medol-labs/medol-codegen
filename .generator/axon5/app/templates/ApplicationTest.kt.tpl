@@ -15,7 +15,10 @@ import org.springframework.test.web.servlet.get
     "spring.datasource.driver-class-name=org.h2.Driver",
     "spring.datasource.username=sa",
     "spring.datasource.password=",
-    "spring.jpa.hibernate.ddl-auto=create-drop"
+    "spring.jpa.hibernate.ddl-auto=create-drop",
+    "axon.axonserver.enabled=false",
+    "axon.axonserver.event-store.enabled=false",
+    "medol.axon.event-storage=inmemory"
 ])
 class <%= applicationClass %>Test(
     @Autowired private val mockMvc: MockMvc

@@ -1,20 +1,4 @@
 services:
-  postgres:
-    image: postgres:16
-    ports:
-      - "${DB_PORT:-<%= dbPort %>}:5432"
-    environment:
-      POSTGRES_USER: medol
-      POSTGRES_PASSWORD: medol
-      POSTGRES_DB: <%= dbName %>
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U medol -d <%= dbName %>"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
   axon-server:
     image: axoniq/axonserver:latest-jdk-17
     hostname: axon-server
@@ -37,7 +21,27 @@ services:
       retries: 10
       start_period: 30s
 
+<% deployments.forEach((deployment) => { -%>
+  <%= deployment.serviceName %>-postgres:
+    image: postgres:16
+    ports:
+      - "${<%= deployment.envPrefix %>_DB_PORT:-<%= deployment.dbPort %>}:5432"
+    environment:
+      POSTGRES_USER: medol
+      POSTGRES_PASSWORD: medol
+      POSTGRES_DB: <%= deployment.dbName %>
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medol -d <%= deployment.dbName %>"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - <%= deployment.serviceName %>_postgres_data:/var/lib/postgresql/data
+
+<% }) -%>
 volumes:
-  postgres_data:
   axon_server_data:
   axon_server_events:
+<% deployments.forEach((deployment) => { -%>
+  <%= deployment.serviceName %>_postgres_data:
+<% }) -%>

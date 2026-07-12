@@ -158,21 +158,11 @@ ${properties}
         const entityAnnotation = singleTag
             ? `@EventSourced(idType = ${idType}::class, tagKey = ${tagOwner}Tags.${constant(selection.fields[0].tag.name)})`
             : `@EventSourced(idType = ${selection.name}::class)`;
-        const criteria = selection.compositeTag
-            ? `EventCriteria.havingTags(Tag.of(${tagOwner}Tags.${constant(selection.compositeTag.tag.name)}, selection.${selection.compositeTag.property}))`
-            : selection.fields
-                .map((field) => `EventCriteria.havingTags(Tag.of(${tagOwner}Tags.${constant(field.tag.name)}, selection.${field.alias}.toString()))`)
-                .join(',\n                ');
+        const criteria = selection.fields
+            .map((field) => `EventCriteria.havingTags(Tag.of(${tagOwner}Tags.${constant(field.tag.name)}, selection.${field.alias}.toString()))`)
+            .join(',\n                ');
         const criteriaFunction = singleTag
             ? ''
-            : selection.compositeTag
-            ? `    companion object {
-        @JvmStatic
-        @EventCriteriaBuilder
-        fun resolveCriteria(selection: ${selection.name}): EventCriteria = ${criteria}
-    }
-
-`
             : `    companion object {
         @JvmStatic
         @EventCriteriaBuilder
@@ -268,7 +258,7 @@ ${methods}
         const groups = groupByMap(slices.filter((slice) => primaryConcept(slice) && slice.commands.length > 0), (slice) => primaryConcept(slice));
         for (const [, conceptSlices] of groups.entries()) {
             const first = conceptSlices[0];
-            const selection = selectionFor(first, this.model, this.eventStorageMode);
+            const selection = selectionFor(first, this.model);
             const target = stateTargetFor(this.model, first);
             const context = contextPackage(first.context);
             const conceptPackage = _sliceTitle(primaryConcept(first));

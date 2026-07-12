@@ -89,10 +89,10 @@ const sliceOrchestratorMethods = {
         const slicePackage = _sliceTitle(slice.title);
         const packageName = `${this.model.rootPackage}.${context}.${slicePackage}`;
         if (slice.commands.length > 0) {
-            const selection = selectionFor(slice, this.model, this.eventStorageMode);
+            const selection = selectionFor(slice, this.model);
             const selectionTarget = selectionTargetFor(this.model, slice);
             const relatedEvents = relatedEventsForSlice(this.model, slice);
-            const reservations = uniqueReservationsForSlice(slice, this.model, this.eventStorageMode);
+            const reservations = uniqueReservationsForSlice(slice, this.model);
             this._writeSelection(selectionTarget.packageName, selectionTarget.pathPrefix, slice, selection);
             reservations.forEach((reservation) => this._writeReservationArtifacts(context, reservation));
             slice.commands.forEach((command) => this._writeCommand(packageName, context, slicePackage, command, selection, selectionTarget.packageName, reservations));

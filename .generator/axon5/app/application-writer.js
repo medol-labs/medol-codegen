@@ -29,6 +29,17 @@ const applicationWriterMethods = {
             dbName: safeDatabaseName(kebab(this.model.domain) || 'medol-application'),
             modulePrefix: ''
         });
+        this.fs.copyTpl(this.templatePath('mono-docker-compose.yml.tpl'), this.destinationPath('docker-compose.yml'), {
+            deployments: deployments.map((deployment, index) => {
+                const serviceName = this._deploymentModuleName(deployment);
+                return {
+                    serviceName,
+                    envPrefix: serviceName.toUpperCase().replace(/[^A-Z0-9]+/g, '_'),
+                    dbPort: 5432 + index,
+                    dbName: safeDatabaseName(serviceName)
+                };
+            })
+        });
         this.fs.copy(this.templatePath('gitignore'), this.destinationPath('.gitignore'));
         this._copyMavenWrapper();
         this._writeDevSeedScript();
@@ -107,7 +118,11 @@ const applicationWriterMethods = {
             rootPackage: this.model.rootPackage
         });
         this._writeMetadataSupport();
+        this.fs.copyTpl(this.templatePath('AxonEventStorageConfig.kt.tpl'), this._kotlinPath('support/AxonEventStorageConfig.kt'), {
+            rootPackage: this.model.rootPackage
+        });
         this.fs.copyTpl(this.templatePath('application.yml'), this._destPath('src/main/resources/application.yml'), runtime);
+        this.fs.copy(this.templatePath('application-inmemory.yml'), this._destPath('src/main/resources/application-inmemory.yml'));
         this.fs.copyTpl(this.templatePath('docker-compose.yml'), this._destPath('docker-compose.yml'), runtime);
         this.fs.copy(this.templatePath('V1__baseline.sql'), this._destPath('src/main/resources/db/migration/V1__baseline.sql'));
         this.fs.copy(this.templatePath('gitignore'), this._destPath('.gitignore'));
@@ -135,7 +150,7 @@ const applicationWriterMethods = {
             appPort: 8080 + index,
             dbPort: 5432 + index,
             dbName: safeDatabaseName(appName),
-            composeFile: 'docker-compose.yml'
+            composeFile: this.modulePrefix ? '../docker-compose.yml' : 'docker-compose.yml'
         };
     },
 

@@ -13,10 +13,10 @@ Generated from Medol CodegenModel for Axon Framework 5.1.1.
 ./mvnw spring-boot:run
 ```
 
-Spring Boot starts PostgreSQL from `docker-compose.yml` automatically. To manage it manually:
+Spring Boot starts PostgreSQL and Axon Server from `docker-compose.yml` automatically in the default Axon Server mode. To manage them manually:
 
 ```bash
-docker compose up -d
+docker compose --profile axon-server up -d
 ./mvnw spring-boot:run
 ```
 
@@ -32,6 +32,29 @@ Default ports:
 - Application: `<%= appPort %>`; override with `SERVER_PORT`
 - PostgreSQL host port: `<%= dbPort %>`; override with `DB_PORT`
 - PostgreSQL database: `<%= dbName %>`; override the full connection with `DB_URL`
+- Axon Server UI: `http://localhost:8024`; override with `AXON_SERVER_HTTP_PORT`
+- Axon Server gRPC: `localhost:8124`; override with `AXON_SERVER_SERVERS`
+
+## Event Storage Mode
+
+The default event storage is Axon Server, which supports multiple Axon event tags per event.
+
+```bash
+./mvnw spring-boot:run
+```
+
+Use the in-memory event store for local experiments or tests that should not connect to Axon Server:
+
+```bash
+docker compose up -d
+SPRING_PROFILES_ACTIVE=inmemory ./mvnw spring-boot:run
+```
+
+Equivalent explicit properties:
+
+```bash
+MEDOL_AXON_EVENT_STORAGE=inmemory AXON_SERVER_ENABLED=false ./mvnw spring-boot:run
+```
 
 ## Seed Development Data
 

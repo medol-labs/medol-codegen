@@ -19,7 +19,6 @@ class Axon5Generator extends Generator {
         this.modulePrefix = '';
         this.currentDeployment = null;
         this.currentDeploymentIndex = 0;
-        this.eventStorageMode = String(this.opts.eventStorageMode ?? this.model.eventStorageMode ?? 'aggregate').toLowerCase();
         configureValueTypes(this.model.valueTypes, this.model.rootPackage, this.model.concepts);
     }
 

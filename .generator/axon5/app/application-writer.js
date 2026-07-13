@@ -91,15 +91,20 @@ const applicationWriterMethods = {
         return kebab(deployment.name) || 'application';
     },
 
+    _usesInfraModule() {
+        return Boolean(this.modulePrefix || this.model.deployment || process.env.CODEGEN_DEPLOYMENT);
+    },
+
     _writeSkeleton() {
         const appName = kebab(this.model.domain) || 'medol-application';
         const applicationClass = `${pascal(this.model.domain)}Application`;
         const runtime = this._runtimeConfig(appName);
+        const hasInfra = this._usesInfraModule();
         this.fs.copyTpl(this.templatePath('pom.xml.tpl'), this._destPath('pom.xml'), {
             rootPackage: this.model.rootPackage,
             appName,
             appPort: runtime.appPort,
-            hasInfra: Boolean(this.modulePrefix)
+            hasInfra
         });
         this.fs.copyTpl(this.templatePath('Application.kt.tpl'), this._kotlinPath('Application.kt'), {
             rootPackage: this.model.rootPackage,
@@ -110,7 +115,7 @@ const applicationWriterMethods = {
             domain: this.model.domain,
             rootPackage: this.model.rootPackage,
             modulePrefix: this.modulePrefix,
-            hasInfra: Boolean(this.modulePrefix),
+            hasInfra,
             appPort: runtime.appPort,
             dbPort: runtime.dbPort,
             dbName: runtime.dbName
@@ -129,14 +134,14 @@ const applicationWriterMethods = {
         this._writeMetadataSupport();
         this.fs.copyTpl(this.templatePath('AxonEventStorageConfig.kt.tpl'), this._kotlinPath('support/AxonEventStorageConfig.kt'), {
             rootPackage: this.model.rootPackage,
-            hasInfra: Boolean(this.modulePrefix)
+            hasInfra
         });
         this.fs.copyTpl(this.templatePath('application.yml'), this._destPath('src/main/resources/application.yml'), {
             ...runtime,
-            hasInfra: Boolean(this.modulePrefix)
+            hasInfra
         });
         this.fs.copy(this.templatePath('application-inmemory.yml'), this._destPath('src/main/resources/application-inmemory.yml'));
-        if (this.modulePrefix) {
+        if (hasInfra) {
             this.fs.copy(this.templatePath('application-umadb.yml'), this._destPath('src/main/resources/application-umadb.yml'));
         }
         if (!this.modulePrefix) {

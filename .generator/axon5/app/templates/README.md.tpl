@@ -9,16 +9,20 @@ Generated from Medol CodegenModel for Axon Framework 5.1.1.
 
 ## Run
 
-```bash
-./mvnw spring-boot:run
-```
-
 <% if (modulePrefix) { -%>
-Start PostgreSQL and Axon Server from the shared `../docker-compose.yml`, then run the module:
+Run this module from the generated multi-module root so Maven can include the sibling `infra` module in the reactor:
 
 ```bash
-docker compose -f ../docker-compose.yml --profile axon-server up -d
-./mvnw spring-boot:run
+cd ..
+docker compose --profile axon-server up -d
+./mvnw -pl <%= modulePrefix %> -am spring-boot:run
+```
+<% } else if (hasInfra) { -%>
+Run a backend module from this generated multi-module root:
+
+```bash
+docker compose --profile axon-server up -d
+./mvnw -pl <module-name> -am spring-boot:run
 ```
 <% } else { -%>
 Spring Boot starts PostgreSQL and Axon Server from `docker-compose.yml` automatically in the default Axon Server mode. To manage them manually:
@@ -49,35 +53,63 @@ Default ports:
 The default event storage is Axon Server, which supports multiple Axon event tags per event.
 
 ```bash
+<% if (modulePrefix) { -%>
+cd ..
+./mvnw -pl <%= modulePrefix %> -am spring-boot:run
+<% } else if (hasInfra) { -%>
+./mvnw -pl <module-name> -am spring-boot:run
+<% } else { -%>
 ./mvnw spring-boot:run
+<% } -%>
 ```
 
 Use the in-memory event store for local experiments or tests that should not connect to Axon Server:
 
 ```bash
 <% if (modulePrefix) { -%>
-docker compose -f ../docker-compose.yml up -d
+cd ..
+docker compose up -d
+SPRING_PROFILES_ACTIVE=inmemory ./mvnw -pl <%= modulePrefix %> -am spring-boot:run
+<% } else if (hasInfra) { -%>
+docker compose up -d
+SPRING_PROFILES_ACTIVE=inmemory ./mvnw -pl <module-name> -am spring-boot:run
 <% } else { -%>
 docker compose up -d
-<% } -%>
 SPRING_PROFILES_ACTIVE=inmemory ./mvnw spring-boot:run
+<% } -%>
 ```
 
 Equivalent explicit properties:
 
 ```bash
+<% if (modulePrefix) { -%>
+cd ..
+MEDOL_AXON_EVENT_STORAGE=inmemory AXON_SERVER_ENABLED=false ./mvnw -pl <%= modulePrefix %> -am spring-boot:run
+<% } else if (hasInfra) { -%>
+MEDOL_AXON_EVENT_STORAGE=inmemory AXON_SERVER_ENABLED=false ./mvnw -pl <module-name> -am spring-boot:run
+<% } else { -%>
 MEDOL_AXON_EVENT_STORAGE=inmemory AXON_SERVER_ENABLED=false ./mvnw spring-boot:run
+<% } -%>
 ```
 
 <% if (hasInfra) { -%>
 Use the generated experimental UmaDB event store adapter from the `infra` module with the `umadb` profile:
 
 ```bash
+<% if (modulePrefix) { -%>
+cd ..
+<% } -%>
 SPRING_PROFILES_ACTIVE=umadb \
 UMADB_ENDPOINT=http://localhost:8529 \
 UMADB_DATABASE=<%= appName %>_events \
 UMADB_APPEND_PATH=/api/v1/events/append \
+<% if (modulePrefix) { -%>
+./mvnw -pl <%= modulePrefix %> -am spring-boot:run
+<% } else if (hasInfra) { -%>
+./mvnw -pl <module-name> -am spring-boot:run
+<% } else { -%>
 ./mvnw spring-boot:run
+<% } -%>
 ```
 
 The UmaDB adapter is an experimental EventStorageEngine boundary. It includes HTTP append wiring, but production use still requires completing and validating source, stream, tracking token, and DCB consistency behavior against the selected UmaDB protocol.
@@ -105,7 +137,14 @@ node scripts/seed-dev-data.mjs --dry-run
 ## Build
 
 ```bash
+<% if (modulePrefix) { -%>
+cd ..
+./mvnw -pl <%= modulePrefix %> -am clean verify
+<% } else if (hasInfra) { -%>
+./mvnw -pl <module-name> -am clean verify
+<% } else { -%>
 ./mvnw clean verify
+<% } -%>
 ```
 
 ## Container Image
@@ -114,7 +153,12 @@ Build a Docker image directly from Maven:
 
 ```bash
 <% if (modulePrefix) { -%>
-./mvnw -pl <%= modulePrefix || '.' %> jib:dockerBuild
+cd ..
+./mvnw -pl infra -DskipTests install
+./mvnw -pl <%= modulePrefix %> jib:dockerBuild
+<% } else if (hasInfra) { -%>
+./mvnw -pl infra -DskipTests install
+./mvnw -pl <module-name> jib:dockerBuild
 <% } else { -%>
 ./mvnw -pl <module-name> jib:dockerBuild
 <% } -%>

@@ -69,6 +69,25 @@ Equivalent explicit properties:
 MEDOL_AXON_EVENT_STORAGE=inmemory AXON_SERVER_ENABLED=false ./mvnw spring-boot:run
 ```
 
+Use the experimental UmaDB event store adapter after installing the adapter jar from its source directory:
+
+```bash
+cd /path/to/axon-umadb-event-store
+mvn install
+```
+
+Then run this application with the `umadb` profile:
+
+```bash
+SPRING_PROFILES_ACTIVE=umadb \
+UMADB_ENDPOINT=http://localhost:8529 \
+UMADB_DATABASE=<%= appName %>_events \
+UMADB_APPEND_PATH=/api/v1/events/append \
+./mvnw spring-boot:run
+```
+
+The UmaDB adapter is an experimental EventStorageEngine boundary. It includes HTTP append wiring, but production use still requires completing and validating source, stream, tracking token, and DCB consistency behavior against the selected UmaDB protocol.
+
 ## Seed Development Data
 
 After the backend modules are running, seed demo data from the generated backend root:

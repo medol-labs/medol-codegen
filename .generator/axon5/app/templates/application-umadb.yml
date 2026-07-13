@@ -1,0 +1,15 @@
+spring:
+  docker:
+    compose:
+      profiles:
+        active: []
+
+axon:
+  axonserver:
+    enabled: false
+    event-store:
+      enabled: false
+
+medol:
+  axon:
+    event-storage: umadb

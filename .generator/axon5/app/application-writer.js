@@ -128,6 +128,7 @@ const applicationWriterMethods = {
         });
         this.fs.copyTpl(this.templatePath('application.yml'), this._destPath('src/main/resources/application.yml'), runtime);
         this.fs.copy(this.templatePath('application-inmemory.yml'), this._destPath('src/main/resources/application-inmemory.yml'));
+        this.fs.copy(this.templatePath('application-umadb.yml'), this._destPath('src/main/resources/application-umadb.yml'));
         if (!this.modulePrefix) {
             this.fs.copyTpl(this.templatePath('docker-compose.yml'), this._destPath('docker-compose.yml'), runtime);
         }

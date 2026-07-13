@@ -39,6 +39,15 @@ axon:
 medol:
   axon:
     event-storage: ${MEDOL_AXON_EVENT_STORAGE:axon-server}
+    umadb:
+      endpoint: ${UMADB_ENDPOINT:http://localhost:8529}
+      database: ${UMADB_DATABASE:<%= appName %>_events}
+      event-collection: ${UMADB_EVENT_COLLECTION:events}
+      tag-collection: ${UMADB_TAG_COLLECTION:event_tags}
+      token-collection: ${UMADB_TOKEN_COLLECTION:tracking_tokens}
+      append-path: ${UMADB_APPEND_PATH:/api/v1/events/append}
+      token: ${UMADB_TOKEN:}
+      request-timeout: ${UMADB_REQUEST_TIMEOUT:PT10S}
 <% if (externalSystems.length > 0) { -%>
 
 external:

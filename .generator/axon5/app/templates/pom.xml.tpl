@@ -15,6 +15,7 @@
         <java.version>21</java.version>
         <kotlin.version>2.3.20</kotlin.version>
         <axon.version>5.1.1</axon.version>
+        <medol.axon.umadb.version>0.1.0-SNAPSHOT</medol.axon.umadb.version>
         <start-class><%= rootPackage %>.ApplicationKt</start-class>
         <jib-maven-plugin.version>3.4.5</jib-maven-plugin.version>
         <docker.image.prefix>medol</docker.image.prefix>
@@ -78,6 +79,11 @@
             <groupId>io.axoniq.framework</groupId>
             <artifactId>axon-server-connector</artifactId>
             <version>${axon.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>tech.medo</groupId>
+            <artifactId>medol-axon-umadb-event-store</artifactId>
+            <version>${medol.axon.umadb.version}</version>
         </dependency>
         <dependency>
             <groupId>org.jetbrains.kotlin</groupId>

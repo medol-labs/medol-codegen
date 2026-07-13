@@ -39,6 +39,7 @@ axon:
 medol:
   axon:
     event-storage: ${MEDOL_AXON_EVENT_STORAGE:axon-server}
+<% if (hasInfra) { -%>
     umadb:
       endpoint: ${UMADB_ENDPOINT:http://localhost:8529}
       database: ${UMADB_DATABASE:<%= appName %>_events}
@@ -48,6 +49,7 @@ medol:
       append-path: ${UMADB_APPEND_PATH:/api/v1/events/append}
       token: ${UMADB_TOKEN:}
       request-timeout: ${UMADB_REQUEST_TIMEOUT:PT10S}
+<% } -%>
 <% if (externalSystems.length > 0) { -%>
 
 external:

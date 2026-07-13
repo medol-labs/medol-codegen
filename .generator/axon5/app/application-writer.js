@@ -23,7 +23,7 @@ const applicationWriterMethods = {
         this.fs.copyTpl(this.templatePath('mono-pom.xml.tpl'), this.destinationPath('pom.xml'), {
             rootPackage: this.model.rootPackage,
             appName: kebab(this.model.domain) || 'medol-application',
-            modules: deployments.map((deployment) => this._deploymentModuleName(deployment))
+            modules: ['infra', ...deployments.map((deployment) => this._deploymentModuleName(deployment))]
         });
         this.fs.copyTpl(this.templatePath('README.md.tpl'), this.destinationPath('README.md'), {
             appName: kebab(this.model.domain) || 'medol-application',
@@ -32,7 +32,8 @@ const applicationWriterMethods = {
             appPort: 8080,
             dbPort: 5432,
             dbName: safeDatabaseName(kebab(this.model.domain) || 'medol-application'),
-            modulePrefix: ''
+            modulePrefix: '',
+            hasInfra: true
         });
         this.fs.copyTpl(this.templatePath('mono-docker-compose.yml.tpl'), this.destinationPath('docker-compose.yml'), {
             deployments: deployments.map((deployment, index) => {
@@ -49,6 +50,7 @@ const applicationWriterMethods = {
         this._copyMavenWrapper();
         this._writeDevSeedScript();
         this._writeAgentSkills();
+        this._writeInfraModule();
         deployments.forEach((deployment) => this._withDeployment(deployment, () => this._writeSkeleton()));
     },
 
@@ -96,7 +98,8 @@ const applicationWriterMethods = {
         this.fs.copyTpl(this.templatePath('pom.xml.tpl'), this._destPath('pom.xml'), {
             rootPackage: this.model.rootPackage,
             appName,
-            appPort: runtime.appPort
+            appPort: runtime.appPort,
+            hasInfra: Boolean(this.modulePrefix)
         });
         this.fs.copyTpl(this.templatePath('Application.kt.tpl'), this._kotlinPath('Application.kt'), {
             rootPackage: this.model.rootPackage,
@@ -107,6 +110,7 @@ const applicationWriterMethods = {
             domain: this.model.domain,
             rootPackage: this.model.rootPackage,
             modulePrefix: this.modulePrefix,
+            hasInfra: Boolean(this.modulePrefix),
             appPort: runtime.appPort,
             dbPort: runtime.dbPort,
             dbName: runtime.dbName
@@ -124,11 +128,17 @@ const applicationWriterMethods = {
         });
         this._writeMetadataSupport();
         this.fs.copyTpl(this.templatePath('AxonEventStorageConfig.kt.tpl'), this._kotlinPath('support/AxonEventStorageConfig.kt'), {
-            rootPackage: this.model.rootPackage
+            rootPackage: this.model.rootPackage,
+            hasInfra: Boolean(this.modulePrefix)
         });
-        this.fs.copyTpl(this.templatePath('application.yml'), this._destPath('src/main/resources/application.yml'), runtime);
+        this.fs.copyTpl(this.templatePath('application.yml'), this._destPath('src/main/resources/application.yml'), {
+            ...runtime,
+            hasInfra: Boolean(this.modulePrefix)
+        });
         this.fs.copy(this.templatePath('application-inmemory.yml'), this._destPath('src/main/resources/application-inmemory.yml'));
-        this.fs.copy(this.templatePath('application-umadb.yml'), this._destPath('src/main/resources/application-umadb.yml'));
+        if (this.modulePrefix) {
+            this.fs.copy(this.templatePath('application-umadb.yml'), this._destPath('src/main/resources/application-umadb.yml'));
+        }
         if (!this.modulePrefix) {
             this.fs.copyTpl(this.templatePath('docker-compose.yml'), this._destPath('docker-compose.yml'), runtime);
         }
@@ -150,6 +160,17 @@ const applicationWriterMethods = {
 
     _writeMetadataSupport() {
         writeMetadataSupport(this);
+    },
+
+    _writeInfraModule() {
+        this.fs.copyTpl(this.templatePath('infra/pom.xml.tpl'), this.destinationPath('infra/pom.xml'), {
+            rootPackage: this.model.rootPackage
+        });
+        this.fs.copyTpl(
+            this.templatePath('infra/src/main/java/umadb'),
+            this.destinationPath(`infra/src/main/java/${this.model.rootPackage.split('.').join('/')}/infra/umadb`),
+            {rootPackage: this.model.rootPackage}
+        );
     },
 
     _runtimeConfig(appName) {

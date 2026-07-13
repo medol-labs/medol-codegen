@@ -6,13 +6,15 @@ import org.axonframework.common.configuration.ConfigurationEnhancer
 import org.axonframework.common.configuration.SearchScope
 import org.axonframework.eventsourcing.eventstore.EventStorageEngine
 import org.axonframework.eventsourcing.eventstore.inmemory.InMemoryEventStorageEngine
-import org.springframework.core.env.Environment
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import tech.medo.axon.umadb.UmaDbEventStorageEngine
-import tech.medo.axon.umadb.UmaDbEventStorageProperties
+<% if (hasInfra) { -%>
+import org.springframework.core.env.Environment
+import <%= rootPackage %>.infra.umadb.UmaDbEventStorageEngine
+import <%= rootPackage %>.infra.umadb.UmaDbEventStorageProperties
 import java.time.Duration
+<% } -%>
 
 @Configuration
 @ConditionalOnProperty(prefix = "medol.axon", name = ["event-storage"], havingValue = "inmemory")
@@ -33,6 +35,7 @@ class InMemoryAxonEventStorageConfig {
         }
 }
 
+<% if (hasInfra) { -%>
 @Configuration
 @ConditionalOnProperty(prefix = "medol.axon", name = ["event-storage"], havingValue = "umadb")
 class UmaDbAxonEventStorageConfig(private val environment: Environment) {
@@ -63,3 +66,4 @@ class UmaDbAxonEventStorageConfig(private val environment: Environment) {
             Duration.parse(environment.getProperty("medol.axon.umadb.request-timeout", "PT10S"))
         )
 }
+<% } -%>

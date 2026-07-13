@@ -152,7 +152,8 @@ const applicationWriterMethods = {
             appPort: 8080 + index,
             dbPort: 5432 + index,
             dbName: safeDatabaseName(appName),
-            composeFile: this.modulePrefix ? '../docker-compose.yml' : 'docker-compose.yml'
+            composeFile: this.modulePrefix ? '../docker-compose.yml' : 'docker-compose.yml',
+            dockerComposeEnabled: this.modulePrefix ? 'false' : 'true'
         };
     },
 

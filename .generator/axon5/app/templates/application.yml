@@ -6,6 +6,7 @@ spring:
     name: <%= appName %>
   docker:
     compose:
+      enabled: ${SPRING_DOCKER_COMPOSE_ENABLED:<%= dockerComposeEnabled %>}
       file: ${DOCKER_COMPOSE_FILE:<%= composeFile %>}
       lifecycle-management: start-and-stop
       profiles:

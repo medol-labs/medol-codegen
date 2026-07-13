@@ -14,7 +14,7 @@ Generated from Medol CodegenModel for Axon Framework 5.1.1.
 ```
 
 <% if (modulePrefix) { -%>
-Spring Boot starts PostgreSQL and Axon Server from `../docker-compose.yml` automatically in the default Axon Server mode. To manage them manually from this module directory:
+Start PostgreSQL and Axon Server from the shared `../docker-compose.yml`, then run the module:
 
 ```bash
 docker compose -f ../docker-compose.yml --profile axon-server up -d

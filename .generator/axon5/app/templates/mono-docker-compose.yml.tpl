@@ -1,6 +1,6 @@
 services:
   axon-server:
-    image: axoniq/axonserver:latest-jdk-21
+    image: axoniq/axonserver:2026.0.3-jdk-21
     hostname: axon-server
     profiles:
       - axon-server
@@ -9,6 +9,7 @@ services:
       - "${AXON_SERVER_GRPC_PORT:-8124}:8124"
     environment:
       axoniq_axonserver_hostname: axon-server
+      axoniq_axonserver_autocluster_first: axon-server
       axoniq_axonserver_autocluster_dcb: "true"
       axoniq_axonserver_autocluster_contexts: _admin,default
     volumes:

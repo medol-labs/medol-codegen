@@ -39,6 +39,14 @@ axon:
 medol:
   axon:
     event-storage: ${MEDOL_AXON_EVENT_STORAGE:axon-server}
+<% if (externalSystems.length > 0) { -%>
+
+external:
+<% externalSystems.forEach((external) => { -%>
+  <%= external.configKey %>:
+    endpoint: ${<%= external.endpointEnv %>:}
+<% }) -%>
+<% } -%>
 
 management:
   endpoints:

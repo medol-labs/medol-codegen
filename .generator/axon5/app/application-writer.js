@@ -5,8 +5,13 @@
 
 const path = require('path');
 const {configureValueTypes} = require('../../common/util/generator');
-const {pascal, kebab, safeDatabaseName, filterModelByDeployment} = require('./model-helpers');
+const {pascal, kebab, safeDatabaseName, safeIdentifier, filterModelByDeployment} = require('./model-helpers');
 const {writeMetadataSupport} = require('./metadata-support');
+
+function lowerCamel(value) {
+    const name = pascal(value);
+    return safeIdentifier(name.charAt(0).toLowerCase() + name.slice(1));
+}
 
 const applicationWriterMethods = {
     _isMonoMode() {
@@ -136,6 +141,7 @@ const applicationWriterMethods = {
         this._writeFieldOptionEnums();
         this._writeConceptStates();
         this._writeConceptCatalog();
+        this._writeExternalSystems();
         if (!this.modulePrefix) {
             this._writeAgentSkills();
         }
@@ -153,8 +159,112 @@ const applicationWriterMethods = {
             dbPort: 5432 + index,
             dbName: safeDatabaseName(appName),
             composeFile: this.modulePrefix ? '../docker-compose.yml' : 'docker-compose.yml',
-            dockerComposeEnabled: this.modulePrefix ? 'false' : 'true'
+            dockerComposeEnabled: this.modulePrefix ? 'false' : 'true',
+            externalSystems: this._externalSystemConfigs()
         };
+    },
+
+    _externalSystemConfigs() {
+        return (this.model.externalSystems ?? []).map((external) => ({
+            ...external,
+            className: pascal(external.name),
+            configKey: kebab(external.name),
+            endpointEnv: external.endpoint?.type === 'config' ? external.endpoint.key : `${kebab(external.name).toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_URL`
+        }));
+    },
+
+    _writeExternalSystems() {
+        const externalSystems = this._externalSystemConfigs();
+        for (const external of externalSystems) {
+            this.fs.write(
+                this._kotlinPath(`external/${external.className}Properties.kt`),
+                this._renderExternalProperties(external)
+            );
+            this.fs.write(
+                this._kotlinPath(`external/${external.className}Client.kt`),
+                this._renderExternalClient(external)
+            );
+            if ((external.capabilities ?? []).some((capability) => capability.type === 'event')) {
+                this.fs.write(
+                    this._kotlinPath(`external/${external.className}EventResource.kt`),
+                    this._renderExternalEventResource(external)
+                );
+            }
+        }
+    },
+
+    _renderExternalProperties(external) {
+        return `package ${this.model.rootPackage}.external
+
+import org.springframework.boot.context.properties.ConfigurationProperties
+
+@ConfigurationProperties(prefix = "external.${external.configKey}")
+data class ${external.className}Properties(
+    var endpoint: String = ""
+)
+`;
+    },
+
+    _renderExternalClient(external) {
+        const commandMethods = (external.capabilities ?? [])
+            .filter((capability) => capability.type === 'command')
+            .map((capability) => this._renderExternalCommandMethod(capability))
+            .join('\n\n');
+        return `package ${this.model.rootPackage}.external
+
+import org.springframework.stereotype.Component
+import org.springframework.web.client.RestClient
+
+@Component
+class ${external.className}Client(
+    private val properties: ${external.className}Properties,
+    restClientBuilder: RestClient.Builder
+) {
+    private val restClient: RestClient by lazy {
+        restClientBuilder.baseUrl(properties.endpoint.trimEnd('/')).build()
+    }${commandMethods ? `\n\n${commandMethods}` : ''}
+}
+`;
+    },
+
+    _renderExternalCommandMethod(capability) {
+        const methodName = lowerCamel(capability.name);
+        const route = kebab(capability.name);
+        return `    fun ${methodName}(payload: Any): String? =
+        restClient.post()
+            .uri("/${route}")
+            .body(payload)
+            .retrieve()
+            .body(String::class.java)`;
+    },
+
+    _renderExternalEventResource(external) {
+        const eventMethods = (external.capabilities ?? [])
+            .filter((capability) => capability.type === 'event')
+            .map((capability) => this._renderExternalEventMethod(capability))
+            .join('\n\n');
+        return `package ${this.model.rootPackage}.external
+
+import org.springframework.http.ResponseEntity
+import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RestController
+
+@RestController
+@RequestMapping("/external/${external.configKey}/events")
+class ${external.className}EventResource {
+${eventMethods}
+}
+`;
+    },
+
+    _renderExternalEventMethod(capability) {
+        const methodName = lowerCamel(capability.name);
+        const route = kebab(capability.name);
+        return `    @PostMapping("/${route}")
+    fun ${methodName}(@RequestBody payload: Map<String, Any?>): ResponseEntity<Void> =
+        ResponseEntity.accepted().build()`;
     },
 
     _writeAgentSkills() {

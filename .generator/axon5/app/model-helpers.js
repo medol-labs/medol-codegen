@@ -745,6 +745,7 @@ function filterModelByDeployment(model, deployment) {
         aggregates: (model.aggregates ?? []).filter(inContext),
         concepts: (model.concepts ?? []).filter(inContext),
         transitions: (model.transitions ?? []).filter(inContext),
+        externalSystems: (model.externalSystems ?? []).filter(inContext),
         slices
     };
 }

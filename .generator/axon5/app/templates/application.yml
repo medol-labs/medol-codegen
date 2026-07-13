@@ -25,6 +25,10 @@ spring:
     locations: classpath:db/migration
 
 axon:
+  converter:
+    general: jackson2
+    messages: jackson2
+    events: jackson2
   axonserver:
     enabled: ${AXON_SERVER_ENABLED:true}
     servers: ${AXON_SERVER_SERVERS:localhost:8124}

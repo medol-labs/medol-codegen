@@ -22,6 +22,13 @@ services:
       retries: 10
       start_period: 30s
 
+  umadb:
+    image: umadb/umadb:latest
+    ports:
+      - "50051:50051"
+    volumes:
+      - ./volumes/umadb:/data
+
 <% deployments.forEach((deployment) => { -%>
   <%= deployment.serviceName %>-postgres:
     image: postgres:16

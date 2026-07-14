@@ -38,6 +38,13 @@ services:
       retries: 10
       start_period: 30s
 
+  umadb:
+    image: umadb/umadb:latest
+    ports:
+      - "50051:50051"
+    volumes:
+      - ./volumes/umadb:/data
+
 volumes:
   postgres_data:
   axon_server_data:

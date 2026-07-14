@@ -100,9 +100,8 @@ Use the generated experimental UmaDB event store adapter from the `infra` module
 cd ..
 <% } -%>
 SPRING_PROFILES_ACTIVE=umadb \
-UMADB_ENDPOINT=http://localhost:8529 \
-UMADB_DATABASE=<%= appName %>_events \
-UMADB_APPEND_PATH=/api/v1/events/append \
+UMADB_TARGET=localhost:50051 \
+UMADB_PLAINTEXT=true \
 <% if (modulePrefix) { -%>
 ./mvnw -pl <%= modulePrefix %> -am spring-boot:run
 <% } else if (hasInfra) { -%>
@@ -112,7 +111,7 @@ UMADB_APPEND_PATH=/api/v1/events/append \
 <% } -%>
 ```
 
-The UmaDB adapter is an experimental EventStorageEngine boundary. It includes HTTP append wiring, but production use still requires completing and validating source, stream, tracking token, and DCB consistency behavior against the selected UmaDB protocol.
+The UmaDB adapter is an experimental EventStorageEngine boundary over UmaDB's official `umadb.v1.DCB` gRPC service. It includes append wiring through the generated gRPC stub, but production use still requires completing and validating source, stream, tracking token, and Axon DCB condition mapping.
 
 <% } -%>
 ## Seed Development Data

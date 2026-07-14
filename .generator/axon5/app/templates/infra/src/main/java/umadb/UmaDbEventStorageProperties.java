@@ -1,87 +1,58 @@
 package <%= rootPackage %>.infra.umadb;
 
-import java.net.URI;
 import java.time.Duration;
-import java.util.Objects;
 
 public final class UmaDbEventStorageProperties {
-    private final URI endpoint;
-    private final String database;
-    private final String eventCollection;
-    private final String tagCollection;
-    private final String tokenCollection;
-    private final String appendPath;
-    private final String token;
+    private final String target;
+    private final boolean plaintext;
+    private final String apiKey;
+    private final int batchSize;
     private final Duration requestTimeout;
 
     public UmaDbEventStorageProperties(
-            URI endpoint,
-            String database,
-            String eventCollection,
-            String tagCollection,
-            String tokenCollection,
-            String appendPath,
-            String token,
+            String target,
+            boolean plaintext,
+            String apiKey,
+            int batchSize,
             Duration requestTimeout
     ) {
-        this.endpoint = Objects.requireNonNull(endpoint, "endpoint");
-        this.database = requireText(database, "database");
-        this.eventCollection = requireText(eventCollection, "eventCollection");
-        this.tagCollection = requireText(tagCollection, "tagCollection");
-        this.tokenCollection = requireText(tokenCollection, "tokenCollection");
-        this.appendPath = requireText(appendPath, "appendPath");
-        this.token = token == null ? "" : token;
+        this.target = requireText(target, "target");
+        this.plaintext = plaintext;
+        this.apiKey = apiKey == null ? "" : apiKey;
+        this.batchSize = batchSize <= 0 ? 256 : batchSize;
         this.requestTimeout = requestTimeout == null ? Duration.ofSeconds(10) : requestTimeout;
     }
 
     public static UmaDbEventStorageProperties of(
-            String endpoint,
-            String database,
-            String eventCollection,
-            String tagCollection,
-            String tokenCollection,
-            String appendPath,
-            String token,
+            String target,
+            boolean plaintext,
+            String apiKey,
+            int batchSize,
             Duration requestTimeout
     ) {
         return new UmaDbEventStorageProperties(
-                URI.create(requireText(endpoint, "endpoint")),
-                database,
-                eventCollection,
-                tagCollection,
-                tokenCollection,
-                appendPath,
-                token,
+                target,
+                plaintext,
+                apiKey,
+                batchSize,
                 requestTimeout
         );
     }
 
-    public URI endpoint() {
-        return endpoint;
+    public String target() {
+        return target;
     }
 
-    public String database() {
-        return database;
+    public boolean plaintext() {
+        return plaintext;
     }
 
-    public String eventCollection() {
-        return eventCollection;
+    public String apiKey() {
+        return apiKey;
     }
 
-    public String tagCollection() {
-        return tagCollection;
-    }
-
-    public String tokenCollection() {
-        return tokenCollection;
-    }
-
-    public String appendPath() {
-        return appendPath;
-    }
-
-    public String token() {
-        return token;
+    public int batchSize() {
+        return batchSize;
     }
 
     public Duration requestTimeout() {

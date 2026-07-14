@@ -7,9 +7,6 @@ public interface UmaDbClient {
     CompletableFuture<AppendResult> append(AppendRequest request);
 
     record AppendRequest(
-            String database,
-            String eventCollection,
-            String tagCollection,
             List<StoredEvent> events
     ) {
         public AppendRequest {
@@ -17,6 +14,6 @@ public interface UmaDbClient {
         }
     }
 
-    record AppendResult(long firstSequence, long lastSequence) {
+    record AppendResult(long position) {
     }
 }

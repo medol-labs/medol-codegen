@@ -24,7 +24,7 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
     private final UmaDbClient client;
 
     public UmaDbEventStorageEngine(UmaDbEventStorageProperties properties) {
-        this(properties, new HttpUmaDbClient(properties));
+        this(properties, new GrpcUmaDbClient(properties));
     }
 
     public UmaDbEventStorageEngine(UmaDbEventStorageProperties properties, UmaDbClient client) {
@@ -39,9 +39,6 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
             List<TaggedEventMessage<?>> events
     ) {
         var request = new UmaDbClient.AppendRequest(
-                properties.database(),
-                properties.eventCollection(),
-                properties.tagCollection(),
                 events.stream()
                         .map(UmaDbEventStorageEngine::toStoredEvent)
                         .toList()
@@ -77,12 +74,10 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
     @Override
     public void describeTo(ComponentDescriptor descriptor) {
         descriptor.describeProperty("type", "UmaDbEventStorageEngine");
-        descriptor.describeProperty("endpoint", properties.endpoint().toString());
-        descriptor.describeProperty("database", properties.database());
-        descriptor.describeProperty("eventCollection", properties.eventCollection());
-        descriptor.describeProperty("tagCollection", properties.tagCollection());
-        descriptor.describeProperty("tokenCollection", properties.tokenCollection());
-        descriptor.describeProperty("appendPath", properties.appendPath());
+        descriptor.describeProperty("protocol", "grpc");
+        descriptor.describeProperty("target", properties.target());
+        descriptor.describeProperty("plaintext", properties.plaintext());
+        descriptor.describeProperty("batchSize", properties.batchSize());
     }
 
     private static StoredEvent toStoredEvent(TaggedEventMessage<?> tagged) {
@@ -118,7 +113,7 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
 
         @Override
         public CompletableFuture<ConsistencyMarker> afterCommit(UmaDbClient.AppendResult result) {
-            return CompletableFuture.completedFuture(new GlobalIndexConsistencyMarker(result.lastSequence()));
+            return CompletableFuture.completedFuture(new GlobalIndexConsistencyMarker(result.position()));
         }
     }
 }

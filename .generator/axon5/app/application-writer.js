@@ -176,6 +176,7 @@ const applicationWriterMethods = {
             this.destinationPath(`infra/src/main/java/${this.model.rootPackage.split('.').join('/')}/infra/umadb`),
             {rootPackage: this.model.rootPackage}
         );
+        this.fs.copy(this.templatePath('infra/src/main/proto'), this.destinationPath('infra/src/main/proto'));
     },
 
     _runtimeConfig(appName) {

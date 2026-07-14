@@ -56,13 +56,10 @@ class UmaDbAxonEventStorageConfig(private val environment: Environment) {
 
     private fun umaDbProperties(): UmaDbEventStorageProperties =
         UmaDbEventStorageProperties.of(
-            environment.getRequiredProperty("medol.axon.umadb.endpoint"),
-            environment.getRequiredProperty("medol.axon.umadb.database"),
-            environment.getProperty("medol.axon.umadb.event-collection", "events"),
-            environment.getProperty("medol.axon.umadb.tag-collection", "event_tags"),
-            environment.getProperty("medol.axon.umadb.token-collection", "tracking_tokens"),
-            environment.getProperty("medol.axon.umadb.append-path", "/api/v1/events/append"),
-            environment.getProperty("medol.axon.umadb.token", ""),
+            environment.getRequiredProperty("medol.axon.umadb.target"),
+            environment.getProperty("medol.axon.umadb.plaintext", "true").toBoolean(),
+            environment.getProperty("medol.axon.umadb.api-key", ""),
+            environment.getProperty("medol.axon.umadb.batch-size", "256").toInt(),
             Duration.parse(environment.getProperty("medol.axon.umadb.request-timeout", "PT10S"))
         )
 }

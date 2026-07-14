@@ -20,7 +20,7 @@
         <java.version>21</java.version>
         <axon.version>5.1.1</axon.version>
         <grpc.version>1.79.0</grpc.version>
-        <protobuf.version>4.32.1</protobuf.version>
+        <protobuf.version>4.34.0</protobuf.version>
     </properties>
 
     <build>
@@ -32,6 +32,13 @@
             </extension>
         </extensions>
         <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <skip>true</skip>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.xolstice.maven.plugins</groupId>
                 <artifactId>protobuf-maven-plugin</artifactId>
@@ -102,6 +109,11 @@
             <groupId>javax.annotation</groupId>
             <artifactId>javax.annotation-api</artifactId>
             <version>1.3.2</version>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 </project>

@@ -47,6 +47,7 @@ const applicationWriterMethods = {
             })
         });
         this.fs.copy(this.templatePath('gitignore'), this.destinationPath('.gitignore'));
+        this.fs.copy(this.templatePath('env.example'), this.destinationPath('.env.example'));
         this._copyMavenWrapper();
         this._writeDevSeedScript();
         this._writeAgentSkills();
@@ -140,16 +141,15 @@ const applicationWriterMethods = {
             ...runtime,
             hasInfra
         });
-        this.fs.copy(this.templatePath('application-inmemory.yml'), this._destPath('src/main/resources/application-inmemory.yml'));
-        if (hasInfra) {
-            this.fs.copy(this.templatePath('application-umadb.yml'), this._destPath('src/main/resources/application-umadb.yml'));
-        }
         if (!this.modulePrefix) {
             this.fs.copyTpl(this.templatePath('docker-compose.yml'), this._destPath('docker-compose.yml'), runtime);
         }
         this.fs.copy(this.templatePath('V1__baseline.sql'), this._destPath('src/main/resources/db/migration/V1__baseline.sql'));
         this.fs.copy(this.templatePath('gitignore'), this._destPath('.gitignore'));
         if (!this.modulePrefix) {
+            if (hasInfra) {
+                this.fs.copy(this.templatePath('env.example'), this._destPath('.env.example'));
+            }
             this._copyMavenWrapper();
             this._writeDevSeedScript();
         }
@@ -176,6 +176,11 @@ const applicationWriterMethods = {
             this.destinationPath(`infra/src/main/java/${this.model.rootPackage.split('.').join('/')}/infra/umadb`),
             {rootPackage: this.model.rootPackage}
         );
+        this.fs.copyTpl(
+            this.templatePath('infra/src/test/java/umadb'),
+            this.destinationPath(`infra/src/test/java/${this.model.rootPackage.split('.').join('/')}/infra/umadb`),
+            {rootPackage: this.model.rootPackage}
+        );
         this.fs.copy(this.templatePath('infra/src/main/proto'), this.destinationPath('infra/src/main/proto'));
     },
 
@@ -187,6 +192,7 @@ const applicationWriterMethods = {
             dbPort: 5432 + index,
             dbName: safeDatabaseName(appName),
             composeFile: this.modulePrefix ? '../docker-compose.yml' : 'docker-compose.yml',
+            envFile: this.modulePrefix ? '../.env' : '.env',
             dockerComposeEnabled: this.modulePrefix ? 'false' : 'true',
             externalSystems: this._externalSystemConfigs()
         };

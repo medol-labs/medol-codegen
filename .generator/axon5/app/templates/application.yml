@@ -2,6 +2,8 @@ server:
   port: ${SERVER_PORT:<%= appPort %>}
 
 spring:
+  config:
+    import: optional:file:<%= envFile %>[.properties]
   application:
     name: <%= appName %>
   docker:
@@ -25,12 +27,14 @@ spring:
     locations: classpath:db/migration
 
 axon:
+  update-check:
+    disabled: ${AXON_UPDATE_CHECK_DISABLED:false}
   converter:
     general: jackson2
     messages: jackson2
     events: jackson2
   axonserver:
-    enabled: ${AXON_SERVER_ENABLED:true}
+    enabled: ${AXON_SERVER_ENABLED:false}
     servers: ${AXON_SERVER_SERVERS:localhost:8124}
     context: ${AXON_SERVER_CONTEXT:default}
     event-store:
@@ -38,7 +42,7 @@ axon:
 
 medol:
   axon:
-    event-storage: ${MEDOL_AXON_EVENT_STORAGE:axon-server}
+    event-storage: ${MEDOL_AXON_EVENT_STORAGE:umadb}
 <% if (hasInfra) { -%>
     umadb:
       target: ${UMADB_TARGET:localhost:50051}

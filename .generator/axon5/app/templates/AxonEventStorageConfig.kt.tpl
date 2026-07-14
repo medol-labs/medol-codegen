@@ -16,9 +16,25 @@ import <%= rootPackage %>.infra.umadb.UmaDbEventStorageProperties
 import java.time.Duration
 <% } -%>
 
+private const val AXON_SERVER_CONFIGURATION_ENHANCER =
+    "io.axoniq.framework.axonserver.connector.configuration.AxonServerConfigurationEnhancer"
+
+private fun disableAxonServerConfigurationEnhancer(): ConfigurationEnhancer =
+    object : ConfigurationEnhancer {
+        override fun order(): Int = Int.MIN_VALUE
+
+        override fun enhance(registry: ComponentRegistry) {
+            registry.disableEnhancer(AXON_SERVER_CONFIGURATION_ENHANCER)
+        }
+    }
+
 @Configuration
 @ConditionalOnProperty(prefix = "medol.axon", name = ["event-storage"], havingValue = "inmemory")
 class InMemoryAxonEventStorageConfig {
+
+    @Bean
+    fun axonServerConfigurationEnhancerDisabler(): ConfigurationEnhancer =
+        disableAxonServerConfigurationEnhancer()
 
     @Bean
     fun inMemoryEventStorageEngineConfigurationEnhancer(): ConfigurationEnhancer =
@@ -39,6 +55,10 @@ class InMemoryAxonEventStorageConfig {
 @Configuration
 @ConditionalOnProperty(prefix = "medol.axon", name = ["event-storage"], havingValue = "umadb")
 class UmaDbAxonEventStorageConfig(private val environment: Environment) {
+
+    @Bean
+    fun axonServerConfigurationEnhancerDisabler(): ConfigurationEnhancer =
+        disableAxonServerConfigurationEnhancer()
 
     @Bean
     fun umaDbEventStorageEngineConfigurationEnhancer(): ConfigurationEnhancer =

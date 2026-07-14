@@ -68,22 +68,6 @@ Use the in-memory event store for local experiments or tests that should not con
 ```bash
 <% if (modulePrefix) { -%>
 cd ..
-docker compose up -d
-SPRING_PROFILES_ACTIVE=inmemory ./mvnw -pl <%= modulePrefix %> -am spring-boot:run
-<% } else if (hasInfra) { -%>
-docker compose up -d
-SPRING_PROFILES_ACTIVE=inmemory ./mvnw -pl <module-name> -am spring-boot:run
-<% } else { -%>
-docker compose up -d
-SPRING_PROFILES_ACTIVE=inmemory ./mvnw spring-boot:run
-<% } -%>
-```
-
-Equivalent explicit properties:
-
-```bash
-<% if (modulePrefix) { -%>
-cd ..
 MEDOL_AXON_EVENT_STORAGE=inmemory AXON_SERVER_ENABLED=false ./mvnw -pl <%= modulePrefix %> -am spring-boot:run
 <% } else if (hasInfra) { -%>
 MEDOL_AXON_EVENT_STORAGE=inmemory AXON_SERVER_ENABLED=false ./mvnw -pl <module-name> -am spring-boot:run
@@ -93,15 +77,15 @@ MEDOL_AXON_EVENT_STORAGE=inmemory AXON_SERVER_ENABLED=false ./mvnw spring-boot:r
 ```
 
 <% if (hasInfra) { -%>
-Use the generated experimental UmaDB event store adapter from the `infra` module with the `umadb` profile:
+Use the generated experimental UmaDB event store adapter from the `infra` module with the root `.env` file:
 
 ```bash
 <% if (modulePrefix) { -%>
 cd ..
 <% } -%>
-SPRING_PROFILES_ACTIVE=umadb \
-UMADB_TARGET=localhost:50051 \
-UMADB_PLAINTEXT=true \
+cp .env.example .env
+# Edit .env if local ports or endpoints differ.
+docker compose up -d umadb <% if (modulePrefix) { -%><%= modulePrefix %>-postgres<% } else { -%><module-name>-postgres<% } -%>
 <% if (modulePrefix) { -%>
 ./mvnw -pl <%= modulePrefix %> -am spring-boot:run
 <% } else if (hasInfra) { -%>

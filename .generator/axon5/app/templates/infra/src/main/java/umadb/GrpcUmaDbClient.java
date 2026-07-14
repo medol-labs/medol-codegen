@@ -146,8 +146,10 @@ public final class GrpcUmaDbClient implements UmaDbClient, AutoCloseable {
 
     private Umadb.SubscribeRequest toSubscribeRequest(UmaDbClient.SubscribeRequest request) {
         var builder = Umadb.SubscribeRequest.newBuilder()
-                .setAfter(Math.max(-1, request.after()))
                 .setBatchSize(request.batchSize());
+        if (request.after() >= 0) {
+            builder.setAfter(request.after());
+        }
         if (!request.queryItems().isEmpty()) {
             builder.setQuery(toQuery(request.queryItems()));
         }

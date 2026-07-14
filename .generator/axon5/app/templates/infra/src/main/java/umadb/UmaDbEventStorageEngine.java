@@ -2,7 +2,6 @@ package <%= rootPackage %>.infra.umadb;
 
 import org.axonframework.common.Registration;
 import org.axonframework.common.infra.ComponentDescriptor;
-import org.axonframework.eventsourcing.eventstore.AggregateBasedEventStorageEngineUtils;
 import org.axonframework.eventsourcing.eventstore.AppendCondition;
 import org.axonframework.eventsourcing.eventstore.AppendEventsTransactionRejectedException;
 import org.axonframework.eventsourcing.eventstore.ConsistencyMarker;
@@ -34,16 +33,14 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 public final class UmaDbEventStorageEngine implements EventStorageEngine {
     private static final String AXON_EVENT_VERSION = "axon_event_version";
     private static final String AXON_PAYLOAD_TYPE = "axon_payload_type";
-    private static final String AXON_AGGREGATE_ID = "axon_aggregate_id";
-    private static final String AXON_AGGREGATE_TYPE = "axon_aggregate_type";
-    private static final String AXON_AGGREGATE_SEQUENCE = "axon_aggregate_sequence";
 
     private final UmaDbEventStorageProperties properties;
     private final UmaDbClient client;
@@ -63,12 +60,9 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
             ProcessingContext processingContext,
             List<TaggedEventMessage<?>> events
     ) {
-        try {
-            AggregateBasedEventStorageEngineUtils.assertValidTags(events);
-        } catch (Exception ex) {
-            return CompletableFuture.failedFuture(ex);
-        }
-        var storedEvents = toStoredEvents(events);
+        var storedEvents = events.stream()
+                .map(UmaDbEventStorageEngine::toStoredEvent)
+                .toList();
         var request = new UmaDbClient.AppendRequest(
                 storedEvents,
                 appendCondition(appendCondition)
@@ -104,13 +98,13 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
         return client.read(request)
                 .thenApply(result -> result.events().stream()
                         .findFirst()
-                        .map(event -> (TrackingToken) new GlobalSequenceTrackingToken(Math.max(-1L, event.position() - 1)))
+                        .map(event -> (TrackingToken) new GlobalSequenceTrackingToken(event.position()))
                         .orElseGet(() -> new GlobalSequenceTrackingToken(-1)));
     }
 
     @Override
     public CompletableFuture<TrackingToken> latestToken() {
-        return client.head().thenApply(result -> new GlobalSequenceTrackingToken(result.position()));
+        return client.head().thenApply(result -> new GlobalSequenceTrackingToken(result.position() < 0 ? -1 : result.position() + 1));
     }
 
     @Override
@@ -135,14 +129,6 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
         var metadata = new HashMap<String, Object>(event.metadata());
         metadata.putIfAbsent(AXON_EVENT_VERSION, event.type().version());
         metadata.putIfAbsent(AXON_PAYLOAD_TYPE, event.payloadType().getName());
-        var aggregateIdentifier = AggregateBasedEventStorageEngineUtils.resolveAggregateIdentifier(tagged.tags());
-        if (aggregateIdentifier != null) {
-            metadata.putIfAbsent(AXON_AGGREGATE_ID, aggregateIdentifier);
-        }
-        var aggregateType = AggregateBasedEventStorageEngineUtils.resolveAggregateType(tagged.tags());
-        if (aggregateType != null) {
-            metadata.putIfAbsent(AXON_AGGREGATE_TYPE, aggregateType);
-        }
         return new StoredEvent(
                 event.identifier(),
                 event.type().name(),
@@ -151,32 +137,6 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
                 event.payload(),
                 tags
         );
-    }
-
-    private List<StoredEvent> toStoredEvents(List<TaggedEventMessage<?>> events) {
-        var nextSequences = new HashMap<String, Long>();
-        return events.stream()
-                .map(tagged -> {
-                    var stored = toStoredEvent(tagged);
-                    var aggregateId = (String) stored.metadata().get(AXON_AGGREGATE_ID);
-                    if (aggregateId == null) {
-                        return stored;
-                    }
-                    var sequence = nextSequences.compute(aggregateId, (ignored, current) ->
-                            current == null ? currentAggregateSequence(stored) + 1 : current + 1
-                    );
-                    var metadata = new HashMap<String, Object>(stored.metadata());
-                    metadata.put(AXON_AGGREGATE_SEQUENCE, String.valueOf(sequence));
-                    return new StoredEvent(
-                            stored.eventIdentifier(),
-                            stored.eventType(),
-                            stored.timestamp(),
-                            metadata,
-                            stored.payload(),
-                            stored.tags()
-                    );
-                })
-                .toList();
     }
 
     private MessageStream<EventMessage> eventStream(List<UmaDbClient.SequencedStoredEvent> events, EventsCondition condition) {
@@ -256,8 +216,16 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
     private static UmaDbClient.AppendCondition appendCondition(AppendCondition condition) {
         return new UmaDbClient.AppendCondition(
                 queryItems(condition),
-                globalPosition(condition.consistencyMarker())
+                conflictAfterPosition(condition.consistencyMarker())
         );
+    }
+
+    private static Long conflictAfterPosition(ConsistencyMarker marker) {
+        var position = globalPosition(marker);
+        if (position == null) {
+            return null;
+        }
+        return position <= 0 ? null : position - 1;
     }
 
     private static Long globalPosition(ConsistencyMarker marker) {
@@ -277,7 +245,7 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
     private static Set<Tag> axonTags(StoredEvent event) {
         return event.tags().stream()
                 .map(tag -> Tag.of(tag.key(), tag.value()))
-                .collect(java.util.stream.Collectors.toSet());
+                .collect(Collectors.toSet());
     }
 
     private static EventMessage toEventMessage(StoredEvent event) {
@@ -298,25 +266,6 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
         return result;
     }
 
-    private long currentAggregateSequence(StoredEvent event) {
-        var queryItems = event.tags().stream()
-                .map(tag -> new UmaDbClient.QueryItem(List.of(), List.of(tag.key() + "=" + tag.value())))
-                .toList();
-        var readResult = client.read(new UmaDbClient.ReadRequest(0, properties.batchSize(), queryItems)).join();
-        return readResult.events().stream()
-                .filter(stored -> sameAggregate(stored.event(), event))
-                .map(stored -> stored.event().metadata().get(AXON_AGGREGATE_SEQUENCE))
-                .filter(String.class::isInstance)
-                .map(String.class::cast)
-                .mapToLong(Long::parseLong)
-                .max()
-                .orElse(-1);
-    }
-
-    private static boolean sameAggregate(StoredEvent left, StoredEvent right) {
-        return java.util.Objects.equals(left.metadata().get(AXON_AGGREGATE_ID), right.metadata().get(AXON_AGGREGATE_ID));
-    }
-
     private static Context trackedContext(UmaDbClient.SequencedStoredEvent event) {
         var context = Context.empty();
         context = TrackingToken.addToContext(context, new GlobalSequenceTrackingToken(event.position() + 1));
@@ -334,7 +283,7 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
     }
 
     private static ConsistencyMarker afterCommitMarker(UmaDbClient.AppendResult result) {
-        return new GlobalIndexConsistencyMarker(result.position());
+        return new GlobalIndexConsistencyMarker(result.position() < 0 ? -1 : result.position() + 1);
     }
 
     private static Throwable appendException(AppendCondition condition, Throwable ex) {

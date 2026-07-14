@@ -25,6 +25,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -32,12 +33,8 @@ class UmaDbEventStorageEngineTest {
     private static final Instant NOW = Instant.parse("2026-07-14T00:00:00Z");
 
     @Test
-    void appendPassesConditionAndAggregateSequenceToUmaDb() {
+    void appendPassesDcbConditionAndTagsToUmaDb() {
         var client = new RecordingUmaDbClient();
-        client.events.add(new UmaDbClient.SequencedStoredEvent(
-                3,
-                stored("existing", "Order", Map.of("axon_aggregate_id", "order-1", "axon_aggregate_sequence", "4"), "Order", "order-1")
-        ));
         var engine = engine(client);
         var condition = AppendCondition
                 .withCriteria(EventCriteria.havingTags(Tag.of("Order", "order-1")))
@@ -45,12 +42,35 @@ class UmaDbEventStorageEngineTest {
 
         engine.appendEvents(condition, null, List.of(tagged("created", "OrderCreated", "Order", "order-1"))).join();
 
-        assertEquals(3L, client.appendRequest.condition().after());
+        assertEquals(2L, client.appendRequest.condition().after());
         assertEquals(List.of("Order=order-1"), client.appendRequest.condition().failIfEventsMatch().getFirst().tags());
         var appended = client.appendRequest.events().getFirst();
-        assertEquals("order-1", appended.metadata().get("axon_aggregate_id"));
-        assertEquals("Order", appended.metadata().get("axon_aggregate_type"));
-        assertEquals("5", appended.metadata().get("axon_aggregate_sequence"));
+        assertEquals(List.of(new StoredEventTag("Order", "order-1")), appended.tags());
+        assertFalse(appended.metadata().containsKey("axon_aggregate_id"));
+        assertFalse(appended.metadata().containsKey("axon_aggregate_type"));
+        assertFalse(appended.metadata().containsKey("axon_aggregate_sequence"));
+    }
+
+    @Test
+    void appendAllowsMultipleDcbTagsPerEvent() {
+        var client = new RecordingUmaDbClient();
+        var engine = engine(client);
+
+        engine.appendEvents(
+                AppendCondition.none(),
+                null,
+                List.of(tagged(
+                        "dictionary-registered",
+                        "DictionaryRegistered",
+                        Set.of(Tag.of("dictionaryId", "dict-1"), Tag.of("dictionaryCode", "RUNTIME_CONNECTIVITY_MODE"))
+                ))
+        ).join();
+
+        var storedTags = client.appendRequest.events().getFirst().tags().stream()
+                .map(tag -> tag.key() + "=" + tag.value())
+                .sorted()
+                .toList();
+        assertEquals(List.of("dictionaryCode=RUNTIME_CONNECTIVITY_MODE", "dictionaryId=dict-1"), storedTags);
     }
 
     @Test
@@ -102,6 +122,23 @@ class UmaDbEventStorageEngineTest {
         assertEquals(11L, TrackingToken.fromContext(entry).orElseThrow().position().orElseThrow());
     }
 
+    @Test
+    void firstAndLatestTokenUseDcbGlobalPositions() {
+        var client = new RecordingUmaDbClient();
+        client.events.add(new UmaDbClient.SequencedStoredEvent(
+                0,
+                stored("first", "OrderCreated", Map.of(), "Order", "order-1")
+        ));
+        client.events.add(new UmaDbClient.SequencedStoredEvent(
+                5,
+                stored("latest", "OrderConfirmed", Map.of(), "Order", "order-1")
+        ));
+        var engine = engine(client);
+
+        assertEquals(0L, engine.firstToken().join().position().orElseThrow());
+        assertEquals(6L, engine.latestToken().join().position().orElseThrow());
+    }
+
     private static UmaDbEventStorageEngine engine(UmaDbClient client) {
         return new UmaDbEventStorageEngine(
                 UmaDbEventStorageProperties.of("localhost:50051", true, "", 16, Duration.ofSeconds(1)),
@@ -111,6 +148,10 @@ class UmaDbEventStorageEngineTest {
 
     private static TaggedEventMessage<EventMessage> tagged(String identifier, String eventType, String tagKey, String tagValue) {
         return new TestTaggedEventMessage(event(identifier, eventType), Set.of(Tag.of(tagKey, tagValue)));
+    }
+
+    private static TaggedEventMessage<EventMessage> tagged(String identifier, String eventType, Set<Tag> tags) {
+        return new TestTaggedEventMessage(event(identifier, eventType), tags);
     }
 
     private static EventMessage event(String identifier, String eventType) {

@@ -67,16 +67,13 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
                 storedEvents,
                 appendCondition(appendCondition)
         );
-        CompletableFuture<AppendTransaction<?>> future = client.append(request)
-                .<AppendTransaction<?>>thenApply(result -> new UmaDbAppendTransaction(result, afterCommitMarker(result)))
-                .exceptionallyCompose(ex -> CompletableFuture.failedFuture(appendException(appendCondition, ex)));
-        return future;
+        return CompletableFuture.completedFuture(new UmaDbAppendTransaction(client, request, appendCondition));
     }
 
     @Override
     public MessageStream<EventMessage> source(SourcingCondition condition) {
         var start = sourceStart(condition);
-        var request = new UmaDbClient.ReadRequest(start, properties.batchSize(), queryItems(condition));
+        var request = new UmaDbClient.ReadRequest(start, null, properties.batchSize(), queryItems(condition));
         var result = client.read(request).join();
         return eventStream(result.events(), condition)
                 .concatWith(terminalStream(result.events(), start));
@@ -94,7 +91,7 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
 
     @Override
     public CompletableFuture<TrackingToken> firstToken() {
-        var request = new UmaDbClient.ReadRequest(0, 1, List.of());
+        var request = new UmaDbClient.ReadRequest(0, 1, 1, List.of());
         return client.read(request)
                 .thenApply(result -> result.events().stream()
                         .findFirst()
@@ -175,7 +172,7 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
     }
 
     private CompletableFuture<TrackingToken> readTokenAt(Instant instant, long start) {
-        var request = new UmaDbClient.ReadRequest(start, properties.batchSize(), List.of());
+        var request = new UmaDbClient.ReadRequest(start, properties.batchSize(), properties.batchSize(), List.of());
         return client.read(request).thenCompose(result -> {
             for (UmaDbClient.SequencedStoredEvent event : result.events()) {
                 if (!event.event().timestamp().isBefore(instant)) {
@@ -194,7 +191,7 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
         if (condition.strategy() instanceof SourcingStrategy.Absolute absolute) {
             return Math.max(0, GlobalIndexPosition.toIndex(absolute.position()));
         }
-        return 0;
+        throw new UnsupportedOperationException("Unsupported UmaDB sourcing strategy: " + condition.strategy());
     }
 
     private static List<UmaDbClient.QueryItem> queryItems(EventsCondition condition) {
@@ -297,22 +294,24 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
     }
 
     private record UmaDbAppendTransaction(
-            UmaDbClient.AppendResult result,
-            ConsistencyMarker marker
+            UmaDbClient client,
+            UmaDbClient.AppendRequest request,
+            AppendCondition condition
     ) implements AppendTransaction<UmaDbClient.AppendResult> {
         @Override
         public CompletableFuture<UmaDbClient.AppendResult> commit() {
-            return CompletableFuture.completedFuture(result);
+            return client.append(request)
+                    .exceptionallyCompose(ex -> CompletableFuture.failedFuture(appendException(condition, ex)));
         }
 
         @Override
         public void rollback() {
-            // UmaDB append is expected to be transactional; rollback is a no-op after client completion.
+            // No remote append happens before commit, so rollback has nothing to undo.
         }
 
         @Override
         public CompletableFuture<ConsistencyMarker> afterCommit(UmaDbClient.AppendResult result) {
-            return CompletableFuture.completedFuture(marker);
+            return CompletableFuture.completedFuture(afterCommitMarker(result));
         }
     }
 }

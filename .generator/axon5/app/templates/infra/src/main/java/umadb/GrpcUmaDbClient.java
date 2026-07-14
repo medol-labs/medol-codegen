@@ -89,7 +89,7 @@ public final class GrpcUmaDbClient implements UmaDbClient, AutoCloseable {
     @Override
     public CompletableFuture<UmaDbClient.ReadResult> subscribe(UmaDbClient.SubscribeRequest request) {
         return CompletableFuture.supplyAsync(() -> {
-            var responseIterator = blockingStub.subscribe(toSubscribeRequest(request));
+            var responseIterator = deadlineBlockingStub().subscribe(toSubscribeRequest(request));
             if (!responseIterator.hasNext()) {
                 return new UmaDbClient.ReadResult(List.of());
             }
@@ -135,9 +135,11 @@ public final class GrpcUmaDbClient implements UmaDbClient, AutoCloseable {
     private Umadb.ReadRequest toReadRequest(UmaDbClient.ReadRequest request) {
         var builder = Umadb.ReadRequest.newBuilder()
                 .setStart(Math.max(0, request.start()))
-                .setLimit(request.limit())
-                .setBatchSize(request.limit())
+                .setBatchSize(request.batchSize())
                 .setBackwards(false);
+        if (request.limit() != null) {
+            builder.setLimit(request.limit());
+        }
         if (!request.queryItems().isEmpty()) {
             builder.setQuery(toQuery(request.queryItems()));
         }

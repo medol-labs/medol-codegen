@@ -2,6 +2,8 @@ package <%= rootPackage %>.infra.umadb;
 
 import org.axonframework.eventsourcing.eventstore.AppendCondition;
 import org.axonframework.eventsourcing.eventstore.AppendEventsTransactionRejectedException;
+import org.axonframework.eventsourcing.eventstore.ConsistencyMarker;
+import org.axonframework.eventsourcing.eventstore.EventStorageEngine.AppendTransaction;
 import org.axonframework.eventsourcing.eventstore.GlobalIndexConsistencyMarker;
 import org.axonframework.eventsourcing.eventstore.SourcingCondition;
 import org.axonframework.eventsourcing.eventstore.TaggedEventMessage;
@@ -27,6 +29,7 @@ import java.util.concurrent.CompletionException;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.fail;
 
 class UmaDbEventStorageEngineTest {
@@ -40,10 +43,11 @@ class UmaDbEventStorageEngineTest {
                 .withCriteria(EventCriteria.havingTags(Tag.of("Order", "order-1")))
                 .withMarker(new GlobalIndexConsistencyMarker(3));
 
-        engine.appendEvents(condition, null, List.of(tagged("created", "OrderCreated", "Order", "order-1"))).join();
+        var marker = commit(engine.appendEvents(condition, null, List.of(tagged("created", "OrderCreated", "Order", "order-1"))).join());
 
         assertEquals(2L, client.appendRequest.condition().after());
         assertEquals(List.of("Order=order-1"), client.appendRequest.condition().failIfEventsMatch().getFirst().tags());
+        assertEquals(1L, GlobalIndexConsistencyMarker.position(marker));
         var appended = client.appendRequest.events().getFirst();
         assertEquals(List.of(new StoredEventTag("Order", "order-1")), appended.tags());
         assertFalse(appended.metadata().containsKey("axon_aggregate_id"));
@@ -56,7 +60,7 @@ class UmaDbEventStorageEngineTest {
         var client = new RecordingUmaDbClient();
         var engine = engine(client);
 
-        engine.appendEvents(
+        commit(engine.appendEvents(
                 AppendCondition.none(),
                 null,
                 List.of(tagged(
@@ -64,7 +68,7 @@ class UmaDbEventStorageEngineTest {
                         "DictionaryRegistered",
                         Set.of(Tag.of("dictionaryId", "dict-1"), Tag.of("dictionaryCode", "RUNTIME_CONNECTIVITY_MODE"))
                 ))
-        ).join();
+        ).join());
 
         var storedTags = client.appendRequest.events().getFirst().tags().stream()
                 .map(tag -> tag.key() + "=" + tag.value())
@@ -81,10 +85,35 @@ class UmaDbEventStorageEngineTest {
         var condition = AppendCondition.withCriteria(EventCriteria.havingTags(Tag.of("Order", "order-1")));
 
         var thrown = assertThrowsCompletion(() ->
-                engine.appendEvents(condition, null, List.of(tagged("created", "OrderCreated", "Order", "order-1"))).join()
+                engine.appendEvents(condition, null, List.of(tagged("created", "OrderCreated", "Order", "order-1"))).join().commit().join()
         );
 
         assertInstanceOf(AppendEventsTransactionRejectedException.class, thrown);
+    }
+
+    @Test
+    void appendWritesOnlyWhenTransactionCommits() {
+        var client = new RecordingUmaDbClient();
+        var engine = engine(client);
+
+        var rolledBack = engine.appendEvents(
+                AppendCondition.none(),
+                null,
+                List.of(tagged("rolled-back", "OrderCreated", "Order", "order-1"))
+        ).join();
+        assertNull(client.appendRequest);
+
+        rolledBack.rollback();
+        assertNull(client.appendRequest);
+
+        var committed = engine.appendEvents(
+                AppendCondition.none(),
+                null,
+                List.of(tagged("committed", "OrderCreated", "Order", "order-1"))
+        ).join();
+        commit(committed);
+
+        assertEquals("committed", client.appendRequest.events().getFirst().eventIdentifier());
     }
 
     @Test
@@ -99,6 +128,8 @@ class UmaDbEventStorageEngineTest {
         var entry = stream.next().orElseThrow();
         var token = TrackingToken.fromContext(entry).orElseThrow();
 
+        assertNull(client.readRequest.limit());
+        assertEquals(16, client.readRequest.batchSize());
         assertEquals("stored", entry.message().identifier());
         assertEquals(8L, token.position().orElseThrow());
     }
@@ -175,6 +206,13 @@ class UmaDbEventStorageEngineTest {
         );
     }
 
+    @SuppressWarnings("unchecked")
+    private static ConsistencyMarker commit(AppendTransaction<?> transaction) {
+        var typed = (AppendTransaction<UmaDbClient.AppendResult>) transaction;
+        var result = typed.commit().join();
+        return typed.afterCommit(result).join();
+    }
+
     private static Throwable assertThrowsCompletion(Runnable runnable) {
         try {
             runnable.run();
@@ -197,6 +235,7 @@ class UmaDbEventStorageEngineTest {
     private static final class RecordingUmaDbClient implements UmaDbClient {
         private final List<UmaDbClient.SequencedStoredEvent> events = new ArrayList<>();
         private AppendRequest appendRequest;
+        private ReadRequest readRequest;
         private SubscribeRequest subscribeRequest;
         private RuntimeException appendFailure;
 
@@ -215,6 +254,7 @@ class UmaDbEventStorageEngineTest {
 
         @Override
         public CompletableFuture<ReadResult> read(ReadRequest request) {
+            readRequest = request;
             return CompletableFuture.completedFuture(new ReadResult(selectAfter(request.start() - 1, request.limit(), request.queryItems())));
         }
 
@@ -230,11 +270,12 @@ class UmaDbEventStorageEngineTest {
             return CompletableFuture.completedFuture(new HeadResult(position));
         }
 
-        private List<UmaDbClient.SequencedStoredEvent> selectAfter(long after, int limit, List<QueryItem> queryItems) {
+        private List<UmaDbClient.SequencedStoredEvent> selectAfter(long after, Integer limit, List<QueryItem> queryItems) {
+            var max = limit == null ? Long.MAX_VALUE : limit.longValue();
             return events.stream()
                     .filter(event -> event.position() > after)
                     .filter(event -> matchesAny(event.event(), queryItems))
-                    .limit(limit)
+                    .limit(max)
                     .toList();
         }
 

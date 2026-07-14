@@ -35,7 +35,8 @@ public interface UmaDbClient {
 
     record ReadRequest(
             long start,
-            int limit,
+            Integer limit,
+            int batchSize,
             List<QueryItem> queryItems
     ) {
         public ReadRequest {

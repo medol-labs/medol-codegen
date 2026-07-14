@@ -77,7 +77,7 @@ MEDOL_AXON_EVENT_STORAGE=inmemory AXON_SERVER_ENABLED=false ./mvnw spring-boot:r
 ```
 
 <% if (hasInfra) { -%>
-Use the generated experimental UmaDB event store adapter from the `infra` module with the root `.env` file:
+Use the generated UmaDB DCB event store adapter from the `infra` module with the root `.env` file:
 
 ```bash
 <% if (modulePrefix) { -%>
@@ -95,7 +95,7 @@ docker compose up -d umadb <% if (modulePrefix) { -%><%= modulePrefix %>-postgre
 <% } -%>
 ```
 
-The UmaDB adapter is an experimental EventStorageEngine boundary over UmaDB's official `umadb.v1.DCB` gRPC service. It includes append wiring through the generated gRPC stub, but production use still requires completing and validating source, stream, tracking token, and Axon DCB condition mapping.
+The UmaDB adapter implements Axon Framework's `EventStorageEngine` boundary over UmaDB's official `umadb.v1.DCB` gRPC service: events are stored with DCB tags, Axon event criteria are mapped to UmaDB queries, conditional append uses UmaDB's DCB conflict condition, and source/stream tokens use Axon's global next-position semantics. Axon processor checkpoints still use the generated `token_entry` table; UmaDB's optional `TrackingInfo` API is not used as an Axon token store.
 
 <% } -%>
 ## Seed Development Data

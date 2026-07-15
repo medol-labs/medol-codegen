@@ -194,7 +194,8 @@ const applicationWriterMethods = {
             composeFile: this.modulePrefix ? '../docker-compose.yml' : 'docker-compose.yml',
             envFile: this.modulePrefix ? '../.env' : '.env',
             dockerComposeEnabled: this.modulePrefix ? 'false' : 'true',
-            externalSystems: this._externalSystemConfigs()
+            externalSystems: this._externalSystemConfigs(),
+            integrationClients: this._integrationClientConfigs()
         };
     },
 
@@ -205,6 +206,20 @@ const applicationWriterMethods = {
             configKey: kebab(external.name),
             endpointEnv: external.endpoint?.type === 'config' ? external.endpoint.key : `${kebab(external.name).toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_URL`
         }));
+    },
+
+    _integrationClientConfigs() {
+        const localContexts = new Set((this.model.contexts ?? []).map((context) => context.name));
+        return (this.fullModel?.deployments ?? this.model.deployments ?? [])
+            .filter((deployment) => !(deployment.contexts ?? []).some((context) => localContexts.has(context.name)))
+            .map((deployment) => {
+                const configKey = kebab(deployment.name);
+                return {
+                    name: deployment.name,
+                    configKey,
+                    endpointEnv: `${configKey.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_URL`
+                };
+            });
     },
 
     _writeExternalSystems() {
@@ -246,17 +261,13 @@ data class ${external.className}Properties(
             .join('\n\n');
         return `package ${this.model.rootPackage}.external
 
-import org.springframework.stereotype.Component
-import org.springframework.web.client.RestClient
+import org.springframework.cloud.openfeign.FeignClient
+import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestBody
 
-@Component
-class ${external.className}Client(
-    private val properties: ${external.className}Properties,
-    restClientBuilder: RestClient.Builder
-) {
-    private val restClient: RestClient by lazy {
-        restClientBuilder.baseUrl(properties.endpoint.trimEnd('/')).build()
-    }${commandMethods ? `\n\n${commandMethods}` : ''}
+@FeignClient(name = "${external.configKey}", url = "\\${'${'}external.${external.configKey}.endpoint:}")
+interface ${external.className}Client {
+${commandMethods}
 }
 `;
     },
@@ -264,12 +275,8 @@ class ${external.className}Client(
     _renderExternalCommandMethod(capability) {
         const methodName = lowerCamel(capability.name);
         const route = kebab(capability.name);
-        return `    fun ${methodName}(payload: Any): String? =
-        restClient.post()
-            .uri("/${route}")
-            .body(payload)
-            .retrieve()
-            .body(String::class.java)`;
+        return `    @PostMapping("/${route}")
+    fun ${methodName}(@RequestBody payload: Map<String, Any?>): Any?`;
     },
 
     _renderExternalEventResource(external) {

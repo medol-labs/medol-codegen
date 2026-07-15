@@ -8,6 +8,7 @@ const {selectionWriterMethods} = require('./selection-writer');
 const {commandWriterMethods} = require('./command-writer');
 const {stateWriterMethods} = require('./state-writer');
 const {readModelWriterMethods} = require('./read-model-writer');
+const {processorWriterMethods} = require('./processor-writer');
 
 const sliceWriterMethods = Object.assign(
     {},
@@ -15,7 +16,8 @@ const sliceWriterMethods = Object.assign(
     selectionWriterMethods,
     commandWriterMethods,
     stateWriterMethods,
-    readModelWriterMethods
+    readModelWriterMethods,
+    processorWriterMethods
 );
 
 module.exports = {sliceWriterMethods};

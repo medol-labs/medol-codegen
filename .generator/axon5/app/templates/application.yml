@@ -59,6 +59,14 @@ external:
     endpoint: ${<%= external.endpointEnv %>:}
 <% }) -%>
 <% } -%>
+<% if (integrationClients.length > 0) { -%>
+
+integration:
+<% integrationClients.forEach((client) => { -%>
+  <%= client.configKey %>:
+    endpoint: ${<%= client.endpointEnv %>:}
+<% }) -%>
+<% } -%>
 
 management:
   endpoints:

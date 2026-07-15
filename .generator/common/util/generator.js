@@ -38,53 +38,55 @@ function idType(element) {
 }
 
 const typeMapping = (fieldType, fieldCardinality, optional, mutable) => {
+    const isList = fieldCardinality?.toLowerCase() === "list";
+    const typeOptional = isList ? false : optional;
     var fieldType;
     switch (fieldType?.toLowerCase()) {
         case "string":
-            fieldType = optional ? "String?" : "String";
+            fieldType = typeOptional ? "String?" : "String";
             break
         case "double":
-            fieldType = optional ? "Double?" : "Double";
+            fieldType = typeOptional ? "Double?" : "Double";
             break
         case "float":
-            fieldType = optional ? "Float?" : "Float";
+            fieldType = typeOptional ? "Float?" : "Float";
             break
         case "decimal":
         case "bigdecimal":
-            fieldType = optional ? "BigDecimal?" : "BigDecimal";
+            fieldType = typeOptional ? "BigDecimal?" : "BigDecimal";
             break
         case "number":
-            fieldType = optional ? "Double?" : "Double";
+            fieldType = typeOptional ? "Double?" : "Double";
             break
         case "int":
-            fieldType = optional ? "Int?" : "Int";
+            fieldType = typeOptional ? "Int?" : "Int";
             break
         case "long":
-            fieldType = optional ? "Long?" : "Long";
+            fieldType = typeOptional ? "Long?" : "Long";
             break
         case "boolean":
-            fieldType = optional ? "Boolean?" : "Boolean";
+            fieldType = typeOptional ? "Boolean?" : "Boolean";
             break
         case "date":
-            fieldType = optional ? "LocalDate?" : "LocalDate";
+            fieldType = typeOptional ? "LocalDate?" : "LocalDate";
             break
         case "datetime":
-            fieldType = optional ? "LocalDateTime?" : "LocalDateTime";
+            fieldType = typeOptional ? "LocalDateTime?" : "LocalDateTime";
             break
         case "uuid":
-            fieldType = optional ? "UUID?" : "UUID";
+            fieldType = typeOptional ? "UUID?" : "UUID";
             break
         default: {
             const state = conceptState(fieldType);
             fieldType = state
-                ? (optional ? `${state.typeName}?` : state.typeName)
+                ? (typeOptional ? `${state.typeName}?` : state.typeName)
                 : isValueType(fieldType)
-                ? (optional ? `${fieldType}?` : fieldType)
-                : (optional ? "String?" : "String");
+                ? (typeOptional ? `${fieldType}?` : fieldType)
+                : (typeOptional ? "String?" : "String");
             break
         }
     }
-    if (fieldCardinality?.toLowerCase() === "list") {
+    if (isList) {
         return mutable ? `MutableList<${fieldType}>` : `List<${fieldType}>`
     } else {
         return fieldType

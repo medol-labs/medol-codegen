@@ -105,6 +105,7 @@ const sliceOrchestratorMethods = {
             this._writeCommandResource(packageName, context, slicePackage, slice);
         }
         slice.readmodels.forEach((readmodel) => this._writeReadModel(packageName, context, slicePackage, slice, readmodel));
+        this._writeProcessors(slice);
     },
 };
 

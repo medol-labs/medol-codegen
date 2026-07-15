@@ -569,7 +569,8 @@ function mappedType(field, optional = field.optional) {
     const optionSet = fieldOptionsFor(field);
     const cardinality = field.cardinality === 'Multiple' ? 'List' : field.cardinality;
     if (optionSet) {
-        const fieldType = optional ? `${optionSet.enumName}?` : optionSet.enumName;
+        const typeOptional = cardinality?.toLowerCase() === 'list' ? false : optional;
+        const fieldType = typeOptional ? `${optionSet.enumName}?` : optionSet.enumName;
         return cardinality?.toLowerCase() === 'list'
             ? field.mutable ? `MutableList<${fieldType}>` : `List<${fieldType}>`
             : fieldType;

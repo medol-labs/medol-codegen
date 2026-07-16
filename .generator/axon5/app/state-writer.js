@@ -88,14 +88,60 @@ function isFailureOutcome(event) {
     return name.includes('fail') || name.includes('failure') || name.includes('reject') || name.includes('block');
 }
 
-function hasBooleanField(command, fieldName) {
-    return (command.fields ?? []).some((field) =>
-        field.name === fieldName && String(field.type).toLowerCase() === 'boolean'
-    );
+function isExternalCapabilityCommand(command) {
+    const name = pascal(command.name ?? command.title ?? '');
+    return ['Verify', 'Authorize', 'Inspect', 'Evaluate'].some((prefix) => name.startsWith(prefix));
+}
+
+function portCapability(command) {
+    const name = pascal(command.name ?? command.title ?? '');
+    const patterns = [
+        {prefix: 'Verify', suffix: 'Verifier', nounSuffix: 'Verification'},
+        {prefix: 'Authorize', suffix: 'Authorizer', nounSuffix: 'Authorization'},
+        {prefix: 'Inspect', suffix: 'Inspector', nounSuffix: 'Inspection'},
+        {prefix: 'Evaluate', suffix: 'Evaluator', nounSuffix: 'Evaluation'}
+    ];
+    const pattern = patterns.find((candidate) => name.startsWith(candidate.prefix));
+    if (!pattern) {
+        return {
+            resultName: `${name}Result`
+        };
+    }
+    const subject = name.slice(pattern.prefix.length);
+    return {
+        resultName: `${subject}${pattern.nounSuffix}`
+    };
+}
+
+function isExternalPortCommand(command, outputs) {
+    return outputs.length === 2 && isExternalCapabilityCommand(command) && outputs.some(isFailureOutcome);
 }
 
 function normalizeOutcomeName(value) {
     return String(value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function resultEventArgument(field, command, resultVariable) {
+    if (field.idAttribute || field.technicalAttribute) {
+        const commandField = (command.fields ?? []).find((candidate) => candidate.name === field.name);
+        if (commandField) return `${field.name} = command.${field.name}`;
+    }
+    if (field.name === 'failedAt' || field.name === 'verifiedAt') {
+        return `${field.name} = ${resultVariable}.${field.name}`;
+    }
+    return `${field.name} = ${resultVariable}.${field.name}`;
+}
+
+function unavailableEventArgument(field, command, resultVariable, fallbackTime = 'now') {
+    const commandField = (command.fields ?? []).find((candidate) => candidate.name === field.name);
+    if (field.name === 'failedAt' || field.name === 'verifiedAt') return `${field.name} = ${fallbackTime}`;
+    if (field.name === 'failureReason') return `${field.name} = ${resultVariable}.failureReason`;
+    if (field.name === 'remediationHint') return `${field.name} = ${resultVariable}.remediationHint`;
+    if (commandField) {
+        if (field.optional || !commandField.optional) return `${field.name} = command.${field.name}`;
+        return `${field.name} = command.${field.name} ?: ${fallbackValue(field)} /* TODO: provide non-null ${field.name} */`;
+    }
+    return `${field.name} = ${fallbackValue(field)} /* TODO: provide ${field.name} */`;
 }
 
 const stateWriterMethods = {
@@ -223,10 +269,13 @@ ${sourcingHandlers}
         const methods = slice.commands.map((command) => {
             const commandName = _commandTitle(command.title);
             const outputs = outboundEvents(command, events);
+            const usePort = isExternalPortCommand(command, outputs);
+            const capability = portCapability(command);
             const commandReservations = command.startsLifecycle ? reservations : [];
             const includeState = !command.startsLifecycle;
             const stateParam = includeState ? `, state: ${stateName}` : '';
             const reservationParams = commandReservations.map((reservation) => `, ${reservation.stateParam}: ${reservation.stateName}`).join('');
+            const portParams = usePort ? `, portResult: ${capability.resultName}, now: java.time.LocalDateTime` : '';
             const reservationGuard = commandReservations.map((reservation) => [
                 `        require(!${reservation.stateParam}.reserved) {`,
                 `            "${escapeKotlin(reservation.message)}"`,
@@ -241,25 +290,34 @@ ${sourcingHandlers}
                 ...reservationEvents,
                 ...outputs.map((event) => `            ${_eventTitle(event.title)}(${eventArguments(event, command, selection)})`)
             ];
-            const canBranchByVerificationPassed = outputs.length === 2 && hasBooleanField(command, 'verificationPassed');
-            const returnStatement = canBranchByVerificationPassed
+            const returnStatement = usePort
                 ? (() => {
                     const success = outputs.find((event) => !isFailureOutcome(event)) ?? outputs[0];
                     const failure = outputs.find(isFailureOutcome) ?? outputs[1];
+                    const successArgs = success.fields.map((field) => resultEventArgument(field, command, 'portResult')).join(', ');
+                    const failureArgs = failure.fields.map((field) => resultEventArgument(field, command, 'portResult')).join(', ');
+                    const unavailableArgs = failure.fields.map((field) => unavailableEventArgument(field, command, 'portResult')).join(', ');
                     return [
-                        'return if (command.verificationPassed) {',
-                        `            listOf(${_eventTitle(success.title)}(${eventArguments(success, command, selection)}))`,
-                        '        } else {',
-                        `            listOf(${_eventTitle(failure.title)}(${eventArguments(failure, command, selection)}))`,
+                        'return when (portResult) {',
+                        `            is ${capability.resultName}.Succeeded -> listOf(${_eventTitle(success.title)}(${successArgs}))`,
+                        `            is ${capability.resultName}.Rejected -> listOf(${_eventTitle(failure.title)}(${failureArgs}))`,
+                        `            is ${capability.resultName}.Unavailable -> listOf(${_eventTitle(failure.title)}(${unavailableArgs}))`,
                         '        }'
                     ].join('\n        ');
                 })()
                 : outputs.length > 0
                     ? `return listOf(\n${eventLines.join(',\n')}\n        )`
                     : 'return emptyList() // TODO: return the event produced by this command.';
-            return `    fun decide(command: ${commandName}${stateParam}${reservationParams}): List<Any> {\n${guard}${reservationGuard ? `${reservationGuard}\n` : ''}        ${returnStatement}\n    }`;
+            return `    fun decide(command: ${commandName}${stateParam}${reservationParams}${portParams}): List<Any> {\n${guard}${reservationGuard ? `${reservationGuard}\n` : ''}        ${returnStatement}\n    }`;
         }).join('\n\n');
         const commandImports = slice.commands.map((command) => `import ${packageName}.${_commandTitle(command.title)}`).join('\n');
+        const portImports = uniqueBy(slice.commands
+            .map((command) => {
+                const outputs = outboundEvents(command, events);
+                return isExternalPortCommand(command, outputs) ? `import ${packageName}.${portCapability(command).resultName}` : undefined;
+            })
+            .filter(Boolean), (value) => value)
+            .join('\n');
         const eventImports = uniqueBy([
             ...events.map((event) => `import ${this._eventPackage(event, slice)}.${_eventTitle(event.title)}`),
             ...reservations.map((reservation) => `import ${this.model.rootPackage}.${context}.events.${reservation.eventName}`)
@@ -276,6 +334,7 @@ ${sourcingHandlers}
 
 import org.springframework.stereotype.Component
 ${commandImports}
+${portImports}
 ${eventImports}
 ${stateImport}
 ${reservationStateImports}

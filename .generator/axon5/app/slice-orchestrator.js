@@ -96,6 +96,7 @@ const sliceOrchestratorMethods = {
             this._writeSelection(selectionTarget.packageName, selectionTarget.pathPrefix, slice, selection);
             reservations.forEach((reservation) => this._writeReservationArtifacts(context, reservation));
             slice.commands.forEach((command) => this._writeCommand(packageName, context, slicePackage, command, selection, selectionTarget.packageName, reservations));
+            slice.commands.forEach((command) => this._writePortArtifacts(packageName, context, slicePackage, slice, command, relatedEvents, selection));
             relatedEvents.forEach((event) => this._writeEvent(event, slice, selection));
             if (!primaryConcept(slice)) {
                 this._writeState(packageName, context, slicePackage, slice, selection, relatedEvents);

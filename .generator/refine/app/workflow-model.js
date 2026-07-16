@@ -113,7 +113,8 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
                 .map((dependency) => dependency.id ?? String(dependency.title ?? ''));
             const inboundEvents = inboundEventIds
                 .map((eventId) => eventsById.get(eventId))
-                .filter(Boolean);
+                .filter(Boolean)
+                .filter((event) => eventTargetsReadModel(event, readModel));
             const producerCommands = uniqueElements(inboundEvents
                 .flatMap((event) => (event.dependencies ?? [])
                     .filter((dependency) => dependencyDirection(dependency) === 'INBOUND' && dependency.elementType === 'COMMAND')
@@ -205,6 +206,26 @@ function queryFieldsForReadModel(readModel) {
     return unique((readModel?.fields ?? [])
         .filter((field) => field?.query)
         .map((field) => field.name));
+}
+
+function eventTargetsReadModel(event, readModel) {
+    const outboundReadModels = (event.dependencies ?? [])
+        .filter((dependency) => dependencyDirection(dependency) === 'OUTBOUND' && dependency.elementType === 'READMODEL');
+    if (outboundReadModels.length === 0) {
+        return true;
+    }
+    const readModelKeys = new Set([
+        readModel.id,
+        readModel.name,
+        readModel.title,
+        cleanTitle(readModel.title)
+    ].filter(Boolean).map(String));
+    return outboundReadModels.some((dependency) => [
+        dependency.id,
+        dependency.name,
+        dependency.title,
+        cleanTitle(dependency.title)
+    ].filter(Boolean).some((key) => readModelKeys.has(String(key))));
 }
 
 function buildAutomationCommandKeys(slices) {

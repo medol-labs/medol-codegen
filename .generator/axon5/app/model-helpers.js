@@ -451,10 +451,21 @@ function renderStateGuard(model, transition) {
 function eventArguments(event, command, selection) {
     const eventFields = event.fields ?? [];
     const commandFields = commandFieldsWithSelection(command, selection ?? {fields: []});
+    const renderCommandField = (field, source) => {
+        if (field.optional || !source.optional) return `command.${source.name}`;
+        const fieldType = mappedType(field, false).replace(/\?$/, '');
+        const sourceType = mappedType(source, false).replace(/\?$/, '');
+        if (fieldType !== sourceType) return `command.${source.name}`;
+        return `command.${source.name} ?: ${fallbackValue(field)} /* TODO: provide non-null ${field.name} */`;
+    };
     return eventFields.map((field) => {
-        if (commandFields.some((candidate) => candidate.name === field.name)) return `${field.name} = command.${field.name}`;
+        const sameName = commandFields.find((candidate) => candidate.name === field.name);
+        if (sameName) return `${field.name} = ${renderCommandField(field, sameName)}`;
         const source = field.source?.from?.find((name) => commandFields.some((candidate) => candidate.name === name));
-        if (source) return `${field.name} = command.${source}`;
+        if (source) {
+            const sourceField = commandFields.find((candidate) => candidate.name === source);
+            if (sourceField) return `${field.name} = ${renderCommandField(field, sourceField)}`;
+        }
         return `${field.name} = ${fallbackValue(field)} /* TODO: ${field.source?.rule ?? 'derive value'} */`;
     }).join(', ');
 }

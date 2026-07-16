@@ -254,6 +254,7 @@ function normalizeFields(fields = []) {
             technicalAttribute: !!field.technicalAttribute,
             idAttribute: !!field.idAttribute,
             cardinality: field.cardinality ?? 'Single',
+            source: field.source,
             valueType: field.valueType
         }));
 }
@@ -549,7 +550,7 @@ function zodPrimitive(type) {
         case 'boolean': return 'z.boolean()';
         case 'uuid': return 'z.string().uuid()';
         case 'date': return 'z.string().date()';
-        case 'datetime': return 'z.string().datetime({ local: true })';
+        case 'datetime': return 'dateTimeLocalSchema';
         default: return 'z.string()';
     }
 }

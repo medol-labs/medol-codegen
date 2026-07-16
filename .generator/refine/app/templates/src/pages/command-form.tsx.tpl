@@ -197,6 +197,9 @@ export const <%= command.pageComponent %> = () => {
       <CreateViewHeader title={t("<%= command.i18nKey %>", "<%= command.label %>")} />
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
+<% command.hiddenPrefillFields.forEach((field) => { -%>
+          <input type="hidden" {...form.register("<%= field.name %>" as never)} />
+<% }) -%>
 <% command.fields.forEach((field) => { -%>
 <% if (field.object && field.list) { -%>
           <div className="space-y-4 rounded-md border p-4">

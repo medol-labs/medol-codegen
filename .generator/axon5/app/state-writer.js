@@ -83,6 +83,21 @@ const {
 const {contextPackage} = require('../../common/util/value-types');
 const {_commandTitle, _eventTitle, _readmodelTitle, _sliceTitle} = require('../../common/util/naming');
 
+function isFailureOutcome(event) {
+    const name = `${event.name ?? ''} ${event.title ?? ''}`.toLowerCase();
+    return name.includes('fail') || name.includes('failure') || name.includes('reject') || name.includes('block');
+}
+
+function hasBooleanField(command, fieldName) {
+    return (command.fields ?? []).some((field) =>
+        field.name === fieldName && String(field.type).toLowerCase() === 'boolean'
+    );
+}
+
+function normalizeOutcomeName(value) {
+    return String(value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
 const stateWriterMethods = {
     _writeEvent(event, ownerSlice, selection) {
         const eventSlice = this.model.slices.find((slice) => slice.title === event.slice || slice.name === event.slice) ?? ownerSlice;
@@ -141,8 +156,15 @@ ${properties}
         const sourcingHandlers = events.map((event) => {
             const transition = childTransitionByEventId.get(event.id);
             const stateTransition = transitionByEventId.get(event.id);
+            const inferredState = concept && !stateTransition
+                ? (this.model.concepts ?? [])
+                    .find((candidate) => candidate.name === concept && (!slice.context || candidate.context === slice.context))
+                    ?.states
+                    ?.find((state) => normalizeOutcomeName(`${event.name} ${event.title}`).includes(normalizeOutcomeName(state)))
+                : undefined;
             const assignments = [
                 ...(concept && stateTransition && !transition && conceptHasState(this.model, slice.context, concept, stateTransition.to) ? [`        currentState = ${stateEnumName}.${constant(stateTransition.to)}`] : []),
+                ...(concept && inferredState && !transition ? [`        currentState = ${stateEnumName}.${constant(inferredState)}`] : []),
                 ...event.fields
                     .filter((field) => !(transition?.keyField && field.name === transition.keyField))
                     .map((field) => `        ${field.name} = event.${field.name}`),
@@ -219,9 +241,22 @@ ${sourcingHandlers}
                 ...reservationEvents,
                 ...outputs.map((event) => `            ${_eventTitle(event.title)}(${eventArguments(event, command, selection)})`)
             ];
-            const returnStatement = outputs.length > 0
-                ? `return listOf(\n${eventLines.join(',\n')}\n        )`
-                : 'return emptyList() // TODO: return the event produced by this command.';
+            const canBranchByVerificationPassed = outputs.length === 2 && hasBooleanField(command, 'verificationPassed');
+            const returnStatement = canBranchByVerificationPassed
+                ? (() => {
+                    const success = outputs.find((event) => !isFailureOutcome(event)) ?? outputs[0];
+                    const failure = outputs.find(isFailureOutcome) ?? outputs[1];
+                    return [
+                        'return if (command.verificationPassed) {',
+                        `            listOf(${_eventTitle(success.title)}(${eventArguments(success, command, selection)}))`,
+                        '        } else {',
+                        `            listOf(${_eventTitle(failure.title)}(${eventArguments(failure, command, selection)}))`,
+                        '        }'
+                    ].join('\n        ');
+                })()
+                : outputs.length > 0
+                    ? `return listOf(\n${eventLines.join(',\n')}\n        )`
+                    : 'return emptyList() // TODO: return the event produced by this command.';
             return `    fun decide(command: ${commandName}${stateParam}${reservationParams}): List<Any> {\n${guard}${reservationGuard ? `${reservationGuard}\n` : ''}        ${returnStatement}\n    }`;
         }).join('\n\n');
         const commandImports = slice.commands.map((command) => `import ${packageName}.${_commandTitle(command.title)}`).join('\n');

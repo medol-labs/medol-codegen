@@ -50,14 +50,17 @@ function toReadModelResource(group, readModel, allEvents, workflow) {
     const producerCommandKeys = group.producerCommandKeys ?? new Set();
     const itemCommandKeys = group.itemCommandKeys ?? new Set();
     const producerCommands = normalizedCommands.filter((command) => producerCommandKeys.has(command.id));
-    const createCommand = producerCommands.find((command) => command.startsLifecycle && isCreateCommand(command))
-        ?? producerCommands.find((command) => command.startsLifecycle);
+    const resourceAggregateRoute = axonRoute(aggregateTitle);
+    const aggregateProducerCommands = producerCommands
+        .filter((command) => command.aggregateRoute === resourceAggregateRoute);
+    const createCommand = aggregateProducerCommands.find((command) => command.startsLifecycle && isCreateCommand(command))
+        ?? aggregateProducerCommands.find((command) => command.startsLifecycle);
     const rowCommands = normalizedCommands
         .filter((command) => itemCommandKeys.has(command.id))
-        .filter((command) => sharesIdentifierField(command.fields, queryFields));
+        .filter((command) => canAddressCommandFromReadModel(command, queryFields));
     const primaryIdField = idField?.name ?? 'id';
     const primaryRowCommands = rowCommands.filter((command) =>
-        command.fields.some((field) => field.name === primaryIdField)
+        command.matchingFields.some((field) => field.name === primaryIdField)
     );
     const editCommand = primaryRowCommands.find((command) => isEditCommand(command));
     const deleteCommand = primaryRowCommands.find((command) => isDeleteCommand(command));
@@ -69,7 +72,7 @@ function toReadModelResource(group, readModel, allEvents, workflow) {
         title: queryTitle,
         aggregateTitle,
         label: queryTitle,
-        aggregateRoute: axonRoute(aggregateTitle),
+        aggregateRoute: resourceAggregateRoute,
         queryRoute: axonRoute(queryTitle),
         route,
         name,
@@ -180,7 +183,12 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
             ...field,
             select: workflowFields.selects.get(field.name) ?? null
         })),
-        workflowPrefillFields: formFields.filter((field) => workflowFields.prefill.has(field.name)),
+        matchingFields: normalizedFields,
+        prefillCandidateFields: [
+            ...formFields,
+            ...normalizedFields.filter((field) => !isCommandFormField(field) && hasSourceMapping(field))
+        ],
+        workflowPrefillFields: normalizedFields.filter((field) => workflowFields.prefill.has(field.name)),
         defaultValueFields: formFields
             .filter((field) => !workflowFields.prefill.has(field.name))
             .filter((field) => field.object || field.list)
@@ -201,17 +209,41 @@ function isCommandFormField(field) {
     return true;
 }
 
+function canAddressCommandFromReadModel(command, queryFields) {
+    return sharesIdentifierField(command.fields, queryFields)
+        || sharesSourcedIdentifierField(command.matchingFields, queryFields);
+}
+
+function sharesSourcedIdentifierField(commandFields, readModelFields) {
+    const readModelIdentifiers = new Set(readModelFields
+        .filter(isIdentifierField)
+        .map((field) => field.name));
+    return commandFields
+        .filter(isIdentifierField)
+        .filter(hasSourceMapping)
+        .some((field) => readModelIdentifiers.has(field.name));
+}
+
+function hasSourceMapping(field) {
+    return Array.isArray(field.source?.from) && field.source.from.length > 0;
+}
+
 function withPrefillFields(commands, resourceFields) {
     const resourceFieldNames = new Set(resourceFields.map((field) => field.name));
-    return commands.map((command) => ({
-        ...command,
-        rowPrefillFields: command.fields.filter((field) => resourceFieldNames.has(field.name)),
-        prefillFields: uniqueFields([
-            ...command.fields.filter((field) => resourceFieldNames.has(field.name)),
+    return commands.map((command) => {
+        const prefillFields = uniqueFields([
+            ...command.prefillCandidateFields.filter((field) => resourceFieldNames.has(field.name)),
             ...(command.workflowPrefillFields ?? [])
-        ]),
-        hasSelectFields: command.fields.some((field) => field.select)
-    }));
+        ]);
+        const formFieldNames = new Set(command.fields.map((field) => field.name));
+        return {
+            ...command,
+            rowPrefillFields: command.prefillCandidateFields.filter((field) => resourceFieldNames.has(field.name)),
+            prefillFields,
+            hiddenPrefillFields: prefillFields.filter((field) => !formFieldNames.has(field.name)),
+            hasSelectFields: command.fields.some((field) => field.select)
+        };
+    });
 }
 
 function withActionControlFields(commands, resourceFields) {

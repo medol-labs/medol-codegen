@@ -82,40 +82,7 @@ const {
 } = require('./model-helpers');
 const {contextPackage} = require('../../common/util/value-types');
 const {_commandTitle, _eventTitle, _readmodelTitle, _sliceTitle} = require('../../common/util/naming');
-
-function isFailureOutcome(event) {
-    const name = `${event.name ?? ''} ${event.title ?? ''}`.toLowerCase();
-    return name.includes('fail') || name.includes('failure') || name.includes('reject') || name.includes('block');
-}
-
-function isExternalCapabilityCommand(command) {
-    const name = pascal(command.name ?? command.title ?? '');
-    return ['Verify', 'Authorize', 'Inspect', 'Evaluate'].some((prefix) => name.startsWith(prefix));
-}
-
-function portCapability(command) {
-    const name = pascal(command.name ?? command.title ?? '');
-    const patterns = [
-        {prefix: 'Verify', suffix: 'Verifier', nounSuffix: 'Verification'},
-        {prefix: 'Authorize', suffix: 'Authorizer', nounSuffix: 'Authorization'},
-        {prefix: 'Inspect', suffix: 'Inspector', nounSuffix: 'Inspection'},
-        {prefix: 'Evaluate', suffix: 'Evaluator', nounSuffix: 'Evaluation'}
-    ];
-    const pattern = patterns.find((candidate) => name.startsWith(candidate.prefix));
-    if (!pattern) {
-        return {
-            resultName: `${name}Result`
-        };
-    }
-    const subject = name.slice(pattern.prefix.length);
-    return {
-        resultName: `${subject}${pattern.nounSuffix}`
-    };
-}
-
-function isExternalPortCommand(command, outputs) {
-    return outputs.length === 2 && isExternalCapabilityCommand(command) && outputs.some(isFailureOutcome);
-}
+const {infrastructurePortForCommand} = require('./infrastructure-port-writer');
 
 function normalizeOutcomeName(value) {
     return String(value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -269,8 +236,9 @@ ${sourcingHandlers}
         const methods = slice.commands.map((command) => {
             const commandName = _commandTitle(command.title);
             const outputs = outboundEvents(command, events);
-            const usePort = isExternalPortCommand(command, outputs);
-            const capability = portCapability(command);
+            const port = infrastructurePortForCommand(command, events, slice, this.model);
+            const usePort = Boolean(port);
+            const capability = port?.capability;
             const commandReservations = command.startsLifecycle ? reservations : [];
             const includeState = !command.startsLifecycle;
             const stateParam = includeState ? `, state: ${stateName}` : '';
@@ -292,8 +260,8 @@ ${sourcingHandlers}
             ];
             const returnStatement = usePort
                 ? (() => {
-                    const success = outputs.find((event) => !isFailureOutcome(event)) ?? outputs[0];
-                    const failure = outputs.find(isFailureOutcome) ?? outputs[1];
+                    const success = port.successEvent;
+                    const failure = port.failureEvent;
                     const successArgs = success.fields.map((field) => resultEventArgument(field, command, 'portResult')).join(', ');
                     const failureArgs = failure.fields.map((field) => resultEventArgument(field, command, 'portResult')).join(', ');
                     const unavailableArgs = failure.fields.map((field) => unavailableEventArgument(field, command, 'portResult')).join(', ');
@@ -313,8 +281,8 @@ ${sourcingHandlers}
         const commandImports = slice.commands.map((command) => `import ${packageName}.${_commandTitle(command.title)}`).join('\n');
         const portImports = uniqueBy(slice.commands
             .map((command) => {
-                const outputs = outboundEvents(command, events);
-                return isExternalPortCommand(command, outputs) ? `import ${packageName}.${portCapability(command).resultName}` : undefined;
+                const port = infrastructurePortForCommand(command, events, slice, this.model);
+                return port ? `import ${port.packageName}.${port.capability.resultName}` : undefined;
             })
             .filter(Boolean), (value) => value)
             .join('\n');

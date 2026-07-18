@@ -12,6 +12,7 @@ const {
     uniqueBy,
     uniqueFields
 } = require('./model-helpers');
+const {contextPackage} = require('../../common/util/value-types');
 const {_sliceTitle} = require('../../common/util/naming');
 
 function lowerCamel(value) {
@@ -36,18 +37,19 @@ function isFailureOutcome(event) {
     return name.includes('fail') || name.includes('failure') || name.includes('reject') || name.includes('block');
 }
 
-function portCapability(command) {
+function portCapability(slice, command) {
     const name = pascal(command.name ?? command.title ?? '');
+    const sliceName = pascal(slice.name ?? slice.title ?? name);
     const patterns = [
-        {prefix: 'Verify', suffix: 'Verifier', nounSuffix: 'Verification', method: 'verify'},
-        {prefix: 'Authorize', suffix: 'Authorizer', nounSuffix: 'Authorization', method: 'authorize'},
-        {prefix: 'Inspect', suffix: 'Inspector', nounSuffix: 'Inspection', method: 'inspect'},
-        {prefix: 'Evaluate', suffix: 'Evaluator', nounSuffix: 'Evaluation', method: 'evaluate'}
+        {prefix: 'Verify', nounSuffix: 'Verification', method: 'verify'},
+        {prefix: 'Authorize', nounSuffix: 'Authorization', method: 'authorize'},
+        {prefix: 'Inspect', nounSuffix: 'Inspection', method: 'inspect'},
+        {prefix: 'Evaluate', nounSuffix: 'Evaluation', method: 'evaluate'}
     ];
     const pattern = patterns.find((candidate) => name.startsWith(candidate.prefix));
     if (!pattern) {
         return {
-            portName: `${name}Port`,
+            portName: `${sliceName}Service`,
             inputName: `${name}Input`,
             resultName: `${name}Result`,
             methodName: 'execute'
@@ -55,7 +57,7 @@ function portCapability(command) {
     }
     const subject = name.slice(pattern.prefix.length);
     return {
-        portName: `${subject}${pattern.suffix}`,
+        portName: `${sliceName}Service`,
         inputName: `${subject}${pattern.nounSuffix}Input`,
         resultName: `${subject}${pattern.nounSuffix}`,
         methodName: pattern.method
@@ -105,12 +107,20 @@ function infrastructureConceptPackage(slice) {
     return _sliceTitle(slice.concepts?.[0] ?? slice.name);
 }
 
-function infrastructurePortPackage(rootPackage, slice) {
-    return `${rootPackage}.infrastructure.${infrastructureConceptPackage(slice)}`;
+function slicePortPackage(rootPackage, slice) {
+    return `${rootPackage}.${contextPackage(slice.context)}.${_sliceTitle(slice.title)}`;
 }
 
-function infrastructurePortPath(slice) {
-    return `infrastructure/${infrastructureConceptPackage(slice)}`;
+function slicePortPath(slice) {
+    return `${contextPackage(slice.context)}/${_sliceTitle(slice.title)}`;
+}
+
+function secondaryPortPackage(rootPackage, slice) {
+    return `${rootPackage}.${contextPackage(slice.context)}.infrastructure.secondary.${infrastructureConceptPackage(slice)}`;
+}
+
+function secondaryPortPath(slice) {
+    return `${contextPackage(slice.context)}/infrastructure/secondary/${infrastructureConceptPackage(slice)}`;
 }
 
 function infrastructurePortForCommand(command, events, slice, model) {
@@ -119,12 +129,14 @@ function infrastructurePortForCommand(command, events, slice, model) {
     const successEvent = outputs.find((event) => !isFailureOutcome(event)) ?? outputs[0];
     const failureEvent = outputs.find(isFailureOutcome) ?? outputs[1];
     return {
-        capability: portCapability(command),
+        capability: portCapability(slice, command),
         inputFields: portInputFields(command),
         successEvent,
         failureEvent,
-        packageName: infrastructurePortPackage(model.rootPackage, slice),
-        pathPrefix: infrastructurePortPath(slice)
+        packageName: slicePortPackage(model.rootPackage, slice),
+        pathPrefix: slicePortPath(slice),
+        secondaryPackageName: secondaryPortPackage(model.rootPackage, slice),
+        secondaryPathPrefix: secondaryPortPath(slice)
     };
 }
 
@@ -186,8 +198,11 @@ ${unavailableProperties}
 `);
 
         const routerClass = `${capability.portName}Router`;
-        this.fs.write(this._kotlinPath(`${port.pathPrefix}/${routerClass}.kt`), `package ${port.packageName}
+        this.fs.write(this._kotlinPath(`${port.secondaryPathPrefix}/${routerClass}.kt`), `package ${port.secondaryPackageName}
 
+import ${port.packageName}.${capability.inputName}
+import ${port.packageName}.${capability.portName}
+import ${port.packageName}.${capability.resultName}
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.context.annotation.Primary
 import org.springframework.stereotype.Component

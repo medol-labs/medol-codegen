@@ -4,7 +4,7 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 current_dir="$(pwd)"
 target="${1:-all}"
-workspace_id="${2:-${MEDOL_WORKSPACE_ID:-}}"
+workspace_id="${MEDOL_WORKSPACE_ID:-}"
 image="${CODEGEN_IMAGE:-es-codegen}"
 container_name="${CODEGEN_CONTAINER_NAME:-codegen}"
 generator_path="/opt/codegen/.generator/app/"
@@ -23,9 +23,9 @@ if [[ "$current_dir" != "$script_dir" ]]; then
 fi
 
 case "$target" in
-  all|axon|axon5|refine|shell|model) ;;
+  all|axon|axon5|refine|shell|update|model) ;;
   *)
-    echo "Usage: ./test-codegen-model.sh [all|axon|axon5|refine|shell|model [workspace-id]]" >&2
+    echo "Usage: ./test-codegen-model.sh [all|axon|axon5|refine|shell|update [workspace-id]]" >&2
     exit 1
     ;;
 esac
@@ -40,7 +40,7 @@ require_image() {
 }
 
 verify_image() {
-  if ! docker run --rm "$image" /bin/sh -lc "command -v fetch-codegen-model >/dev/null && grep -q 'loadGeneratorModel' /opt/codegen/.generator/axon/app/index.js && grep -q 'allAggregates' /opt/codegen/.generator/axon/aggregates/index.js && grep -q 'loadCodegenModel' /opt/codegen/.generator/axon5/app/index.js"; then
+  if ! docker run --rm "$image" /bin/sh -lc "command -v update-codegen-model >/dev/null && grep -q 'loadGeneratorModel' /opt/codegen/.generator/axon/app/index.js && grep -q 'allAggregates' /opt/codegen/.generator/axon/aggregates/index.js && grep -q 'loadCodegenModel' /opt/codegen/.generator/axon5/app/index.js"; then
     echo "Docker image $image does not include the latest codegen-model generator changes." >&2
     echo "Rebuild it from the code-generator root with:" >&2
     echo "  docker build -f Dockerfile.codegen -t $image ." >&2
@@ -48,12 +48,21 @@ verify_image() {
   fi
 }
 
-if [[ "$target" == "model" ]]; then
+if [[ "$target" == "model" || "$target" == "update" ]]; then
   require_image
   verify_image
 
   model_args=(--base-url "$medol_base_url" --output /workspace/codegen-model.json)
-  if [[ -n "$workspace_id" ]]; then
+  if [[ $# -gt 1 ]]; then
+    if [[ "${2:-}" == --* ]]; then
+      model_args+=("${@:2}")
+    else
+      model_args+=(--workspace-id "$2")
+      if [[ $# -gt 2 ]]; then
+        model_args+=("${@:3}")
+      fi
+    fi
+  elif [[ -n "$workspace_id" ]]; then
     model_args+=(--workspace-id "$workspace_id")
   fi
   if [[ -n "$model_locale" ]]; then
@@ -64,7 +73,7 @@ if [[ "$target" == "model" ]]; then
     --rm \
     -v "$script_dir:/workspace" \
     "$image" \
-    fetch-codegen-model "${model_args[@]}"
+    update-codegen-model "${model_args[@]}"
   exit 0
 fi
 
@@ -72,7 +81,7 @@ if [[ ! -f "$model_path" ]]; then
   echo "Codegen model was not found: $model_path" >&2
   echo "Export it from Event Modeling Toolkit first." >&2
   echo "Or set CODEGEN_MODEL_PATH=/path/to/codegen-model.json." >&2
-  echo "Or run ./test-codegen-model.sh model [workspace-id] while Medol is running." >&2
+  echo "Or run ./test-codegen-model.sh update [workspace-id] while Medol is running." >&2
   exit 1
 fi
 

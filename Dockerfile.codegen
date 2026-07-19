@@ -14,7 +14,8 @@ COPY .generator /opt/codegen/.generator
 RUN cd /opt/codegen/.generator && npm ci --omit=dev
 
 COPY gen.sh /usr/local/bin/gen
-COPY fetch-codegen-model.js /usr/local/bin/fetch-codegen-model
-RUN chmod +x /usr/local/bin/gen /usr/local/bin/fetch-codegen-model
+COPY update-codegen-model.js /usr/local/bin/update-codegen-model
+RUN ln -s /usr/local/bin/update-codegen-model /usr/local/bin/fetch-codegen-model \
+  && chmod +x /usr/local/bin/gen /usr/local/bin/update-codegen-model
 
 CMD ["/bin/bash"]

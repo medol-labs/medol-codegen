@@ -6,12 +6,12 @@ const path = require("path");
 const DEFAULT_BASE_URL = "http://host.docker.internal:5172";
 
 function usage() {
-  console.error(`Usage: fetch-codegen-model [options]
+  console.error(`Usage: update-codegen-model [workspace-id] [options]
 
 Options:
       --base-url <url>       Medol service base URL. Default: ${DEFAULT_BASE_URL}
       --url <url>            Full CodegenModel endpoint URL.
-      --workspace-id <id>    Medol workspace id. Defaults to the latest workspace.
+      --workspace-id <id>    Medol workspace id. Omit to export the current workspace.
       --version-id <id>      Medol workspace version id.
       --locale <locale>      Include stored Medol translations for the locale.
       --language <locale>    Alias for --locale.
@@ -38,6 +38,7 @@ function requireValue(argv, index, option) {
 }
 
 function parseArgs(argv) {
+  const args = argv[0] === "update" ? argv.slice(1) : argv;
   const options = {
     baseUrl: process.env.MEDOL_BASE_URL || DEFAULT_BASE_URL,
     url: process.env.CODEGEN_MODEL_URL,
@@ -49,37 +50,37 @@ function parseArgs(argv) {
     listWorkspaces: false,
   };
 
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
     if (arg === "-h" || arg === "--help") {
       options.help = true;
     } else if (arg === "--base-url") {
-      options.baseUrl = requireValue(argv, index, arg);
+      options.baseUrl = requireValue(args, index, arg);
       index += 1;
     } else if (arg.startsWith("--base-url=")) {
       options.baseUrl = arg.slice("--base-url=".length);
     } else if (arg === "--url") {
-      options.url = requireValue(argv, index, arg);
+      options.url = requireValue(args, index, arg);
       index += 1;
     } else if (arg.startsWith("--url=")) {
       options.url = arg.slice("--url=".length);
     } else if (arg === "--workspace-id") {
-      options.workspaceId = requireValue(argv, index, arg);
+      options.workspaceId = requireValue(args, index, arg);
       index += 1;
     } else if (arg.startsWith("--workspace-id=")) {
       options.workspaceId = arg.slice("--workspace-id=".length);
     } else if (arg === "--version-id") {
-      options.versionId = requireValue(argv, index, arg);
+      options.versionId = requireValue(args, index, arg);
       index += 1;
     } else if (arg.startsWith("--version-id=")) {
       options.versionId = arg.slice("--version-id=".length);
     } else if (arg === "--locale" || arg === "--language") {
-      options.locale = requireValue(argv, index, arg);
+      options.locale = requireValue(args, index, arg);
       index += 1;
     } else if (arg.startsWith("--locale=") || arg.startsWith("--language=")) {
       options.locale = arg.slice(arg.indexOf("=") + 1);
     } else if (arg === "-o" || arg === "--output") {
-      options.output = requireValue(argv, index, arg);
+      options.output = requireValue(args, index, arg);
       index += 1;
     } else if (arg.startsWith("--output=")) {
       options.output = arg.slice("--output=".length);

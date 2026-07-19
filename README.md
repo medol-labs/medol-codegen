@@ -143,31 +143,34 @@ When the Medol app is running, it exposes the current workspace as CodegenModel 
 GET /api/modeling/codegen-model?workspaceId=<workspace-id>
 ```
 
-If `workspaceId` is omitted, Medol exports the latest updated workspace. The endpoint also accepts `locale` or `language` to include stored model translations.
+If `workspaceId` is omitted, Medol exports the current workspace. The endpoint also accepts `locale` or `language` to include stored model translations.
 
-Inside the code generator container, download that JSON into the mounted workspace:
+Inside the code generator container, update that JSON in the mounted workspace:
 
 ```bash
-fetch-codegen-model --workspace-id <workspace-id>
+update-codegen-model
+update-codegen-model <workspace-id>
+update-codegen-model --workspace-id <workspace-id>
 ```
 
 The default Medol base URL from the container is `http://host.docker.internal:5172`. Override it when needed:
 
 ```bash
-MEDOL_BASE_URL=http://host.docker.internal:5187 fetch-codegen-model --workspace-id <workspace-id>
+MEDOL_BASE_URL=http://host.docker.internal:5187 update-codegen-model <workspace-id>
 ```
 
 To inspect available workspace ids from inside the container:
 
 ```bash
-fetch-codegen-model --list-workspaces
+update-codegen-model --list-workspaces
 ```
 
-The example test script exposes the same Docker-based download step:
+The example test script exposes the same Docker-based update step:
 
 ```bash
 cd example
-./test-codegen-model.sh model <workspace-id>
+./test-codegen-model.sh update
+./test-codegen-model.sh update <workspace-id>
 ```
 
 Set `CODEGEN_MODEL_LOCALE` or `MEDOL_WORKSPACE_ID` for translated or environment-driven exports.

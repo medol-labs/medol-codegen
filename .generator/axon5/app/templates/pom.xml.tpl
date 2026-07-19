@@ -91,10 +91,17 @@
             <artifactId>axon-server-connector</artifactId>
             <version>${axon.version}</version>
         </dependency>
+<% if (hasSharedKernel) { -%>
+        <dependency>
+            <groupId><%= rootPackage %></groupId>
+            <artifactId>shared-kernel</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+<% } -%>
 <% if (hasInfra) { -%>
         <dependency>
             <groupId><%= rootPackage %></groupId>
-            <artifactId>medol-infra</artifactId>
+            <artifactId>axon-event-storage-umadb</artifactId>
             <version>${project.version}</version>
         </dependency>
 <% } -%>

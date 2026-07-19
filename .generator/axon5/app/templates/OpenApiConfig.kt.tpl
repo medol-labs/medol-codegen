@@ -1,4 +1,4 @@
-package <%= rootPackage %>.support
+package <%= rootPackage %>.shared.infrastructure.configuration
 
 import io.swagger.v3.oas.models.OpenAPI
 import io.swagger.v3.oas.models.info.Info

@@ -83,6 +83,18 @@ const {
 const {contextPackage} = require('../../common/util/value-types');
 const {_commandTitle, _eventTitle, _readmodelTitle, _sliceTitle} = require('../../common/util/naming');
 
+function readModelPersistencePackage(rootPackage, context, readmodelName) {
+    return `${rootPackage}.${context}.infrastructure.secondary.persistence.${_sliceTitle(readmodelName)}`;
+}
+
+function readModelPersistencePath(context, readmodelName) {
+    return `${context}/infrastructure/secondary/persistence/${_sliceTitle(readmodelName)}`;
+}
+
+function readModelRepositoryMethodName(filterFields) {
+    return filterFields.length > 0 ? 'findAllByFilter' : 'findAll';
+}
+
 const readModelWriterMethods = {
     _writeReadModel(packageName, context, slicePackage, slice, readmodel) {
         const name = _readmodelTitle(readmodel.title);
@@ -103,47 +115,181 @@ const readModelWriterMethods = {
         ].join('\n');
         const keyName = `${name}Key`;
         const keyDeclaration = compositeId
-            ? `@Embeddable\ndata class ${keyName}(\n${idFields.map((field) => `    var ${field.name}: ${readModelStorageType(field, true)} = null`).join(',\n')}\n) : java.io.Serializable\n\n`
+            ? `data class ${keyName}(\n${idFields.map((field) => `    var ${field.name}: ${readModelStorageType(field, true)} = null`).join(',\n')}\n) : java.io.Serializable\n\n`
             : '';
+        const projectionFields = [
+            ...readmodel.fields.map((field) => `    var ${field.name}: ${readModelStorageFieldType(field)} = ${readModelStorageFieldDefault(field)}`),
+            ...metadataFields.map((field) => `    override var ${field.name}: ${field.type} = null`)
+        ].join('\n');
         const idClassAnnotation = compositeId ? `@IdClass(${keyName}::class)\n` : '';
         const resultFields = [
             ...readmodel.fields.map((field) => `    val ${field.name}: ${readModelStorageType(field, true)}`),
             ...metadataFields.map((field) => `    val ${field.name}: ${field.type}`)
         ].join(',\n');
+        const resultArguments = [
+            ...readmodel.fields.map((field) => `    ${field.name} = ${field.name}`),
+            ...metadataFields.map((field) => `    ${field.name} = ${field.name}`)
+        ].join(',\n');
         const queryDeclaration = readmodel.listElement || !id
             ? `class ${name}Query`
             : `data class ${name}Query(val ${id.name}: ${readModelStorageType(id, false)})`;
+        const idType = compositeId ? keyName : readModelStorageType(id, false);
+        const filterFields = readModelFilterFields(readmodel);
+        const filterParameters = filterFields
+            .map((field) => `${field.name}: ${readModelStorageType(field, false)}?`)
+            .join(', ');
+        const filterSignaturePrefix = filterFields.length > 0 ? `${filterParameters}, ` : '';
+        const partialLookupMethods = compositeId
+            ? idFields.map((field) =>
+                `    fun findProjectionsBy${pascal(field.name)}(${field.name}: ${readModelStorageType(field, false)}): List<${name}Projection>`
+            ).join('\n')
+            : '';
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${name}.kt`), `package ${packageName}
 
-import jakarta.persistence.Embeddable
-import jakarta.persistence.Entity
-import jakarta.persistence.EnumType
-import jakarta.persistence.Enumerated
-import jakarta.persistence.Id
-import jakarta.persistence.IdClass
-${metadataFields.length > 0 ? `import ${this.model.rootPackage}.support.metadata.MetadataProjection\n` : ''}
-${allImports}
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.Pageable
+${metadataFields.length > 0 ? `import ${this.model.rootPackage}.shared.application.metadata.MetadataProjection\n` : ''}${allImports}
 
-${queryDeclaration}
+${keyDeclaration}${queryDeclaration}
 
-${keyDeclaration}${idClassAnnotation}
-@Entity
-class ${name}Entity${metadataFields.length > 0 ? ' : MetadataProjection' : ''} {
-${entityFields}
+class ${name}Projection${metadataFields.length > 0 ? ' : MetadataProjection' : ''} {
+${projectionFields}
+}
+
+fun ${name}Projection.toReadModel(): ${name} =
+    ${name}(
+${resultArguments}
+    )
+
+interface ${name}Repository {
+    fun ${readModelRepositoryMethodName(filterFields)}(${filterSignaturePrefix}pageable: Pageable): Page<${name}>
+${id ? `    fun findById(id: ${idType}): ${name}?\n` : ''}    fun findProjectionById(id: ${idType}): ${name}Projection?
+${partialLookupMethods ? `${partialLookupMethods}\n` : ''}    fun save(projection: ${name}Projection)
 }
 
 data class ${name}(
 ${resultFields}
 )
 `);
+        this.fs.write(this._kotlinPath(`${readModelPersistencePath(context, name)}/${name}Entity.kt`), `package ${readModelPersistencePackage(this.model.rootPackage, context, name)}
+
+import jakarta.persistence.Entity
+import jakarta.persistence.EnumType
+import jakarta.persistence.Enumerated
+import jakarta.persistence.Id
+import jakarta.persistence.IdClass
+${metadataFields.length > 0 ? `import ${this.model.rootPackage}.shared.application.metadata.MetadataProjection\n` : ''}${compositeId ? `import ${packageName}.${keyName}\n` : ''}${allImports}
+
+${idClassAnnotation}@Entity
+class ${name}Entity${metadataFields.length > 0 ? ' : MetadataProjection' : ''} {
+${entityFields}
+}
+`);
         if (id) {
+            this._writeReadModelJpaRepository(packageName, context, slicePackage, slice, readmodel, name, idFields);
             this._writeReadModelResource(packageName, context, slicePackage, slice, readmodel, name, idFields);
             this._writeReadModelProjector(packageName, context, slicePackage, slice, readmodel, name, idFields);
         }
     },
 
-    _writeReadModelResource(packageName, context, slicePackage, slice, readmodel, name, idFields) {
+    _writeReadModelJpaRepository(readModelPackageName, context, slicePackage, slice, readmodel, name, idFields) {
         const entityName = `${name}Entity`;
+        const springDataRepositoryName = `SpringData${name}Repository`;
+        const repositoryName = `${name}Repository`;
+        const adapterName = `Jpa${name}Repository`;
+        const id = idFields[0];
+        const idType = idFields.length > 1 ? `${name}Key` : readModelStorageType(id, false);
+        const filterFields = readModelFilterFields(readmodel);
+        const imports = readModelStorageImports([...idFields, ...filterFields], this.model.rootPackage);
+        const partialLookupMethods = idFields.length > 1
+            ? idFields.map((field) =>
+                `    fun findAllBy${pascal(field.name)}(${field.name}: ${readModelStorageType(field, false)}): List<${entityName}>`
+            ).join('\n')
+            : '';
+        const projectionLookupMethods = idFields.length > 1
+            ? idFields.map((field) =>
+                `    override fun findProjectionsBy${pascal(field.name)}(${field.name}: ${readModelStorageType(field, false)}): List<${name}Projection> =
+        jpaRepository.findAllBy${pascal(field.name)}(${field.name}).map { it.toProjection() }`
+            ).join('\n\n')
+            : '';
+        const packageName = readModelPersistencePackage(this.model.rootPackage, context, name);
+        const filterParameters = filterFields
+            .map((field) => `${field.name}: ${readModelStorageType(field, false)}?`)
+            .join(', ');
+        const filterSignaturePrefix = filterFields.length > 0 ? `${filterParameters}, ` : '';
+        const filterArguments = filterFields.map((field) => field.name).join(', ');
+        const findAllImplementation = filterFields.length > 0
+            ? `    override fun findAllByFilter(${filterSignaturePrefix}pageable: Pageable): Page<${name}> =
+        jpaRepository.findAll(filters(${filterArguments}), pageable).map { it.toProjection().toReadModel() }`
+            : `    override fun findAll(pageable: Pageable): Page<${name}> =
+        jpaRepository.findAll(pageable).map { it.toProjection().toReadModel() }`;
+        const filterSpecification = filterFields.length > 0
+            ? `
+
+    private fun filters(${filterParameters}): Specification<${entityName}> =
+        Specification { root, _, criteriaBuilder ->
+            val predicates = mutableListOf<Predicate>()
+${filterFields.map((field) => `            ${field.name}?.let { predicates.add(criteriaBuilder.equal(root.get<${readModelStorageType(field, false)}>("${field.name}"), it)) }`).join('\n')}
+            criteriaBuilder.and(*predicates.toTypedArray())
+        }
+`
+            : '';
+        const entityToProjectionAssignments = [
+            ...readmodel.fields.map((field) => `            it.${field.name} = this@toProjection.${field.name}`),
+            ...readModelMetadataFields(readmodel).map((field) => `            it.${field.name} = this@toProjection.${field.name}`)
+        ].join('\n');
+        const projectionToEntityAssignments = [
+            ...readmodel.fields.map((field) => `            it.${field.name} = this@toEntity.${field.name}`),
+            ...readModelMetadataFields(readmodel).map((field) => `            it.${field.name} = this@toEntity.${field.name}`)
+        ].join('\n');
+        this.fs.write(this._kotlinPath(`${readModelPersistencePath(context, name)}/${springDataRepositoryName}.kt`), `package ${packageName}
+
+import org.springframework.data.jpa.repository.JpaRepository
+${filterFields.length > 0 ? 'import org.springframework.data.jpa.repository.JpaSpecificationExecutor\n' : ''}${imports}
+${idFields.length > 1 ? `import ${readModelPackageName}.${name}Key\n` : ''}
+interface ${springDataRepositoryName} : JpaRepository<${entityName}, ${idType}>${filterFields.length > 0 ? `, JpaSpecificationExecutor<${entityName}>` : ''} {
+${partialLookupMethods}
+}
+`);
+        this.fs.write(this._kotlinPath(`${readModelPersistencePath(context, name)}/${adapterName}.kt`), `package ${packageName}
+
+${filterFields.length > 0 ? 'import jakarta.persistence.criteria.Predicate\nimport org.springframework.data.jpa.domain.Specification\n' : ''}import org.springframework.data.domain.Page
+import org.springframework.data.domain.Pageable
+import org.springframework.stereotype.Repository
+${imports}
+import ${readModelPackageName}.${name}
+${idFields.length > 1 ? `import ${readModelPackageName}.${name}Key\n` : ''}import ${readModelPackageName}.${name}Projection
+import ${readModelPackageName}.${repositoryName}
+import ${readModelPackageName}.toReadModel
+
+@Repository
+class ${adapterName}(private val jpaRepository: ${springDataRepositoryName}) : ${repositoryName} {
+${findAllImplementation}
+
+    override fun findById(id: ${idType}): ${name}? =
+        jpaRepository.findById(id).map { it.toProjection().toReadModel() }.orElse(null)
+
+    override fun findProjectionById(id: ${idType}): ${name}Projection? =
+        jpaRepository.findById(id).map { it.toProjection() }.orElse(null)
+
+${projectionLookupMethods ? `${projectionLookupMethods}\n\n` : ''}    override fun save(projection: ${name}Projection) {
+        jpaRepository.save(projection.toEntity())
+    }${filterSpecification}
+
+    private fun ${entityName}.toProjection(): ${name}Projection =
+        ${name}Projection().also {
+${entityToProjectionAssignments}
+        }
+
+    private fun ${name}Projection.toEntity(): ${entityName} =
+        ${entityName}().also {
+${projectionToEntityAssignments}
+        }
+}
+`);
+    },
+
+    _writeReadModelResource(packageName, context, slicePackage, slice, readmodel, name, idFields) {
         const repositoryName = `${name}Repository`;
         const resourceName = `${name}Resource`;
         const id = idFields[0];
@@ -152,11 +298,6 @@ ${resultFields}
         const readmodelRoute = httpRoute(readmodel.title);
         const filterFields = readModelFilterFields(readmodel);
         const imports = readModelStorageImports([...idFields, ...filterFields], this.model.rootPackage);
-        const partialLookupMethods = idFields.length > 1
-            ? idFields.map((field) =>
-                `    fun findAllBy${pascal(field.name)}(${field.name}: ${readModelStorageType(field, false)}): List<${entityName}>`
-            ).join('\n')
-            : '';
         const filterRequestParams = filterFields
             .map((field) => `        @RequestParam(required = false) ${field.name}: ${readModelStorageType(field, false)}?`)
             .join(',\n');
@@ -164,22 +305,10 @@ ${resultFields}
             filterRequestParams,
             '        @PageableDefault(size = 20) pageable: Pageable'
         ].filter(Boolean).join(',\n');
-        const filterArguments = filterFields.map((field) => field.name).join(', ');
-        const filterSpecification = filterFields.length > 0
-            ? `
-
-    private fun filters(${filterFields.map((field) => `${field.name}: ${readModelStorageType(field, false)}?`).join(', ')}): Specification<${entityName}> =
-        Specification { root, _, criteriaBuilder ->
-            val predicates = mutableListOf<Predicate>()
-${filterFields.map((field) => `            ${field.name}?.let { predicates.add(criteriaBuilder.equal(root.get<${readModelStorageType(field, false)}>("${field.name}"), it)) }`).join('\n')}
-            criteriaBuilder.and(*predicates.toTypedArray())
-        }
-`
-            : '';
+        const filterArguments = filterFields.length > 0 ? `${filterFields.map((field) => field.name).join(', ')}, ` : '';
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${resourceName}.kt`), `package ${packageName}
 
-${filterFields.length > 0 ? 'import jakarta.persistence.criteria.Predicate\n' : ''}import org.springframework.data.jpa.repository.JpaRepository
-${filterFields.length > 0 ? 'import org.springframework.data.jpa.repository.JpaSpecificationExecutor\nimport org.springframework.data.jpa.domain.Specification\n' : ''}import org.springframework.data.domain.Page
+import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import org.springframework.data.web.PageableDefault
 import org.springframework.http.ResponseEntity
@@ -190,10 +319,6 @@ ${filterFields.length > 0 ? 'import org.springframework.web.bind.annotation.Requ
 import org.springframework.web.bind.annotation.RestController
 ${imports}
 
-interface ${repositoryName} : JpaRepository<${entityName}, ${idType}>${filterFields.length > 0 ? `, JpaSpecificationExecutor<${entityName}>` : ''} {
-${partialLookupMethods}
-}
-
 @CrossOrigin
 @RestController
 @RequestMapping("/${conceptRoute}/${readmodelRoute}")
@@ -201,15 +326,13 @@ class ${resourceName}(private val repository: ${repositoryName}) {
     @GetMapping
     fun findAll(
 ${findAllParameters}
-    ): Page<${entityName}> =
-        ${filterFields.length > 0 ? `repository.findAll(filters(${filterArguments}), pageable)` : 'repository.findAll(pageable)'}${filterSpecification}
+    ): Page<${name}> =
+        repository.${readModelRepositoryMethodName(filterFields)}(${filterArguments}pageable)
 
 ${idFields.length === 1 ? `
     @GetMapping("/{id}")
-    fun findOne(@PathVariable id: ${idType}): ResponseEntity<${entityName}> =
-        repository.findById(id)
-            .map { ResponseEntity.ok(it) }
-            .orElseGet { ResponseEntity.notFound().build() }
+    fun findOne(@PathVariable id: ${idType}): ResponseEntity<${name}> =
+        repository.findById(id)?.let { ResponseEntity.ok(it) } ?: ResponseEntity.notFound().build()
 ` : ''}
 }
 `);
@@ -226,7 +349,6 @@ ${idFields.length === 1 ? `
             return;
         }
 
-        const entityName = `${name}Entity`;
         const repositoryName = `${name}Repository`;
         const keyName = `${name}Key`;
         const metadataFields = readModelMetadataFields(readmodel);
@@ -268,20 +390,26 @@ ${idFields.length === 1 ? `
             const availableIds = idFields.filter((field) => eventFields.has(field.name));
 
             if (availableIds.length === idFields.length) {
-                const keyExpression = idFields.length > 1
+                const rawKeyExpression = idFields.length > 1
                     ? `${keyName}(${idFields.map((field) => `${field.name} = ${readModelStorageExpression(field, `event.${field.name}`)}`).join(', ')})`
                     : readModelStorageExpression(idFields[0], `event.${idFields[0].name}`);
+                const singleKeyEventField = idFields.length === 1
+                    ? event.fields.find((field) => field.name === idFields[0].name)
+                    : undefined;
+                const keyGuard = singleKeyEventField?.optional
+                    ? `        val key = ${rawKeyExpression} ?: return\n`
+                    : '';
+                const keyExpression = singleKeyEventField?.optional ? 'key' : rawKeyExpression;
                 const initializeIds = idFields
-                    .map((field) => `                this.${field.name} = ${readModelStorageExpression(field, `event.${field.name}`)}`)
+                    .map((field) => `                this.${field.name} = ${singleKeyEventField?.optional && field.name === idFields[0].name ? 'key' : readModelStorageExpression(field, `event.${field.name}`)}`)
                     .join('\n');
                 return `    @EventHandler
     fun on(
         event: ${_eventTitle(event.title)}${metadataParameters}
     ) {
-        val entity = repository.findById(${keyExpression}).orElseGet {
-            ${entityName}().apply {
+${keyGuard}
+        val entity = repository.findProjectionById(${keyExpression}) ?: ${name}Projection().apply {
 ${initializeIds}
-            }
         }
 ${saveAssignments || '        // No read-model fields are present on this event.'}
         repository.save(entity)
@@ -290,11 +418,18 @@ ${saveAssignments || '        // No read-model fields are present on this event.
 
             if (availableIds.length === 1 && idFields.length > 1) {
                 const lookupField = availableIds[0];
+                const lookupEventField = event.fields.find((field) => field.name === lookupField.name);
+                const rawLookupExpression = readModelStorageExpression(lookupField, `event.${lookupField.name}`);
+                const lookupGuard = lookupEventField?.optional
+                    ? `        val lookupValue = ${rawLookupExpression} ?: return\n`
+                    : '';
+                const lookupExpression = lookupEventField?.optional ? 'lookupValue' : rawLookupExpression;
                 return `    @EventHandler
     fun on(
         event: ${_eventTitle(event.title)}${metadataParameters}
     ) {
-        repository.findAllBy${pascal(lookupField.name)}(${readModelStorageExpression(lookupField, `event.${lookupField.name}`)}).forEach { entity ->
+${lookupGuard}
+        repository.findProjectionsBy${pascal(lookupField.name)}(${lookupExpression}).forEach { entity ->
 ${saveAssignments || '            // No read-model fields are present on this event.'}
             repository.save(entity)
         }
@@ -303,7 +438,7 @@ ${saveAssignments || '            // No read-model fields are present on this ev
 
             return `    @EventHandler
     fun on(event: ${_eventTitle(event.title)}) {
-        // Skipped: ${_eventTitle(event.title)} does not provide enough key fields to locate ${entityName}.
+        // Skipped: ${_eventTitle(event.title)} does not provide enough key fields to locate ${name}Projection.
     }`;
         }).join('\n\n');
 
@@ -311,7 +446,8 @@ ${saveAssignments || '            // No read-model fields are present on this ev
 
 import org.axonframework.messaging.eventhandling.annotation.EventHandler
 ${includeMetadata ? 'import org.axonframework.messaging.eventhandling.EventMessage\n' : ''}import org.springframework.stereotype.Component
-${includeMetadata ? `import ${this.model.rootPackage}.support.metadata.ProjectionMetadata\n` : ''}${eventImports}
+${includeMetadata ? `import ${this.model.rootPackage}.shared.application.metadata.ProjectionMetadata\n` : ''}
+${eventImports}
 ${stateImports}
 
 @Component

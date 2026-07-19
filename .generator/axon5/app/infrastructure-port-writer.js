@@ -116,11 +116,11 @@ function slicePortPath(slice) {
 }
 
 function secondaryPortPackage(rootPackage, slice) {
-    return `${rootPackage}.${contextPackage(slice.context)}.infrastructure.secondary.${infrastructureConceptPackage(slice)}`;
+    return `${rootPackage}.${contextPackage(slice.context)}.infrastructure.secondary.${infrastructureConceptPackage(slice)}.routing`;
 }
 
 function secondaryPortPath(slice) {
-    return `${contextPackage(slice.context)}/infrastructure/secondary/${infrastructureConceptPackage(slice)}`;
+    return `${contextPackage(slice.context)}/infrastructure/secondary/${infrastructureConceptPackage(slice)}/routing`;
 }
 
 function infrastructurePortForCommand(command, events, slice, model) {

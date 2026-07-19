@@ -1,4 +1,4 @@
-package <%= rootPackage %>.support
+package <%= rootPackage %>.shared.infrastructure.configuration
 
 import org.axonframework.common.configuration.ComponentBuilder
 import org.axonframework.common.configuration.ComponentRegistry

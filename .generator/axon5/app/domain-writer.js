@@ -44,8 +44,8 @@ const domainWriterMethods = {
         for (const optionSet of optionSets) {
             const values = optionSet.values.map((option) => `    ${option.enumConstant}`).join(',\n');
             this.fs.write(
-                this._kotlinPath(`support/enums/${optionSet.enumName}.kt`),
-                `package ${this.model.rootPackage}.support.enums\n\nenum class ${optionSet.enumName} {\n${values}\n}\n`
+                this._sharedKernelKotlinPath(`shared/domain/enums/${optionSet.enumName}.kt`),
+                `package ${this.model.rootPackage}.shared.domain.enums\n\nenum class ${optionSet.enumName} {\n${values}\n}\n`
             );
         }
     },

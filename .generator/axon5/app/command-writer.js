@@ -230,7 +230,7 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
-import ${this.model.rootPackage}.support.metadata.MetadataFactory
+import ${this.model.rootPackage}.shared.application.metadata.MetadataFactory
 import java.util.concurrent.CompletableFuture
 
 @CrossOrigin

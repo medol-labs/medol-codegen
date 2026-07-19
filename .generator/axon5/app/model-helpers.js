@@ -600,7 +600,7 @@ function kotlinEnumImports(fields, rootPackage) {
     return uniqueBy((fields ?? [])
         .map(fieldOptionsFor)
         .filter(Boolean)
-        .map((optionSet) => `import ${rootPackage}.support.enums.${optionSet.enumName}`), (value) => value)
+        .map((optionSet) => `import ${rootPackage}.shared.domain.enums.${optionSet.enumName}`), (value) => value)
         .join('\n');
 }
 

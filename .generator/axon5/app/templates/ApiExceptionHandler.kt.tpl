@@ -1,4 +1,4 @@
-package <%= rootPackage %>.support
+package <%= rootPackage %>.shared.infrastructure.web
 
 import org.springframework.http.HttpStatus
 import org.springframework.http.ProblemDetail

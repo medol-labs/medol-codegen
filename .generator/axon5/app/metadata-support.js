@@ -4,7 +4,7 @@
  */
 
 function writeMetadataSupport(generator) {
-        generator.fs.write(generator._kotlinPath('support/metadata/MetadataKeys.kt'), `package ${generator.model.rootPackage}.support.metadata
+        generator.fs.write(generator._sharedKernelKotlinPath('shared/application/metadata/MetadataKeys.kt'), `package ${generator.model.rootPackage}.shared.application.metadata
 
 object MetadataKeys {
     const val USER_ID = "userId"
@@ -34,7 +34,7 @@ object MetadataHeaders {
     const val TENANT_ID = "X-Tenant-Id"
 }
 `);
-        generator.fs.write(generator._kotlinPath('support/metadata/MetadataFactory.kt'), `package ${generator.model.rootPackage}.support.metadata
+        generator.fs.write(generator._sharedKernelKotlinPath('shared/application/metadata/MetadataFactory.kt'), `package ${generator.model.rootPackage}.shared.application.metadata
 
 import jakarta.servlet.http.HttpServletRequest
 import org.axonframework.messaging.core.Metadata
@@ -95,7 +95,7 @@ object MetadataFactory {
             ?.takeIf { it.length == 32 }
 }
 `);
-        generator.fs.write(generator._kotlinPath('support/metadata/ProjectionMetadata.kt'), `package ${generator.model.rootPackage}.support.metadata
+        generator.fs.write(generator._sharedKernelKotlinPath('shared/application/metadata/ProjectionMetadata.kt'), `package ${generator.model.rootPackage}.shared.application.metadata
 
 import org.axonframework.messaging.eventhandling.EventMessage
 
@@ -162,7 +162,7 @@ object ProjectionMetadata {
     }
 }
 `);
-        generator.fs.write(generator._kotlinPath('support/metadata/CorrelationConfig.kt'), `package ${generator.model.rootPackage}.support.metadata
+        generator.fs.write(generator._sharedKernelKotlinPath('shared/application/metadata/CorrelationConfig.kt'), `package ${generator.model.rootPackage}.shared.application.metadata
 
 import org.axonframework.messaging.commandhandling.CommandMessage
 import org.axonframework.messaging.core.correlation.MessageOriginProvider
@@ -186,7 +186,7 @@ class CorrelationConfig {
         CorrelationDataInterceptor(messageOriginProvider(), metadataCorrelationDataProvider())
 }
 `);
-        generator.fs.write(generator._kotlinPath('support/metadata/MetadataCommandInterceptor.kt'), `package ${generator.model.rootPackage}.support.metadata
+        generator.fs.write(generator._sharedKernelKotlinPath('shared/application/metadata/MetadataCommandInterceptor.kt'), `package ${generator.model.rootPackage}.shared.application.metadata
 
 import org.axonframework.messaging.commandhandling.CommandMessage
 import org.axonframework.messaging.core.MessageDispatchInterceptor
@@ -219,7 +219,7 @@ class MetadataCommandInterceptor : MessageDispatchInterceptor<CommandMessage> {
     }
 }
 `);
-        generator.fs.write(generator._kotlinPath('support/metadata/AuditLogEntry.kt'), `package ${generator.model.rootPackage}.support.metadata
+        generator.fs.write(generator._sharedKernelKotlinPath('shared/application/metadata/AuditLogEntry.kt'), `package ${generator.model.rootPackage}.shared.application.metadata
 
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
@@ -255,7 +255,7 @@ class AuditLogEntry {
     var payload: String? = null
 }
 `);
-        generator.fs.write(generator._kotlinPath('support/metadata/AuditLogRepository.kt'), `package ${generator.model.rootPackage}.support.metadata
+        generator.fs.write(generator._sharedKernelKotlinPath('shared/application/metadata/AuditLogRepository.kt'), `package ${generator.model.rootPackage}.shared.application.metadata
 
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
@@ -269,7 +269,7 @@ interface AuditLogRepository : JpaRepository<AuditLogEntry, Long> {
     fun findAllByTenantId(tenantId: String, pageable: Pageable): Page<AuditLogEntry>
 }
 `);
-        generator.fs.write(generator._kotlinPath('support/metadata/AuditTrailProjection.kt'), `package ${generator.model.rootPackage}.support.metadata
+        generator.fs.write(generator._sharedKernelKotlinPath('shared/application/metadata/AuditTrailProjection.kt'), `package ${generator.model.rootPackage}.shared.application.metadata
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.axonframework.messaging.eventhandling.EventMessage
@@ -300,7 +300,7 @@ class AuditTrailProjection(
     }
 }
 `);
-        generator.fs.write(generator._kotlinPath('support/metadata/AuditTrailResource.kt'), `package ${generator.model.rootPackage}.support.metadata
+        generator.fs.write(generator._sharedKernelKotlinPath('shared/application/metadata/AuditTrailResource.kt'), `package ${generator.model.rootPackage}.shared.application.metadata
 
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable

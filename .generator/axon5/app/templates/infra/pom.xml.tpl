@@ -12,9 +12,9 @@
     </parent>
 
     <groupId><%= rootPackage %></groupId>
-    <artifactId>medol-infra</artifactId>
+    <artifactId>axon-event-storage-umadb</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>Medol Infra</name>
+    <name>Axon Event Storage UmaDB</name>
 
     <properties>
         <java.version>21</java.version>

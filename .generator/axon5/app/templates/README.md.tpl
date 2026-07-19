@@ -10,7 +10,7 @@ Generated from Medol CodegenModel for Axon Framework 5.1.1.
 ## Run
 
 <% if (modulePrefix) { -%>
-Run this module from the generated multi-module root so Maven can include the sibling `infra` module in the reactor:
+Run this module from the generated multi-module root so Maven can include the sibling `shared-kernel` and `axon-event-storage-umadb` modules in the reactor:
 
 ```bash
 cd ..
@@ -77,7 +77,7 @@ MEDOL_AXON_EVENT_STORAGE=inmemory AXON_SERVER_ENABLED=false ./mvnw spring-boot:r
 ```
 
 <% if (hasInfra) { -%>
-Use the generated UmaDB DCB event store adapter from the `infra` module with the root `.env` file:
+Use the generated UmaDB DCB event store adapter from the `axon-event-storage-umadb` module with the root `.env` file:
 
 ```bash
 <% if (modulePrefix) { -%>
@@ -137,10 +137,10 @@ Build a Docker image directly from Maven:
 ```bash
 <% if (modulePrefix) { -%>
 cd ..
-./mvnw -pl infra -DskipTests install
+./mvnw -pl axon-event-storage-umadb -DskipTests install
 ./mvnw -pl <%= modulePrefix %> jib:dockerBuild
 <% } else if (hasInfra) { -%>
-./mvnw -pl infra -DskipTests install
+./mvnw -pl axon-event-storage-umadb -DskipTests install
 ./mvnw -pl <module-name> jib:dockerBuild
 <% } else { -%>
 ./mvnw -pl <module-name> jib:dockerBuild

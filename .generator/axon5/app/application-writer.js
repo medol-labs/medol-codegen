@@ -8,6 +8,9 @@ const {configureValueTypes} = require('../../common/util/generator');
 const {pascal, kebab, safeDatabaseName, safeIdentifier, filterModelByDeployment} = require('./model-helpers');
 const {writeMetadataSupport} = require('./metadata-support');
 
+const SHARED_KERNEL_MODULE = 'shared-kernel';
+const UMA_DB_EVENT_STORAGE_MODULE = 'axon-event-storage-umadb';
+
 function lowerCamel(value) {
     const name = pascal(value);
     return safeIdentifier(name.charAt(0).toLowerCase() + name.slice(1));
@@ -23,7 +26,7 @@ const applicationWriterMethods = {
         this.fs.copyTpl(this.templatePath('mono-pom.xml.tpl'), this.destinationPath('pom.xml'), {
             rootPackage: this.model.rootPackage,
             appName: kebab(this.model.domain) || 'medol-application',
-            modules: ['infra', ...deployments.map((deployment) => this._deploymentModuleName(deployment))]
+            modules: [SHARED_KERNEL_MODULE, UMA_DB_EVENT_STORAGE_MODULE, ...deployments.map((deployment) => this._deploymentModuleName(deployment))]
         });
         this.fs.copyTpl(this.templatePath('README.md.tpl'), this.destinationPath('README.md'), {
             appName: kebab(this.model.domain) || 'medol-application',
@@ -51,6 +54,7 @@ const applicationWriterMethods = {
         this._copyMavenWrapper();
         this._writeDevSeedScript();
         this._writeAgentSkills();
+        this._writeSharedKernelModule();
         this._writeInfraModule();
         deployments.forEach((deployment) => this._withDeployment(deployment, () => this._writeSkeleton()));
     },
@@ -105,7 +109,8 @@ const applicationWriterMethods = {
             rootPackage: this.model.rootPackage,
             appName,
             appPort: runtime.appPort,
-            hasInfra
+            hasInfra,
+            hasSharedKernel: this._usesSharedKernelModule()
         });
         this.fs.copyTpl(this.templatePath('Application.kt.tpl'), this._kotlinPath('Application.kt'), {
             rootPackage: this.model.rootPackage,
@@ -125,18 +130,9 @@ const applicationWriterMethods = {
             rootPackage: this.model.rootPackage,
             applicationClass
         });
-        this.fs.copyTpl(this.templatePath('OpenApiConfig.kt.tpl'), this._kotlinPath('support/OpenApiConfig.kt'), {
-            rootPackage: this.model.rootPackage,
-            domain: this.model.domain
-        });
-        this.fs.copyTpl(this.templatePath('ApiExceptionHandler.kt.tpl'), this._kotlinPath('support/ApiExceptionHandler.kt'), {
-            rootPackage: this.model.rootPackage
-        });
-        this._writeMetadataSupport();
-        this.fs.copyTpl(this.templatePath('AxonEventStorageConfig.kt.tpl'), this._kotlinPath('support/AxonEventStorageConfig.kt'), {
-            rootPackage: this.model.rootPackage,
-            hasInfra
-        });
+        if (!this._usesSharedKernelModule()) {
+            this._writeSharedKernelArtifacts({hasInfra});
+        }
         this.fs.copyTpl(this.templatePath('application.yml'), this._destPath('src/main/resources/application.yml'), {
             ...runtime,
             hasInfra
@@ -154,7 +150,9 @@ const applicationWriterMethods = {
             this._writeDevSeedScript();
         }
         this._writeValueTypes();
-        this._writeFieldOptionEnums();
+        if (!this._usesSharedKernelModule()) {
+            this._writeFieldOptionEnums();
+        }
         this._writeConceptStates();
         this._writeConceptCatalog();
         this._writeExternalSystems();
@@ -167,21 +165,54 @@ const applicationWriterMethods = {
         writeMetadataSupport(this);
     },
 
+    _usesSharedKernelModule() {
+        return Boolean(this.modulePrefix || this.model.deployment || process.env.CODEGEN_DEPLOYMENT);
+    },
+
+    _writeSharedKernelModule() {
+        this.fs.copyTpl(this.templatePath('shared-kernel/pom.xml.tpl'), this.destinationPath(`${SHARED_KERNEL_MODULE}/pom.xml`), {
+            rootPackage: this.model.rootPackage
+        });
+        const previousWritingSharedKernel = this.writingSharedKernel;
+        this.writingSharedKernel = true;
+        try {
+            this._writeSharedKernelArtifacts({hasInfra: true});
+            this._writeFieldOptionEnums();
+        } finally {
+            this.writingSharedKernel = previousWritingSharedKernel;
+        }
+    },
+
+    _writeSharedKernelArtifacts({hasInfra}) {
+        this.fs.copyTpl(this.templatePath('OpenApiConfig.kt.tpl'), this._sharedKernelKotlinPath('shared/infrastructure/configuration/OpenApiConfig.kt'), {
+            rootPackage: this.model.rootPackage,
+            domain: this.model.domain
+        });
+        this.fs.copyTpl(this.templatePath('ApiExceptionHandler.kt.tpl'), this._sharedKernelKotlinPath('shared/infrastructure/web/ApiExceptionHandler.kt'), {
+            rootPackage: this.model.rootPackage
+        });
+        this._writeMetadataSupport();
+        this.fs.copyTpl(this.templatePath('AxonEventStorageConfig.kt.tpl'), this._sharedKernelKotlinPath('shared/infrastructure/configuration/AxonEventStorageConfig.kt'), {
+            rootPackage: this.model.rootPackage,
+            hasInfra
+        });
+    },
+
     _writeInfraModule() {
-        this.fs.copyTpl(this.templatePath('infra/pom.xml.tpl'), this.destinationPath('infra/pom.xml'), {
+        this.fs.copyTpl(this.templatePath('infra/pom.xml.tpl'), this.destinationPath(`${UMA_DB_EVENT_STORAGE_MODULE}/pom.xml`), {
             rootPackage: this.model.rootPackage
         });
         this.fs.copyTpl(
             this.templatePath('infra/src/main/java/umadb'),
-            this.destinationPath(`infra/src/main/java/${this.model.rootPackage.split('.').join('/')}/infra/umadb`),
+            this.destinationPath(`${UMA_DB_EVENT_STORAGE_MODULE}/src/main/java/${this.model.rootPackage.split('.').join('/')}/infra/umadb`),
             {rootPackage: this.model.rootPackage}
         );
         this.fs.copyTpl(
             this.templatePath('infra/src/test/java/umadb'),
-            this.destinationPath(`infra/src/test/java/${this.model.rootPackage.split('.').join('/')}/infra/umadb`),
+            this.destinationPath(`${UMA_DB_EVENT_STORAGE_MODULE}/src/test/java/${this.model.rootPackage.split('.').join('/')}/infra/umadb`),
             {rootPackage: this.model.rootPackage}
         );
-        this.fs.copy(this.templatePath('infra/src/main/proto'), this.destinationPath('infra/src/main/proto'));
+        this.fs.copy(this.templatePath('infra/src/main/proto'), this.destinationPath(`${UMA_DB_EVENT_STORAGE_MODULE}/src/main/proto`));
     },
 
     _runtimeConfig(appName) {
@@ -326,6 +357,11 @@ ${eventMethods}
 
     _kotlinPath(relative) {
         return this.destinationPath(this._modulePath(`src/main/kotlin/${this.model.rootPackage.split('.').join('/')}/${relative}`));
+    },
+
+    _sharedKernelKotlinPath(relative) {
+        const base = `src/main/kotlin/${this.model.rootPackage.split('.').join('/')}/${relative}`;
+        return this.destinationPath((this.writingSharedKernel || this._usesSharedKernelModule()) ? `${SHARED_KERNEL_MODULE}/${base}` : this._modulePath(base));
     },
 
     _testKotlinPath(relative) {

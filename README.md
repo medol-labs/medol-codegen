@@ -71,6 +71,15 @@ Then select:
 - `slices` to generate slice-level commands, events, read models, REST resources, processors, and specifications
 - concept-root state generation is derived from Medol `concept` references and slice identity fields
 
+For Axon 5 slice generation, choosing `slices` opens a context filter, a keyword
+filter, and then a multi-select slice list. The same selection can be scripted:
+
+```bash
+gen /opt/codegen/.generator/app/ --generator axon5 --generator-type slices --slice-filter RuntimeAgent
+gen /opt/codegen/.generator/app/ --generator axon5 --generator-type slices --context RuntimeOnboarding --slices VerifyRuntimeInfrastructure,DeployRuntimeAgent
+gen /opt/codegen/.generator/app/ --generator axon5 --generator-type slices --all-slices
+```
+
 The top-level generator supports three targets:
 
 - `axon` for the Kotlin/Spring Boot backend

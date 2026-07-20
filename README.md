@@ -148,21 +148,21 @@ If `workspaceId` is omitted, Medol exports the current workspace. The endpoint a
 Inside the code generator container, update that JSON in the mounted workspace:
 
 ```bash
-update-codegen-model
-update-codegen-model <workspace-id>
-update-codegen-model --workspace-id <workspace-id>
+update
+update <workspace-id>
+update --workspace-id <workspace-id>
 ```
 
 The default Medol base URL from the container is `http://host.docker.internal:5172`. Override it when needed:
 
 ```bash
-MEDOL_BASE_URL=http://host.docker.internal:5187 update-codegen-model <workspace-id>
+MEDOL_BASE_URL=http://host.docker.internal:5187 update <workspace-id>
 ```
 
 To inspect available workspace ids from inside the container:
 
 ```bash
-update-codegen-model --list-workspaces
+update --list-workspaces
 ```
 
 The example test script exposes the same Docker-based update step:

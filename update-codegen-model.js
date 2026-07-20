@@ -6,7 +6,7 @@ const path = require("path");
 const DEFAULT_BASE_URL = "http://host.docker.internal:5172";
 
 function usage() {
-  console.error(`Usage: update-codegen-model [workspace-id] [options]
+  console.error(`Usage: update [workspace-id] [options]
 
 Options:
       --base-url <url>       Medol service base URL. Default: ${DEFAULT_BASE_URL}

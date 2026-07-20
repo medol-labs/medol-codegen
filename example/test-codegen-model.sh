@@ -40,7 +40,7 @@ require_image() {
 }
 
 verify_image() {
-  if ! docker run --rm "$image" /bin/sh -lc "command -v update-codegen-model >/dev/null && grep -q 'loadGeneratorModel' /opt/codegen/.generator/axon/app/index.js && grep -q 'allAggregates' /opt/codegen/.generator/axon/aggregates/index.js && grep -q 'loadCodegenModel' /opt/codegen/.generator/axon5/app/index.js"; then
+  if ! docker run --rm "$image" /bin/sh -lc "command -v update >/dev/null && grep -q 'loadGeneratorModel' /opt/codegen/.generator/axon/app/index.js && grep -q 'allAggregates' /opt/codegen/.generator/axon/aggregates/index.js && grep -q 'loadCodegenModel' /opt/codegen/.generator/axon5/app/index.js"; then
     echo "Docker image $image does not include the latest codegen-model generator changes." >&2
     echo "Rebuild it from the code-generator root with:" >&2
     echo "  docker build -f Dockerfile.codegen -t $image ." >&2
@@ -73,7 +73,7 @@ if [[ "$target" == "model" || "$target" == "update" ]]; then
     --rm \
     -v "$script_dir:/workspace" \
     "$image" \
-    update-codegen-model "${model_args[@]}"
+    update "${model_args[@]}"
   exit 0
 fi
 

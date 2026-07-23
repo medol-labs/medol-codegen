@@ -23,18 +23,20 @@ const applicationWriterMethods = {
 
     _writeMonoSkeleton() {
         const deployments = this.model.deployments ?? [];
+        const modules = [SHARED_KERNEL_MODULE, UMA_DB_EVENT_STORAGE_MODULE, ...deployments.map((deployment) => this._deploymentModuleName(deployment))];
+        const appName = this._rootAggregatorName();
         this.fs.copyTpl(this.templatePath('mono-pom.xml.tpl'), this.destinationPath('pom.xml'), {
             rootPackage: this.model.rootPackage,
-            appName: kebab(this.model.domain) || 'medol-application',
-            modules: [SHARED_KERNEL_MODULE, UMA_DB_EVENT_STORAGE_MODULE, ...deployments.map((deployment) => this._deploymentModuleName(deployment))]
+            appName,
+            modules
         });
         this.fs.copyTpl(this.templatePath('README.md.tpl'), this.destinationPath('README.md'), {
-            appName: kebab(this.model.domain) || 'medol-application',
+            appName,
             domain: this.model.domain,
             rootPackage: this.model.rootPackage,
             appPort: 8080,
             dbPort: 5432,
-            dbName: safeDatabaseName(kebab(this.model.domain) || 'medol-application'),
+            dbName: safeDatabaseName(appName),
             modulePrefix: '',
             hasInfra: true
         });
@@ -94,6 +96,11 @@ const applicationWriterMethods = {
 
     _deploymentModuleName(deployment) {
         return kebab(deployment.name) || 'application';
+    },
+
+    _rootAggregatorName() {
+        const appName = kebab(this.model.domain) || 'medol-application';
+        return `${appName}-parent`;
     },
 
     _usesInfraModule() {

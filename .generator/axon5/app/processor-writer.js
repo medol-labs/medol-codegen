@@ -11,11 +11,12 @@ const {
     mappedType,
     pascal,
     kebab,
+    selectionFor,
     safeIdentifier,
     uniqueBy
 } = require('./model-helpers');
 const {contextPackage} = require('../../common/util/value-types');
-const {_commandTitle, _eventTitle, _sliceTitle} = require('../../common/util/naming');
+const {_commandTitle, _eventTitle, _readmodelTitle, _sliceTitle} = require('../../common/util/naming');
 
 function lowerCamel(value) {
     const name = pascal(value);
@@ -47,26 +48,59 @@ function findEvent(generator, eventId) {
     return null;
 }
 
+function findReadModel(generator, readmodelId) {
+    for (const slice of allSlices(generator)) {
+        const readmodel = (slice.readmodels ?? []).find((candidate) => candidate.id === readmodelId);
+        if (readmodel) return {slice, readmodel};
+    }
+    return null;
+}
+
 function dependency(processor, direction, elementType) {
     return (processor.dependencies ?? []).find((candidate) =>
         candidate.direction === direction && candidate.elementType === elementType
     );
 }
 
-function commandExpression(command, event, eventParameter = 'event') {
-    const eventFields = new Map((event.fields ?? []).map((field) => [field.name, field]));
-    const args = commandFieldsWithSelection(command, {fields: []}).map((field) => {
-        const source = field.source?.from?.find((name) => {
-            const sourceField = eventFields.get(String(name).split('.').pop());
-            return sourceField && fieldsCompatible(field, sourceField);
-        });
-        const sourceName = source ? String(source).split('.').pop() : field.name;
-        if (eventFields.has(sourceName) && fieldsCompatible(field, eventFields.get(sourceName))) {
-            return `${field.name} = ${eventParameter}.${sourceName}`;
+function sourceFieldMatch(field, sourceFields) {
+    const source = field.source?.from?.find((name) => {
+        const sourceField = sourceFields.get(String(name).split('.').pop());
+        return sourceField && fieldsCompatible(field, sourceField);
+    });
+    const sourceName = source ? String(source).split('.').pop() : field.name;
+    const sourceField = sourceFields.get(sourceName);
+    if (sourceField && fieldsCompatible(field, sourceField)) {
+        return {sourceName, sourceField};
+    }
+    return null;
+}
+
+function sourceFieldNullable(field, readModelSource = false) {
+    if (field.optional) return true;
+    return readModelSource && field.cardinality !== 'Many';
+}
+
+function commandExpression(command, sourceElement, sourceParameter = 'event', selection = {fields: []}, readModelSource = false) {
+    const sourceFields = new Map((sourceElement.fields ?? []).map((field) => [field.name, field]));
+    const args = commandFieldsWithSelection(command, selection).map((field) => {
+        const match = sourceFieldMatch(field, sourceFields);
+        if (match) {
+            const value = sourceFieldNullable(match.sourceField, readModelSource) && !field.optional
+                ? `${sourceParameter}.${match.sourceName}!!`
+                : `${sourceParameter}.${match.sourceName}`;
+            return `${field.name} = ${value}`;
         }
         return `${field.name} = ${fallbackValue(field)} /* TODO: provide ${field.name} */`;
     });
     return `${_commandTitle(command.title)}(${args.join(', ')})`;
+}
+
+function requiredSourcePredicates(command, sourceElement, sourceParameter = 'todo', selection = {fields: []}, readModelSource = false) {
+    const sourceFields = new Map((sourceElement.fields ?? []).map((field) => [field.name, field]));
+    return commandFieldsWithSelection(command, selection)
+        .map((field) => ({field, match: sourceFieldMatch(field, sourceFields)}))
+        .filter(({field, match}) => match && sourceFieldNullable(match.sourceField, readModelSource) && !field.optional)
+        .map(({match}) => `${sourceParameter}.${match.sourceName} != null`);
 }
 
 function payloadExpression(command, event, eventParameter = 'event') {
@@ -84,6 +118,25 @@ function payloadExpression(command, event, eventParameter = 'event') {
         return `${field.name} = ${value}`;
     });
     return `${commandRequestClass(command)}(${args.join(', ')})`;
+}
+
+function conditionExpression(processor, readmodel, sourceParameter = 'todo') {
+    const expression = processor.metadata?.condition;
+    if (!expression) return 'true';
+    const fieldNames = new Set((readmodel.fields ?? []).map((field) => field.name));
+    return String(expression).replace(/\b[A-Za-z_][A-Za-z0-9_]*\b/g, (token) => {
+        if (token === 'true' || token === 'false' || token === 'null') return token;
+        if (fieldNames.has(token)) return `${sourceParameter}.${token}`;
+        return token;
+    });
+}
+
+function readModelRepositoryPageCall(readmodel) {
+    const filterFields = (readmodel.fields ?? []).filter((field) => field.query);
+    const nullFilters = filterFields.map(() => 'null');
+    return filterFields.length > 0
+        ? `findAllByFilter(${[...nullFilters, 'PageRequest.of(0, 100)'].join(', ')})`
+        : 'findAll(PageRequest.of(0, 100))';
 }
 
 function importLines(values) {
@@ -110,6 +163,10 @@ const processorWriterMethods = {
     },
 
     _writeProcessor(slice, processor) {
+        if (processor.metadata?.onKind === 'todo') {
+            this._writeTodoProcessor(slice, processor);
+            return;
+        }
         const inbound = dependency(processor, 'INBOUND', 'EVENT');
         const outbound = dependency(processor, 'OUTBOUND', 'COMMAND');
         if (!inbound || !outbound) return;
@@ -138,11 +195,74 @@ const processorWriterMethods = {
         }
     },
 
-    _writeLocalCommandProcessor(packageName, context, slicePackage, processorClass, eventImport, commandRef, eventRef) {
+    _writeTodoProcessor(slice, processor) {
+        const inbound = dependency(processor, 'INBOUND', 'READMODEL');
+        const outbound = dependency(processor, 'OUTBOUND', 'COMMAND');
+        if (!inbound || !outbound) return;
+        const readmodelRef = findReadModel(this, inbound.id);
+        const commandRef = findCommand(this, outbound.id);
+        if (!readmodelRef || !commandRef) return;
+
+        const localContextNames = new Set((this.model.contexts ?? []).map((context) => context.name));
+        if (!localContextNames.has(readmodelRef.slice.context)) return;
+        if (!localContextNames.has(commandRef.slice.context)) return;
+
+        const context = contextPackage(slice.context);
+        const slicePackage = _sliceTitle(slice.title);
+        const packageName = `${this.model.rootPackage}.${context}.${slicePackage}`;
+        const processorClass = `${pascal(processor.name)}Processor`;
+        const readmodelClass = _readmodelTitle(readmodelRef.readmodel.title);
+        const readmodelPackage = `${this.model.rootPackage}.${contextPackage(readmodelRef.slice.context)}.${_sliceTitle(readmodelRef.slice.title)}`;
         const command = commandRef.command;
+        const selection = selectionFor(commandRef.slice, this.model);
         const commandClass = _commandTitle(command.title);
         const commandImport = `${this.model.rootPackage}.${contextPackage(commandRef.slice.context)}.${_sliceTitle(commandRef.slice.title)}.${commandClass}`;
-        const commandFields = commandFieldsWithSelection(command, {fields: []});
+        const commandFields = commandFieldsWithSelection(command, selection);
+        const fieldImports = kotlinFieldImports(commandFields, this.model.rootPackage);
+        const imports = importLines([
+            `${readmodelPackage}.${readmodelClass}`,
+            `${readmodelPackage}.${readmodelClass}Repository`,
+            commandImport,
+            fieldImports
+        ]).join('\n');
+        const predicates = [
+            conditionExpression(processor, readmodelRef.readmodel),
+            ...requiredSourcePredicates(command, readmodelRef.readmodel, 'todo', selection, true)
+        ];
+        const condition = predicates.filter(Boolean).join(' && ');
+        this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${processorClass}.kt`), `package ${packageName}
+
+${imports}
+import org.axonframework.messaging.commandhandling.gateway.CommandGateway
+import org.springframework.data.domain.PageRequest
+import org.springframework.scheduling.annotation.Scheduled
+import org.springframework.stereotype.Component
+
+@Component
+class ${processorClass}(
+    private val repository: ${readmodelClass}Repository,
+    private val commandGateway: CommandGateway
+) {
+    @Scheduled(fixedDelayString = "\\${'${'}automation.${kebab(processor.name)}.fixed-delay-ms:5000}")
+    fun processTodo() {
+        repository.${readModelRepositoryPageCall(readmodelRef.readmodel)}
+            .content
+            .asSequence()
+            .filter { todo -> ${condition} }
+            .forEach { todo ->
+                commandGateway.send(${commandExpression(command, readmodelRef.readmodel, 'todo', selection, true)})
+            }
+    }
+}
+`);
+    },
+
+    _writeLocalCommandProcessor(packageName, context, slicePackage, processorClass, eventImport, commandRef, eventRef) {
+        const command = commandRef.command;
+        const selection = selectionFor(commandRef.slice, this.model);
+        const commandClass = _commandTitle(command.title);
+        const commandImport = `${this.model.rootPackage}.${contextPackage(commandRef.slice.context)}.${_sliceTitle(commandRef.slice.title)}.${commandClass}`;
+        const commandFields = commandFieldsWithSelection(command, selection);
         const fieldImports = kotlinFieldImports(commandFields, this.model.rootPackage);
         const imports = importLines([
             eventImport,
@@ -160,7 +280,7 @@ import org.springframework.stereotype.Component
 class ${processorClass}(private val commandGateway: CommandGateway) {
     @EventHandler
     fun on(event: ${eventClassName(eventImport)}): java.util.concurrent.CompletableFuture<${commandClass}> =
-        commandGateway.send(${commandExpression(command, eventRef.event)}).resultMessage.thenApply { it.payload() as ${commandClass} }
+        commandGateway.send(${commandExpression(command, eventRef.event, 'event', selection)}).resultMessage.thenApply { it.payload() as ${commandClass} }
 }
 `);
     },

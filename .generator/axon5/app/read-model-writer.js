@@ -95,12 +95,39 @@ function readModelRepositoryMethodName(filterFields) {
     return filterFields.length > 0 ? 'findAllByFilter' : 'findAll';
 }
 
+function isJsonJpaField(field) {
+    return field.cardinality === 'Multiple' || valueTypeForField(field)?.kind === 'object';
+}
+
+function jpaEntityFieldType(field) {
+    return isJsonJpaField(field) ? 'String?' : readModelStorageFieldType(field);
+}
+
+function jpaEntityFieldDefault(field) {
+    return isJsonJpaField(field) ? 'null' : readModelStorageFieldDefault(field);
+}
+
+function jpaEntityImports(fields, rootPackage) {
+    return readModelStorageImports((fields ?? []).filter((field) => !isJsonJpaField(field)), rootPackage);
+}
+
+function jpaEntityJsonAnnotation(field) {
+    return isJsonJpaField(field) ? '    @Column(columnDefinition = "text")\n' : '';
+}
+
+function jsonTypeReference(field) {
+    return `object : com.fasterxml.jackson.core.type.TypeReference<${readModelStorageFieldType(field)}>() {}`;
+}
+
 const readModelWriterMethods = {
     _writeReadModel(packageName, context, slicePackage, slice, readmodel) {
         const name = _readmodelTitle(readmodel.title);
         const imports = readModelStorageImports(readmodel.fields, this.model.rootPackage);
+        const entityImports = jpaEntityImports(readmodel.fields, this.model.rootPackage);
+        const hasJsonJpaFields = (readmodel.fields ?? []).some(isJsonJpaField);
         const metadataFields = readModelMetadataFields(readmodel);
         const allImports = [imports].filter(Boolean).join('\n');
+        const allEntityImports = [entityImports].filter(Boolean).join('\n');
         const ids = readmodel.fields.filter((field) => field.idAttribute);
         const idFields = ids.length > 0 ? ids : readmodel.fields.slice(0, 1);
         const id = idFields[0];
@@ -109,7 +136,8 @@ const readModelWriterMethods = {
             ...readmodel.fields.map((field) => {
                 const annotation = idFields.some((candidate) => candidate.name === field.name) ? '    @Id\n' : '';
                 const enumAnnotation = isJpaEnumField(field) ? '    @Enumerated(EnumType.STRING)\n' : '';
-                return `${annotation}${enumAnnotation}    var ${field.name}: ${readModelStorageFieldType(field)} = ${readModelStorageFieldDefault(field)}`;
+                const jsonAnnotation = jpaEntityJsonAnnotation(field);
+                return `${annotation}${enumAnnotation}${jsonAnnotation}    var ${field.name}: ${jpaEntityFieldType(field)} = ${jpaEntityFieldDefault(field)}`;
             }),
             ...metadataFields.map((field) => `    override var ${field.name}: ${field.type} = null`)
         ].join('\n');
@@ -174,11 +202,12 @@ ${resultFields}
         this.fs.write(this._kotlinPath(`${readModelPersistencePath(context, name)}/${name}Entity.kt`), `package ${readModelPersistencePackage(this.model.rootPackage, context, name)}
 
 import jakarta.persistence.Entity
+import jakarta.persistence.Column
 import jakarta.persistence.EnumType
 import jakarta.persistence.Enumerated
 import jakarta.persistence.Id
 import jakarta.persistence.IdClass
-${metadataFields.length > 0 ? `import ${this.model.rootPackage}.shared.application.metadata.MetadataProjection\n` : ''}${compositeId ? `import ${packageName}.${keyName}\n` : ''}${allImports}
+${metadataFields.length > 0 ? `import ${this.model.rootPackage}.shared.application.metadata.MetadataProjection\n` : ''}${compositeId ? `import ${packageName}.${keyName}\n` : ''}${allEntityImports}
 
 ${idClassAnnotation}@Entity
 class ${name}Entity${metadataFields.length > 0 ? ' : MetadataProjection' : ''} {
@@ -186,13 +215,13 @@ ${entityFields}
 }
 `);
         if (id) {
-            this._writeReadModelJpaRepository(packageName, context, slicePackage, slice, readmodel, name, idFields);
+            this._writeReadModelJpaRepository(packageName, context, slicePackage, slice, readmodel, name, idFields, hasJsonJpaFields);
             this._writeReadModelResource(packageName, context, slicePackage, slice, readmodel, name, idFields);
             this._writeReadModelProjector(packageName, context, slicePackage, slice, readmodel, name, idFields);
         }
     },
 
-    _writeReadModelJpaRepository(readModelPackageName, context, slicePackage, slice, readmodel, name, idFields) {
+    _writeReadModelJpaRepository(readModelPackageName, context, slicePackage, slice, readmodel, name, idFields, hasJsonJpaFields = false) {
         const entityName = `${name}Entity`;
         const springDataRepositoryName = `SpringData${name}Repository`;
         const repositoryName = `${name}Repository`;
@@ -200,7 +229,8 @@ ${entityFields}
         const id = idFields[0];
         const idType = idFields.length > 1 ? `${name}Key` : readModelStorageType(id, false);
         const filterFields = readModelFilterFields(readmodel);
-        const imports = readModelStorageImports([...idFields, ...filterFields], this.model.rootPackage);
+        const jsonFields = (readmodel.fields ?? []).filter(isJsonJpaField);
+        const imports = readModelStorageImports([...idFields, ...filterFields, ...jsonFields], this.model.rootPackage);
         const partialLookupMethods = idFields.length > 1
             ? idFields.map((field) =>
                 `    fun findAllBy${pascal(field.name)}(${field.name}: ${readModelStorageType(field, false)}): List<${entityName}>`
@@ -235,11 +265,15 @@ ${filterFields.map((field) => `            ${field.name}?.let { predicates.add(c
 `
             : '';
         const entityToProjectionAssignments = [
-            ...readmodel.fields.map((field) => `            it.${field.name} = this@toProjection.${field.name}`),
+            ...readmodel.fields.map((field) => isJsonJpaField(field)
+                ? `            it.${field.name} = this@toProjection.${field.name}?.let { json -> objectMapper.readValue(json, ${jsonTypeReference(field)}) } ?: ${readModelStorageFieldDefault(field)}`
+                : `            it.${field.name} = this@toProjection.${field.name}`),
             ...readModelMetadataFields(readmodel).map((field) => `            it.${field.name} = this@toProjection.${field.name}`)
         ].join('\n');
         const projectionToEntityAssignments = [
-            ...readmodel.fields.map((field) => `            it.${field.name} = this@toEntity.${field.name}`),
+            ...readmodel.fields.map((field) => isJsonJpaField(field)
+                ? `            it.${field.name} = objectMapper.writeValueAsString(this@toEntity.${field.name})`
+                : `            it.${field.name} = this@toEntity.${field.name}`),
             ...readModelMetadataFields(readmodel).map((field) => `            it.${field.name} = this@toEntity.${field.name}`)
         ].join('\n');
         this.fs.write(this._kotlinPath(`${readModelPersistencePath(context, name)}/${springDataRepositoryName}.kt`), `package ${packageName}
@@ -256,6 +290,7 @@ ${partialLookupMethods}
 ${filterFields.length > 0 ? 'import jakarta.persistence.criteria.Predicate\nimport org.springframework.data.jpa.domain.Specification\n' : ''}import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import org.springframework.stereotype.Repository
+${hasJsonJpaFields ? 'import com.fasterxml.jackson.databind.ObjectMapper\n' : ''}${hasJsonJpaFields ? 'import com.fasterxml.jackson.module.kotlin.readValue\n' : ''}
 ${imports}
 import ${readModelPackageName}.${name}
 ${idFields.length > 1 ? `import ${readModelPackageName}.${name}Key\n` : ''}import ${readModelPackageName}.${name}Projection
@@ -263,7 +298,7 @@ import ${readModelPackageName}.${repositoryName}
 import ${readModelPackageName}.toReadModel
 
 @Repository
-class ${adapterName}(private val jpaRepository: ${springDataRepositoryName}) : ${repositoryName} {
+class ${adapterName}(private val jpaRepository: ${springDataRepositoryName}${hasJsonJpaFields ? ', private val objectMapper: ObjectMapper' : ''}) : ${repositoryName} {
 ${findAllImplementation}
 
     override fun findById(id: ${idType}): ${name}? =

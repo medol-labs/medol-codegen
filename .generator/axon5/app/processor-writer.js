@@ -279,8 +279,8 @@ import org.springframework.stereotype.Component
 @Component
 class ${processorClass}(private val commandGateway: CommandGateway) {
     @EventHandler
-    fun on(event: ${eventClassName(eventImport)}): java.util.concurrent.CompletableFuture<${commandClass}> =
-        commandGateway.send(${commandExpression(command, eventRef.event, 'event', selection)}).resultMessage.thenApply { it.payload() as ${commandClass} }
+    fun on(event: ${eventClassName(eventImport)}): java.util.concurrent.CompletableFuture<*> =
+        commandGateway.send(${commandExpression(command, eventRef.event, 'event', selection)}).resultMessage
 }
 `);
     },

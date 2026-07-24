@@ -104,6 +104,7 @@ const sliceOrchestratorMethods = {
             this._writeDecision(packageName, context, slicePackage, slice, selection, relatedEvents, reservations);
             this._writeCommandHandlers(packageName, context, slicePackage, slice, selection, relatedEvents, reservations);
             this._writeCommandResource(packageName, context, slicePackage, slice);
+            this._writeDecisionTest(packageName, context, slicePackage, slice, selection, relatedEvents, reservations);
         }
         slice.readmodels.forEach((readmodel) => this._writeReadModel(packageName, context, slicePackage, slice, readmodel));
         this._writeProcessors(slice);

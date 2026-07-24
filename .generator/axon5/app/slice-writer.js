@@ -10,6 +10,7 @@ const {infrastructurePortWriterMethods} = require('./infrastructure-port-writer'
 const {stateWriterMethods} = require('./state-writer');
 const {readModelWriterMethods} = require('./read-model-writer');
 const {processorWriterMethods} = require('./processor-writer');
+const {testWriterMethods} = require('./test-writer');
 
 const sliceWriterMethods = Object.assign(
     {},
@@ -19,7 +20,8 @@ const sliceWriterMethods = Object.assign(
     infrastructurePortWriterMethods,
     stateWriterMethods,
     readModelWriterMethods,
-    processorWriterMethods
+    processorWriterMethods,
+    testWriterMethods
 );
 
 module.exports = {sliceWriterMethods};

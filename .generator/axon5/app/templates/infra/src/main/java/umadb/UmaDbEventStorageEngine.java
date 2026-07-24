@@ -1,5 +1,7 @@
 package <%= rootPackage %>.infra.umadb;
 
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import org.axonframework.common.Registration;
 import org.axonframework.common.infra.ComponentDescriptor;
 import org.axonframework.eventsourcing.eventstore.AppendCondition;
@@ -34,6 +36,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -161,9 +164,17 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
                 properties.batchSize(),
                 queryItems(condition)
         );
-        var events = client.subscribe(request).join().events().stream()
-                .filter(event -> matches(event, condition))
-                .toList();
+        List<UmaDbClient.SequencedStoredEvent> events;
+        try {
+            events = client.subscribe(request).join().events().stream()
+                    .filter(event -> matches(event, condition))
+                    .toList();
+        } catch (CompletionException ex) {
+            if (isDeadlineExceeded(ex)) {
+                return List.of();
+            }
+            throw ex;
+        }
         events.stream()
                 .mapToLong(UmaDbClient.SequencedStoredEvent::position)
                 .max()
@@ -237,6 +248,18 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
     private static boolean matches(UmaDbClient.SequencedStoredEvent sequencedEvent, EventsCondition condition) {
         var event = sequencedEvent.event();
         return condition.matches(new QualifiedName(event.eventType()), axonTags(event));
+    }
+
+    private static boolean isDeadlineExceeded(Throwable throwable) {
+        var current = throwable;
+        while (current != null) {
+            if (current instanceof StatusRuntimeException statusException
+                    && statusException.getStatus().getCode() == Status.Code.DEADLINE_EXCEEDED) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private static Set<Tag> axonTags(StoredEvent event) {

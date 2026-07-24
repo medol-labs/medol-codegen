@@ -1,5 +1,7 @@
 package <%= rootPackage %>.infra.umadb;
 
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import org.axonframework.eventsourcing.eventstore.AppendCondition;
 import org.axonframework.eventsourcing.eventstore.AppendEventsTransactionRejectedException;
 import org.axonframework.eventsourcing.eventstore.ConsistencyMarker;
@@ -30,6 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 class UmaDbEventStorageEngineTest {
@@ -154,6 +157,19 @@ class UmaDbEventStorageEngineTest {
     }
 
     @Test
+    void streamTreatsUmaDbSubscribeDeadlineAsEmptyBatch() {
+        var client = new RecordingUmaDbClient();
+        client.subscribeFailure = new StatusRuntimeException(Status.DEADLINE_EXCEEDED);
+        var stream = engine(client).stream(StreamingCondition.conditionFor(
+                new GlobalSequenceTrackingToken(4),
+                EventCriteria.havingTags(Tag.of("Order", "order-1"))
+        ));
+
+        assertTrue(stream.next().isEmpty());
+        assertEquals(3L, client.subscribeRequest.after());
+    }
+
+    @Test
     void firstAndLatestTokenUseDcbGlobalPositions() {
         var client = new RecordingUmaDbClient();
         client.events.add(new UmaDbClient.SequencedStoredEvent(
@@ -238,6 +254,7 @@ class UmaDbEventStorageEngineTest {
         private ReadRequest readRequest;
         private SubscribeRequest subscribeRequest;
         private RuntimeException appendFailure;
+        private RuntimeException subscribeFailure;
 
         @Override
         public CompletableFuture<AppendResult> append(AppendRequest request) {
@@ -261,6 +278,9 @@ class UmaDbEventStorageEngineTest {
         @Override
         public CompletableFuture<ReadResult> subscribe(SubscribeRequest request) {
             subscribeRequest = request;
+            if (subscribeFailure != null) {
+                return CompletableFuture.failedFuture(subscribeFailure);
+            }
             return CompletableFuture.completedFuture(new ReadResult(selectAfter(request.after(), request.batchSize(), request.queryItems())));
         }
 

@@ -6,6 +6,7 @@
 const path = require('path');
 const {configureValueTypes} = require('../../common/util/generator');
 const {pascal, kebab, safeDatabaseName, safeIdentifier, filterModelByDeployment} = require('./model-helpers');
+const {manualInfrastructurePortPathForCommand} = require('./infrastructure-port-writer');
 const {writeMetadataSupport} = require('./metadata-support');
 
 const SHARED_KERNEL_MODULE = 'shared-kernel';
@@ -119,7 +120,7 @@ const applicationWriterMethods = {
             hasInfra,
             hasSharedKernel: this._usesSharedKernelModule()
         });
-        this.fs.copyTpl(this.templatePath('Application.kt.tpl'), this._kotlinPath('Application.kt'), {
+        this.fs.copyTpl(this.templatePath('Application.kt.tpl'), this._rootKotlinPath('Application.kt'), {
             rootPackage: this.model.rootPackage,
             applicationClass
         });
@@ -133,7 +134,7 @@ const applicationWriterMethods = {
             dbPort: runtime.dbPort,
             dbName: runtime.dbName
         });
-        this.fs.copyTpl(this.templatePath('ApplicationTest.kt.tpl'), this._testKotlinPath('ApplicationTest.kt'), {
+        this.fs.copyTpl(this.templatePath('ApplicationTest.kt.tpl'), this._rootTestKotlinPath('ApplicationTest.kt'), {
             rootPackage: this.model.rootPackage,
             applicationClass
         });
@@ -163,6 +164,7 @@ const applicationWriterMethods = {
         this._writeConceptStates();
         this._writeConceptCatalog();
         this._writeExternalSystems();
+        this._writeManualInfrastructureDirectories();
         if (!this.modulePrefix) {
             this._writeAgentSkills();
         }
@@ -362,7 +364,33 @@ ${eventMethods}
         this.fs.copy(this.templatePath('seed-dev-data.mjs'), this.destinationPath('scripts/seed-dev-data.mjs'));
     },
 
+    _writeManualInfrastructureDirectories() {
+        this.fs.write(this._manualInfrastructurePath('.gitkeep'), '');
+        this.fs.write(this._manualTestInfrastructurePath('.gitkeep'), '');
+        for (const directory of this._manualInfrastructurePortDirectories()) {
+            this.fs.write(this._manualInfrastructurePath(`${directory}/.gitkeep`), '');
+            this.fs.write(this._manualTestInfrastructurePath(`${directory}/.gitkeep`), '');
+        }
+    },
+
+    _manualInfrastructurePortDirectories() {
+        const directories = new Set();
+        for (const slice of this.model.slices ?? []) {
+            for (const command of slice.commands ?? []) {
+                const directory = manualInfrastructurePortPathForCommand(slice, command);
+                if (directory) {
+                    directories.add(directory);
+                }
+            }
+        }
+        return [...directories].sort();
+    },
+
     _kotlinPath(relative) {
+        return this.destinationPath(this._modulePath(`src/main/kotlin/${this.model.rootPackage.split('.').join('/')}/context/${relative}`));
+    },
+
+    _rootKotlinPath(relative) {
         return this.destinationPath(this._modulePath(`src/main/kotlin/${this.model.rootPackage.split('.').join('/')}/${relative}`));
     },
 
@@ -372,7 +400,19 @@ ${eventMethods}
     },
 
     _testKotlinPath(relative) {
+        return this.destinationPath(this._modulePath(`src/test/kotlin/${this.model.rootPackage.split('.').join('/')}/context/${relative}`));
+    },
+
+    _rootTestKotlinPath(relative) {
         return this.destinationPath(this._modulePath(`src/test/kotlin/${this.model.rootPackage.split('.').join('/')}/${relative}`));
+    },
+
+    _manualInfrastructurePath(relative) {
+        return this.destinationPath(this._modulePath(`src/main/kotlin/${this.model.rootPackage.split('.').join('/')}/infrastructure/${relative}`));
+    },
+
+    _manualTestInfrastructurePath(relative) {
+        return this.destinationPath(this._modulePath(`src/test/kotlin/${this.model.rootPackage.split('.').join('/')}/infrastructure/${relative}`));
     },
 
     _modulePath(relative) {

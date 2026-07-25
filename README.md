@@ -376,6 +376,8 @@ cd example
 
 Generated code is written to `example/generated/axon5` and uses Axon Framework 5 entity, command, event-tagging, and `EventAppender` APIs.
 
+Within each generated backend module, the Spring Boot `Application.kt` entrypoint stays in the root package while generated bounded-context code is written under `src/main/kotlin/<root-package>/context` and context tests under `src/test/kotlin/<root-package>/context`. The skeleton also creates sibling `src/main/kotlin/<root-package>/infrastructure` and `src/test/kotlin/<root-package>/infrastructure` directories for hand-written adapters. For every modeled command with `port`, it creates matching adapter placeholder directories such as `infrastructure/secondary/<context>/<concept>/<port>` using package-safe lowercase names without a trailing `service` suffix. The generator only creates directories there, so adapter implementations can be maintained without being overwritten by subsequent slice generation.
+
 The Axon 5 skeleton includes Maven Wrapper, Docker Compose PostgreSQL, Flyway, Actuator, application configuration, a baseline migration, and a Spring context test. Generated read-model list endpoints use Spring Data `Pageable` and return `Page<T>` by default; the Refine command data provider sends `page`, `size`, and `sort` query parameters and unwraps Spring Page responses.
 
 ### Axon 5 identity modeling

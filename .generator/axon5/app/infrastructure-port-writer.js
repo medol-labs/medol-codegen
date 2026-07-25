@@ -123,6 +123,19 @@ function secondaryPortPath(slice) {
     return `${contextPackage(slice.context)}/infrastructure/secondary/${infrastructureConceptPackage(slice)}/routing`;
 }
 
+function manualInfrastructurePortPath(slice, port) {
+    return `secondary/${contextPackage(slice.context)}/${infrastructureConceptPackage(slice)}/${manualInfrastructurePortDirectory(port.capability.portName)}`;
+}
+
+function manualInfrastructurePortPathForCommand(slice, command) {
+    if (!command?.port) return null;
+    return `secondary/${contextPackage(slice.context)}/${infrastructureConceptPackage(slice)}/${manualInfrastructurePortDirectory(portCapability(slice, command).portName)}`;
+}
+
+function manualInfrastructurePortDirectory(portName) {
+    return _sliceTitle(String(portName ?? '').replace(/Service$/, ''));
+}
+
 function infrastructurePortForCommand(command, events, slice, model) {
     if (!isInfrastructurePortCommand(command, events)) return null;
     const outputs = commandOutputEvents(command, events);
@@ -241,5 +254,7 @@ class ${routerClass}(private val adapters: ObjectProvider<${capability.portName}
 module.exports = {
     constructorArgsFromCommand,
     infrastructurePortForCommand,
+    manualInfrastructurePortPath,
+    manualInfrastructurePortPathForCommand,
     infrastructurePortWriterMethods
 };

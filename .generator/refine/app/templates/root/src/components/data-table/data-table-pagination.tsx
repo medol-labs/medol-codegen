@@ -19,11 +19,13 @@ import { useTranslate } from "@refinedev/core";
 
 interface DataTablePaginationProps<TData> extends React.ComponentProps<"div"> {
   table: Table<TData>;
+  total?: number;
   pageSizeOptions?: number[];
 }
 
 export function DataTablePagination<TData>({
   table,
+  total,
   pageSizeOptions = [10, 20, 30, 40, 50],
   className,
   ...props
@@ -31,6 +33,7 @@ export function DataTablePagination<TData>({
   const t = useTranslate();
   const selectedRows = table.getFilteredSelectedRowModel().rows.length;
   const filteredRows = table.getFilteredRowModel().rows.length;
+  const totalRows = typeof total === "number" ? total : filteredRows;
   const pageCount = table.getPageCount();
   const currentPage = pageCount > 0 ? table.getState().pagination.pageIndex + 1 : 0;
 
@@ -43,10 +46,17 @@ export function DataTablePagination<TData>({
       {...props}
     >
       <div className="flex-1 whitespace-nowrap text-muted-foreground text-sm">
-        {t("table.pagination.selectedRows", {
-          selected: selectedRows,
-          total: filteredRows,
-        }, "{{selected}} of {{total}} row(s) selected.")}
+        <span className="font-medium text-foreground">
+          {t("table.pagination.totalRows", { total: totalRows }, "{{total}} row(s)")}
+        </span>
+        {selectedRows > 0 ? (
+          <span className="ml-2">
+            {t("table.pagination.selectedRows", {
+              selected: selectedRows,
+              total: totalRows,
+            }, "{{selected}} of {{total}} row(s) selected.")}
+          </span>
+        ) : null}
       </div>
       <div className="flex flex-col-reverse items-center gap-4 sm:flex-row sm:gap-6 lg:gap-8">
         <div className="flex items-center space-x-2">

@@ -54,7 +54,6 @@ const {
     valueTypeForField,
     METADATA_FIELD_DEFINITIONS,
     readModelMetadataFields,
-    readModelMetadataParameters,
     readModelMetadataAssignments,
     mappedType,
     kotlinFieldImports,
@@ -82,6 +81,100 @@ const {
 } = require('./model-helpers');
 const {contextPackage} = require('../../common/util/value-types');
 const {_commandTitle, _eventTitle, _readmodelTitle, _sliceTitle} = require('../../common/util/naming');
+
+function conventionallyCompatibleReadModelField(readModelField, eventField) {
+    if (readModelField.type === eventField.type) {
+        return true;
+    }
+    return valueTypeForField(readModelField)?.name === valueTypeForField(eventField)?.name;
+}
+
+function bestSemanticFieldMatch(event, candidates, hint) {
+    if (!candidates.length) {
+        return undefined;
+    }
+    const ranked = candidates
+        .map((field) => {
+            return {
+                field,
+                score: semanticFieldScore(event, field, hint)
+            };
+        })
+        .sort((left, right) => right.score - left.score || left.field.name.length - right.field.name.length);
+    return ranked[0]?.score > 0 ? ranked[0].field : undefined;
+}
+
+function semanticFieldScore(event, field, hint) {
+    const eventWords = semanticWords([event.title, event.name, hint].filter(Boolean).join(' '));
+    const fieldWords = semanticWords(field.name);
+    const overlap = fieldWords.filter((word) => eventWords.includes(word)).length;
+    const extraFieldWords = fieldWords.filter((word) => !eventWords.includes(word)).length;
+    const suffixBonus = hint && field.name.toLowerCase().endsWith(String(hint).toLowerCase()) ? 2 : 0;
+    return overlap * 3 + suffixBonus - extraFieldWords;
+}
+
+function bestSemanticStateMatch(event, states) {
+    if (!states.length) {
+        return undefined;
+    }
+    const eventWords = semanticWords([event.title, event.name].filter(Boolean).join(' '));
+    const ranked = states
+        .map((state) => {
+            const stateWords = semanticWords(state);
+            const overlap = stateWords.filter((word) => eventWords.includes(word)).length;
+            const extraStateWords = stateWords.filter((word) => !eventWords.includes(word)).length;
+            return {
+                state,
+                score: overlap * 3 - extraStateWords
+            };
+        })
+        .sort((left, right) => right.score - left.score || left.state.length - right.state.length);
+    return ranked[0]?.score > 0 ? ranked[0].state : undefined;
+}
+
+function conceptStates(model, context, conceptName) {
+    const concept = (model.concepts ?? []).find((candidate) =>
+        candidate.name === conceptName && (!context || candidate.context === context)
+    );
+    return concept?.states ?? [];
+}
+
+function isFailureEvent(event) {
+    return semanticWords([event.title, event.name].filter(Boolean).join(' ')).includes('failed');
+}
+
+function semanticWords(value) {
+    const synonyms = {
+        failure: 'failed',
+        fail: 'failed',
+        fails: 'failed',
+        failing: 'failed',
+        installation: 'deployment',
+        installed: 'deployment',
+        install: 'deployment',
+        succeeded: 'ready',
+        success: 'ready',
+        established: 'connected'
+    };
+    return splitWords(value)
+        .map((word) => synonyms[word] ?? word)
+        .filter((word) => !['event', 'read', 'model', 'reason', 'at'].includes(word));
+}
+
+function splitWords(value) {
+    return String(value ?? '')
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .replace(/[^A-Za-z0-9]+/g, ' ')
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((word) => word.toLowerCase());
+}
+
+function lowerCamel(value) {
+    const text = String(value ?? '');
+    return text.charAt(0).toLowerCase() + text.slice(1);
+}
 
 function readModelPersistencePackage(rootPackage, context, readmodelName) {
     return `${rootPackage}.${context}.infrastructure.secondary.persistence.${_sliceTitle(readmodelName)}`;
@@ -111,8 +204,15 @@ function jpaEntityImports(fields, rootPackage) {
     return readModelStorageImports((fields ?? []).filter((field) => !isJsonJpaField(field)), rootPackage);
 }
 
-function jpaEntityJsonAnnotation(field) {
-    return isJsonJpaField(field) ? '    @Column(columnDefinition = "text")\n' : '';
+function jpaEntityColumnAnnotation(field) {
+    return isJsonJpaField(field) || isLongTextField(field) ? '    @Column(columnDefinition = "text")\n' : '';
+}
+
+function isLongTextField(field) {
+    if (field.cardinality === 'Multiple' || readModelStorageField(field).type !== 'String') {
+        return false;
+    }
+    return /(?:reason|reasons|message|description|error|output|log|hint|detail|stackTrace)$/i.test(field.name);
 }
 
 function jsonTypeReference(field) {
@@ -136,8 +236,8 @@ const readModelWriterMethods = {
             ...readmodel.fields.map((field) => {
                 const annotation = idFields.some((candidate) => candidate.name === field.name) ? '    @Id\n' : '';
                 const enumAnnotation = isJpaEnumField(field) ? '    @Enumerated(EnumType.STRING)\n' : '';
-                const jsonAnnotation = jpaEntityJsonAnnotation(field);
-                return `${annotation}${enumAnnotation}${jsonAnnotation}    var ${field.name}: ${jpaEntityFieldType(field)} = ${jpaEntityFieldDefault(field)}`;
+                const columnAnnotation = jpaEntityColumnAnnotation(field);
+                return `${annotation}${enumAnnotation}${columnAnnotation}    var ${field.name}: ${jpaEntityFieldType(field)} = ${jpaEntityFieldDefault(field)}`;
             }),
             ...metadataFields.map((field) => `    override var ${field.name}: ${field.type} = null`)
         ].join('\n');
@@ -388,9 +488,13 @@ ${idFields.length === 1 ? `
         const keyName = `${name}Key`;
         const metadataFields = readModelMetadataFields(readmodel);
         const includeMetadata = metadataFields.length > 0;
+        const includeEventTime = events.some((event) =>
+            this._readModelConventionalAssignments(readmodel, event, new Set()).some((assignment) => assignment.usesEventTime)
+        );
+        const includeEventMessage = includeMetadata || includeEventTime;
         const metadataAssignments = readModelMetadataAssignments(metadataFields, '            ');
-        const metadataParameters = includeMetadata
-            ? `,\n${readModelMetadataParameters(metadataFields, '        ')}`
+        const eventMessageParameter = includeEventMessage
+            ? `,\n        message: EventMessage`
             : '';
         const eventImports = events
             .map((event) => `import ${this._eventPackage(event, slice)}.${_eventTitle(event.title)}`)
@@ -401,7 +505,7 @@ ${idFields.length === 1 ? `
                     (candidate.events ?? []).some((item) => item.id === event.id)
                 );
                 const concept = ownerSlice?.concepts?.[0];
-                return ownerSlice?.stateChange?.eventId === event.id
+                return concept
                     && readmodel.fields.some((field) => field.type === `${concept}.State`)
                     ? `import ${this.model.rootPackage}.${contextPackage(ownerSlice.context)}.domain.states.${conceptStateEnumName(concept)}`
                     : undefined;
@@ -414,11 +518,17 @@ ${idFields.length === 1 ? `
                 .filter((field) => eventFields.has(field.name))
                 .map((field) => field.name));
             const derivedAssignments = this._readModelDerivedAssignments(readmodel, event, directFieldNames);
+            const conventionalAssignments = this._readModelConventionalAssignments(
+                readmodel,
+                event,
+                new Set([...directFieldNames, ...derivedAssignments.map((assignment) => assignment.fieldName)])
+            );
             const assignments = [
                 ...readmodel.fields
                 .filter((field) => eventFields.has(field.name))
                 .map((field) => `            entity.${field.name} = ${readModelStorageExpression(field, `event.${field.name}`)}`),
-                ...derivedAssignments.map((assignment) => `            ${assignment}`)
+                ...derivedAssignments.map((assignment) => `            ${assignment.code}`),
+                ...conventionalAssignments.map((assignment) => `            ${assignment.code}`)
             ]
                 .join('\n');
             const saveAssignments = [assignments, metadataAssignments].filter(Boolean).join('\n');
@@ -440,7 +550,7 @@ ${idFields.length === 1 ? `
                     .join('\n');
                 return `    @EventHandler
     fun on(
-        event: ${_eventTitle(event.title)}${metadataParameters}
+        event: ${_eventTitle(event.title)}${eventMessageParameter}
     ) {
 ${keyGuard}
         val entity = repository.findProjectionById(${keyExpression}) ?: ${name}Projection().apply {
@@ -461,7 +571,7 @@ ${saveAssignments || '        // No read-model fields are present on this event.
                 const lookupExpression = lookupEventField?.optional ? 'lookupValue' : rawLookupExpression;
                 return `    @EventHandler
     fun on(
-        event: ${_eventTitle(event.title)}${metadataParameters}
+        event: ${_eventTitle(event.title)}${eventMessageParameter}
     ) {
 ${lookupGuard}
         repository.findProjectionsBy${pascal(lookupField.name)}(${lookupExpression}).forEach { entity ->
@@ -480,20 +590,26 @@ ${saveAssignments || '            // No read-model fields are present on this ev
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${name}Projector.kt`), `package ${packageName}
 
 import org.axonframework.messaging.eventhandling.annotation.EventHandler
-${includeMetadata ? 'import org.axonframework.messaging.eventhandling.EventMessage\n' : ''}import org.springframework.stereotype.Component
+${includeEventMessage ? 'import org.axonframework.messaging.eventhandling.EventMessage\n' : ''}import org.springframework.stereotype.Component
 ${includeMetadata ? `import ${this.model.rootPackage}.shared.application.metadata.ProjectionMetadata\n` : ''}
 ${eventImports}
 ${stateImports}
+${includeEventTime ? 'import java.time.LocalDateTime\nimport java.time.ZoneOffset\n' : ''}
 
 @Component
 class ${name}Projector(private val repository: ${repositoryName}) {
 ${handlers}
+${includeEventTime ? `
+    private fun eventTime(message: EventMessage): LocalDateTime =
+        LocalDateTime.ofInstant(message.timestamp(), ZoneOffset.UTC)
+` : ''}
 }
 `);
     },
 
     _readModelDerivedAssignments(readmodel, event, directFieldNames = new Set()) {
         const assignments = [];
+        const assignedFieldNames = new Set(directFieldNames);
         const eventFields = event.fields ?? [];
         for (const field of readmodel.fields ?? []) {
             const lookup = field.source?.lookup;
@@ -517,10 +633,17 @@ ${handlers}
 
             const expression = readModelStorageExpression(field, `event.${eventField.name}`);
             if (String(lookup.missingValuePolicy ?? '').toLowerCase() === 'keep' && (eventField.optional || field.optional)) {
-                assignments.push(`event.${eventField.name}?.let { entity.${field.name} = ${readModelStorageExpression(field, 'it')} }`);
+                assignments.push({
+                    fieldName: field.name,
+                    code: `event.${eventField.name}?.let { entity.${field.name} = ${readModelStorageExpression(field, 'it')} }`
+                });
             } else {
-                assignments.push(`entity.${field.name} = ${expression}`);
+                assignments.push({
+                    fieldName: field.name,
+                    code: `entity.${field.name} = ${expression}`
+                });
             }
+            assignedFieldNames.add(field.name);
         }
 
         const ownerSlice = this.model.slices.find((slice) =>
@@ -533,10 +656,115 @@ ${handlers}
         }
         const field = readmodel.fields.find((candidate) => candidate.type === `${concept}.State`);
         if (field
-            && !directFieldNames.has(field.name)
+            && !assignedFieldNames.has(field.name)
             && !eventFields.some((candidate) => candidate.name === field.name)
             && conceptHasState(this.model, ownerSlice.context, concept, stateChange.to)) {
-            assignments.push(`entity.${field.name} = ${conceptStateEnumName(concept)}.${constant(stateChange.to)}`);
+            assignments.push({
+                fieldName: field.name,
+                code: `entity.${field.name} = ${conceptStateEnumName(concept)}.${constant(stateChange.to)}`
+            });
+        }
+
+        return assignments;
+    },
+
+    _readModelConventionalAssignments(readmodel, event, assignedFieldNames = new Set()) {
+        const assignments = [];
+        const eventFields = event.fields ?? [];
+        const ownerSlice = this.model.slices.find((slice) =>
+            (slice.events ?? []).some((candidate) => candidate.id === event.id)
+        );
+        const stateChange = ownerSlice?.stateChange?.eventId === event.id ? ownerSlice.stateChange : undefined;
+
+        const addAssignment = (field, code, usesEventTime = false) => {
+            if (!field || assignedFieldNames.has(field.name)) {
+                return;
+            }
+            assignments.push({fieldName: field.name, code, usesEventTime});
+            assignedFieldNames.add(field.name);
+        };
+
+        for (const eventField of eventFields) {
+            if (eventField.name === 'failureReason') {
+                continue;
+            }
+            const suffix = pascal(eventField.name);
+            const candidates = (readmodel.fields ?? []).filter((field) =>
+                !assignedFieldNames.has(field.name)
+                && field.name !== eventField.name
+                && field.name.endsWith(suffix)
+                && conventionallyCompatibleReadModelField(field, eventField)
+            );
+            const field = bestSemanticFieldMatch(event, candidates, eventField.name);
+            if (field) {
+                addAssignment(field, `entity.${field.name} = ${readModelStorageExpression(field, `event.${eventField.name}`)}`);
+            }
+        }
+
+        if (stateChange?.to) {
+            const stateAtSuffix = `${lowerCamel(stateChange.to)}At`;
+            const candidates = (readmodel.fields ?? []).filter((field) =>
+                !assignedFieldNames.has(field.name)
+                && field.type === 'DateTime'
+                && field.name.toLowerCase().endsWith(stateAtSuffix.toLowerCase())
+            );
+            const field = bestSemanticFieldMatch(event, candidates, stateChange.to);
+            if (field) {
+                addAssignment(field, `entity.${field.name} = eventTime(message)`, true);
+            }
+
+            if (!semanticWords(stateChange.to).includes('failed')) {
+                const resolvedEvent = {
+                    ...event,
+                    title: [event.title, stateChange.to].filter(Boolean).join(' '),
+                    name: [event.name, stateChange.to].filter(Boolean).join(' ')
+                };
+                (readmodel.fields ?? [])
+                    .filter((field) =>
+                        !assignedFieldNames.has(field.name)
+                        && field.optional
+                        && (
+                            field.name.endsWith('FailedAt')
+                            || field.name.endsWith('FailureReason')
+                        )
+                        && semanticFieldScore(resolvedEvent, field, stateChange.to) > 0
+                    )
+                    .forEach((field) => {
+                        addAssignment(field, `entity.${field.name} = null`);
+                    });
+            }
+        }
+
+        if (isFailureEvent(event)) {
+            const failedAtField = bestSemanticFieldMatch(event, (readmodel.fields ?? []).filter((field) =>
+                !assignedFieldNames.has(field.name)
+                && field.type === 'DateTime'
+                && field.name.endsWith('FailedAt')
+            ), 'failedAt');
+            if (failedAtField) {
+                addAssignment(failedAtField, `entity.${failedAtField.name} = eventTime(message)`, true);
+            }
+
+            const failureReasonEventField = eventFields.find((field) => field.name === 'failureReason');
+            const failureReasonField = failureReasonEventField ? bestSemanticFieldMatch(event, (readmodel.fields ?? []).filter((field) =>
+                !assignedFieldNames.has(field.name)
+                && field.type === failureReasonEventField.type
+                && field.name.endsWith('FailureReason')
+            ), 'failureReason') : undefined;
+            if (failureReasonField) {
+                addAssignment(failureReasonField, `entity.${failureReasonField.name} = event.failureReason`);
+            }
+
+            const concept = ownerSlice?.concepts?.[0];
+            const stateField = concept ? (readmodel.fields ?? []).find((field) =>
+                !assignedFieldNames.has(field.name)
+                && field.type === `${concept}.State`
+            ) : undefined;
+            const failedState = concept ? bestSemanticStateMatch(event, conceptStates(this.model, ownerSlice.context, concept)
+                .filter((state) => semanticWords(state).includes('failed'))) : undefined;
+            if (stateField && failedState) {
+                addAssignment(stateField, `entity.${stateField.name} = ${conceptStateEnumName(concept)}.${constant(failedState)}`);
+            }
         }
 
         return assignments;

@@ -144,6 +144,13 @@ function normalizedValue(field, commandFields) {
         ?? commandFields.find((candidate) => candidate.name === field.name.replace(/^normalized/, '').replace(/^./, (value) => value.toLowerCase()));
     if (!source) return testValue(field);
     const raw = testValue(source);
+    const valueType = valueTypeForField(source);
+    if (valueType?.kind === 'scalar') {
+        const scalarValue = `${raw}.value`;
+        return String(valueType.baseType ?? '').toLowerCase() === 'string'
+            ? `${scalarValue}.trim().lowercase()`
+            : `${scalarValue}.toString().trim().lowercase()`;
+    }
     return String(source.type ?? '').toLowerCase() === 'string'
         ? `${raw}.trim().lowercase()`
         : `${raw}.toString().trim().lowercase()`;

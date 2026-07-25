@@ -34,6 +34,12 @@ type SpringPagePayload = {
   size?: number;
   totalElements?: number;
   totalPages?: number;
+  page?: {
+    number?: number;
+    size?: number;
+    totalElements?: number;
+    totalPages?: number;
+  };
 };
 
 type ListPayload<TData extends BaseRecord> = {
@@ -47,6 +53,27 @@ const axonSegment = (value: string): string =>
 
 const routeSegment = (value: string): string =>
   value.replace(/[\s_-]+/g, "").toLowerCase();
+
+const commandErrorMessage = async (
+  response: Response,
+  fallback: string,
+): Promise<string> => {
+  const contentType = response.headers.get("content-type") ?? "";
+
+  if (contentType.includes("application/json") || contentType.includes("+json")) {
+    const payload = await response.json().catch(() => null);
+    if (payload && typeof payload === "object") {
+      const error = payload as Record<string, unknown>;
+      const message = error.detail ?? error.message ?? error.title;
+      if (typeof message === "string" && message.trim()) {
+        return message;
+      }
+    }
+  }
+
+  const text = await response.text().catch(() => "");
+  return text.trim() || fallback;
+};
 
 const idField = (meta?: AxonMeta): string =>
   typeof meta?.idField === "string" ? meta.idField : "id";
@@ -139,6 +166,14 @@ const isSpringPagePayload = (payload: unknown): payload is SpringPagePayload =>
       Array.isArray((payload as SpringPagePayload).content),
   );
 
+const normalizeSpringPage = (payload: SpringPagePayload): SpringPagePayload => ({
+  ...payload,
+  number: payload.number ?? payload.page?.number,
+  size: payload.size ?? payload.page?.size,
+  totalElements: payload.totalElements ?? payload.page?.totalElements,
+  totalPages: payload.totalPages ?? payload.page?.totalPages,
+});
+
 const withQuery = (path: string, params?: URLSearchParams): string => {
   const query = params?.toString();
 
@@ -169,7 +204,7 @@ const toListPayload = <TData extends BaseRecord = BaseRecord>(
   payload: unknown,
 ): ListPayload<TData> => {
   const data = unwrapAxonReadModel(payload);
-  const page = isSpringPagePayload(data) ? data : undefined;
+  const page = isSpringPagePayload(data) ? normalizeSpringPage(data) : undefined;
   const records = toRecords<TData>(payload);
 
   return {
@@ -527,7 +562,14 @@ export const commandDataProvider = (
       );
 
       if (!res.ok) {
-        throw new Error(`Command failed: ${resource}.${command}`);
+        const error = new Error(
+          await commandErrorMessage(
+            res,
+            `Command failed: ${resource}.${command}`,
+          ),
+        ) as Error & { statusCode?: number };
+        error.statusCode = res.status;
+        throw error;
       }
 
       return {

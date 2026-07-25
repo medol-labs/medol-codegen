@@ -12,6 +12,25 @@ interface RefineDataTableProps<TData extends BaseRecord> {
   children?: React.ReactNode;
 }
 
+const getTotal = <TData extends BaseRecord>(table: UseTableReturnType<TData, HttpError>) => {
+  const refineCore = table.refineCore as Record<string, unknown>;
+  const tableQuery = refineCore.tableQuery as Record<string, unknown> | undefined;
+  const queryData = tableQuery?.data as Record<string, unknown> | undefined;
+  const result = refineCore.result as Record<string, unknown> | undefined;
+
+  const candidates = [
+    queryData?.total,
+    queryData?.rowCount,
+    queryData?.data && typeof queryData.data === "object"
+      ? (queryData.data as Record<string, unknown>).total
+      : undefined,
+    result?.total,
+    refineCore.total,
+  ];
+
+  return candidates.find((value): value is number => typeof value === "number");
+};
+
 export function RefineDataTable<TData extends BaseRecord>({
   table,
   actionBar,
@@ -28,7 +47,7 @@ export function RefineDataTable<TData extends BaseRecord>({
   }
 
   return (
-    <DataTable table={reactTable} actionBar={actionBar}>
+    <DataTable table={reactTable} actionBar={actionBar} total={getTotal(table)}>
       {children}
     </DataTable >
   );

@@ -95,6 +95,18 @@ class UmaDbEventStorageEngineTest {
     }
 
     @Test
+    void appendInfinityConsistencyMarkerChecksAfterMaximumPosition() {
+        var client = new RecordingUmaDbClient();
+        var engine = engine(client);
+        var condition = AppendCondition.withCriteria(EventCriteria.havingTags(Tag.of("Order", "order-1")))
+                .withMarker(ConsistencyMarker.INFINITY);
+
+        commit(engine.appendEvents(condition, null, List.of(tagged("created", "OrderCreated", "Order", "order-1"))).join());
+
+        assertEquals(Long.MAX_VALUE, client.appendRequest.condition().after());
+    }
+
+    @Test
     void appendWritesOnlyWhenTransactionCommits() {
         var client = new RecordingUmaDbClient();
         var engine = engine(client);
@@ -126,15 +138,23 @@ class UmaDbEventStorageEngineTest {
                 7,
                 stored("stored", "OrderCreated", Map.of(), "Order", "order-1")
         ));
+        client.events.add(new UmaDbClient.SequencedStoredEvent(
+                9,
+                stored("unrelated", "OrderCreated", Map.of(), "Order", "order-2")
+        ));
         var stream = engine(client).source(SourcingCondition.conditionFor(EventCriteria.havingTags(Tag.of("Order", "order-1"))));
 
         var entry = stream.next().orElseThrow();
         var token = TrackingToken.fromContext(entry).orElseThrow();
+        var terminal = stream.next().orElseThrow();
+        var marker = terminal.getResource(ConsistencyMarker.RESOURCE_KEY);
 
         assertNull(client.readRequest.limit());
         assertEquals(16, client.readRequest.batchSize());
         assertEquals("stored", entry.message().identifier());
         assertEquals(8L, token.position().orElseThrow());
+        assertFalse(entry.containsResource(ConsistencyMarker.RESOURCE_KEY));
+        assertEquals(10L, GlobalIndexConsistencyMarker.position(marker));
     }
 
     @Test

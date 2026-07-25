@@ -30,6 +30,8 @@ import org.axonframework.messaging.eventstreaming.EventCriterion;
 import org.axonframework.messaging.eventstreaming.EventsCondition;
 import org.axonframework.messaging.eventstreaming.StreamingCondition;
 import org.axonframework.messaging.eventstreaming.Tag;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
 import java.util.HashMap;
@@ -42,6 +44,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 public final class UmaDbEventStorageEngine implements EventStorageEngine {
+    private static final Logger logger = LoggerFactory.getLogger(UmaDbEventStorageEngine.class);
     private static final String AXON_EVENT_VERSION = "axon_event_version";
     private static final String AXON_PAYLOAD_TYPE = "axon_payload_type";
 
@@ -70,16 +73,48 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
                 storedEvents,
                 appendCondition(appendCondition)
         );
+        if (logger.isDebugEnabled()) {
+            logger.debug(
+                    "Preparing UmaDB append. eventCount={}, eventTypes={}, eventTags={}, failIfEventsMatch={}, after={}",
+                    storedEvents.size(),
+                    storedEvents.stream().map(StoredEvent::eventType).toList(),
+                    storedEvents.stream().map(UmaDbEventStorageEngine::storedEventTags).toList(),
+                    request.condition() == null ? List.of() : request.condition().failIfEventsMatch(),
+                    request.condition() == null ? null : request.condition().after()
+            );
+        }
         return CompletableFuture.completedFuture(new UmaDbAppendTransaction(client, request, appendCondition));
     }
 
     @Override
     public MessageStream<EventMessage> source(SourcingCondition condition) {
         var start = sourceStart(condition);
-        var request = new UmaDbClient.ReadRequest(start, null, properties.batchSize(), queryItems(condition));
+        var head = client.head().join().position();
+        var queryItems = queryItems(condition);
+        var request = new UmaDbClient.ReadRequest(start, null, properties.batchSize(), queryItems);
+        logger.debug("Reading UmaDB source. start={}, head={}, queryItems={}", start, head, queryItems);
         var result = client.read(request).join();
+        if (logger.isDebugEnabled()) {
+            logger.debug(
+                    "Read UmaDB source result. start={}, head={}, queryItems={}, eventCount={}, events={}",
+                    start,
+                    head,
+                    queryItems,
+                    result.events().size(),
+                    result.events().stream()
+                            .map(event -> event.position() + ":" + event.event().eventType() + storedEventTags(event.event()))
+                            .toList()
+            );
+            logger.debug(
+                    "Read UmaDB source payload types. start={}, payloadTypes={}",
+                    start,
+                    result.events().stream()
+                            .map(event -> event.position() + ":" + event.event().payload().getClass().getName())
+                            .toList()
+            );
+        }
         return eventStream(result.events(), condition)
-                .concatWith(terminalStream(result.events(), start));
+                .concatWith(terminalStream(head));
     }
 
     @Override
@@ -147,11 +182,8 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
         );
     }
 
-    private MessageStream<EventMessage> terminalStream(List<UmaDbClient.SequencedStoredEvent> events, long start) {
-        var markerPosition = events.stream()
-                .mapToLong(UmaDbClient.SequencedStoredEvent::position)
-                .max()
-                .orElse(Math.max(-1, start - 1)) + 1;
+    private MessageStream<EventMessage> terminalStream(long head) {
+        var markerPosition = Math.max(-1, head) + 1;
         return MessageStream.just(
                 TerminalEventMessage.INSTANCE,
                 ignored -> Context.with(ConsistencyMarker.RESOURCE_KEY, new GlobalIndexConsistencyMarker(markerPosition))
@@ -221,6 +253,12 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
         return new UmaDbClient.QueryItem(types, tags);
     }
 
+    private static List<String> storedEventTags(StoredEvent event) {
+        return event.tags().stream()
+                .map(tag -> tag.key() + "=" + tag.value())
+                .toList();
+    }
+
     private static UmaDbClient.AppendCondition appendCondition(AppendCondition condition) {
         return new UmaDbClient.AppendCondition(
                 queryItems(condition),
@@ -233,13 +271,18 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
         if (position == null) {
             return null;
         }
+        if (position == Long.MAX_VALUE) {
+            return Long.MAX_VALUE;
+        }
         return position <= 0 ? null : position - 1;
     }
 
     private static Long globalPosition(ConsistencyMarker marker) {
+        if (marker == ConsistencyMarker.INFINITY) {
+            return Long.MAX_VALUE;
+        }
         try {
-            var position = GlobalIndexConsistencyMarker.position(marker);
-            return position == Long.MAX_VALUE ? null : position;
+            return GlobalIndexConsistencyMarker.position(marker);
         } catch (IllegalArgumentException ignored) {
             return null;
         }
@@ -289,7 +332,6 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
     private static Context trackedContext(UmaDbClient.SequencedStoredEvent event) {
         var context = Context.empty();
         context = TrackingToken.addToContext(context, new GlobalSequenceTrackingToken(event.position() + 1));
-        context = ConsistencyMarker.addToContext(context, new GlobalIndexConsistencyMarker(event.position() + 1));
         return context;
     }
 
@@ -324,7 +366,15 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
         @Override
         public CompletableFuture<UmaDbClient.AppendResult> commit() {
             return client.append(request)
-                    .exceptionallyCompose(ex -> CompletableFuture.failedFuture(appendException(condition, ex)));
+                    .exceptionallyCompose(ex -> {
+                        logger.debug(
+                                "UmaDB append failed. failIfEventsMatch={}, after={}, error={}",
+                                request.condition() == null ? List.of() : request.condition().failIfEventsMatch(),
+                                request.condition() == null ? null : request.condition().after(),
+                                ex.toString()
+                        );
+                        return CompletableFuture.failedFuture(appendException(condition, ex));
+                    });
         }
 
         @Override

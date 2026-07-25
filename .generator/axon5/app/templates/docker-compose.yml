@@ -43,9 +43,10 @@ services:
     ports:
       - "50051:50051"
     volumes:
-      - ./volumes/umadb:/data
+      - umadb_data:/data
 
 volumes:
   postgres_data:
   axon_server_data:
   axon_server_events:
+  umadb_data:

@@ -34,7 +34,7 @@ public final class GrpcUmaDbClient implements UmaDbClient, AutoCloseable {
     private final ObjectMapper objectMapper;
 
     public GrpcUmaDbClient(UmaDbEventStorageProperties properties) {
-        this(properties, new ObjectMapper());
+        this(properties, new ObjectMapper().findAndRegisterModules());
     }
 
     public GrpcUmaDbClient(UmaDbEventStorageProperties properties, ObjectMapper objectMapper) {

@@ -17,11 +17,13 @@ import { useTranslate } from "@refinedev/core";
 interface DataTableProps<TData> extends React.ComponentProps<"div"> {
   table: TanstackTable<TData>;
   actionBar?: React.ReactNode;
+  total?: number;
 }
 
 export function DataTable<TData>({
   table,
   actionBar,
+  total,
   children,
   className,
   ...props
@@ -94,7 +96,7 @@ export function DataTable<TData>({
         </Table>
       </div>
       <div className="flex flex-col gap-2.5">
-        <DataTablePagination table={table} />
+        <DataTablePagination table={table} total={total} />
         {actionBar &&
           table.getFilteredSelectedRowModel().rows.length > 0 &&
           actionBar}

@@ -189,7 +189,6 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
                 },
                 filters,
                 pagination: {
-                    current: 1,
                     currentPage: 1,
                     pageSize: 100,
                     mode: 'server'

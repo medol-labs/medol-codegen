@@ -27,7 +27,7 @@ services:
     ports:
       - "50051:50051"
     volumes:
-      - ./volumes/umadb:/data
+      - umadb_data:/data
 
 <% deployments.forEach((deployment) => { -%>
   <%= deployment.serviceName %>-postgres:
@@ -50,6 +50,7 @@ services:
 volumes:
   axon_server_data:
   axon_server_events:
+  umadb_data:
 <% deployments.forEach((deployment) => { -%>
   <%= deployment.serviceName %>_postgres_data:
 <% }) -%>

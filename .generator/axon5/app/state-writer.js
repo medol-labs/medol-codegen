@@ -88,6 +88,58 @@ function normalizeOutcomeName(value) {
     return String(value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
+function semanticOutcomeWords(value) {
+    const synonyms = {
+        failure: 'failed',
+        fail: 'failed',
+        fails: 'failed',
+        failing: 'failed',
+        installation: 'deployment',
+        installed: 'deployment',
+        install: 'deployment',
+        succeeded: 'ready',
+        success: 'ready',
+        established: 'connected'
+    };
+    return String(value ?? '')
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .replace(/[^A-Za-z0-9]+/g, ' ')
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((word) => word.toLowerCase())
+        .map((word) => synonyms[word] ?? word);
+}
+
+function bestStateForEvent(event, states) {
+    const eventName = normalizeOutcomeName(`${event.name} ${event.title}`);
+    const direct = states.find((state) => eventName.includes(normalizeOutcomeName(state)));
+    if (direct) {
+        return direct;
+    }
+
+    const eventWords = semanticOutcomeWords(`${event.name} ${event.title}`);
+    const ranked = states
+        .map((state) => {
+            const stateWords = semanticOutcomeWords(state);
+            const overlap = stateWords.filter((word) => eventWords.includes(word)).length;
+            const extraStateWords = stateWords.filter((word) => !eventWords.includes(word)).length;
+            return {
+                state,
+                score: overlap * 3 - extraStateWords
+            };
+        })
+        .sort((left, right) => right.score - left.score || left.state.length - right.state.length);
+    return ranked[0]?.score > 0 ? ranked[0].state : undefined;
+}
+
+function selectionTagValueExpression(field) {
+    const value = `selection.${field.alias}`;
+    return valueTypeForField(field)?.kind === 'scalar'
+        ? `${value}.value.toString()`
+        : `${value}.toString()`;
+}
+
 function resultEventArgument(field, command, resultVariable) {
     if (field.idAttribute || field.technicalAttribute) {
         const commandField = (command.fields ?? []).find((candidate) => candidate.name === field.name);
@@ -170,10 +222,10 @@ ${properties}
             const transition = childTransitionByEventId.get(event.id);
             const stateTransition = transitionByEventId.get(event.id);
             const inferredState = concept && !stateTransition
-                ? (this.model.concepts ?? [])
+                ? bestStateForEvent(event, (this.model.concepts ?? [])
                     .find((candidate) => candidate.name === concept && (!slice.context || candidate.context === slice.context))
                     ?.states
-                    ?.find((state) => normalizeOutcomeName(`${event.name} ${event.title}`).includes(normalizeOutcomeName(state)))
+                    ?? [])
                 : undefined;
             const assignments = [
                 ...(concept && stateTransition && !transition && conceptHasState(this.model, slice.context, concept, stateTransition.to) ? [`        currentState = ${stateEnumName}.${constant(stateTransition.to)}`] : []),
@@ -194,7 +246,7 @@ ${properties}
             ? `@EventSourced(idType = ${idType}::class, tagKey = ${tagOwner}Tags.${constant(selection.fields[0].tag.name)})`
             : `@EventSourced(idType = ${selection.name}::class)`;
         const criteria = selection.fields
-            .map((field) => `EventCriteria.havingTags(Tag.of(${tagOwner}Tags.${constant(field.tag.name)}, selection.${field.alias}.toString()))`)
+            .map((field) => `EventCriteria.havingTags(Tag.of(${tagOwner}Tags.${constant(field.tag.name)}, ${selectionTagValueExpression(field)}))`)
             .join(',\n                ');
         const criteriaFunction = singleTag
             ? ''

@@ -5,12 +5,14 @@ import type { PropsWithChildren } from "react";
 import { CreateButton } from "@/components/refine-ui/buttons/create";
 import { Breadcrumb } from "@/components/refine-ui/layout/breadcrumb";
 import { Separator } from "@/components/ui/separator";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useResourceParams, useTranslate, useUserFriendlyName } from "@refinedev/core";
 import { type Table as TanstackTable } from "@tanstack/react-table";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import { DataTableFilterList } from "@/components/data-table/data-table-filter-list";
 import { DataTableSortList } from "@/components/data-table/data-table-sort-list";
+import { Loader2, Search } from "lucide-react";
 
 type ListViewProps = PropsWithChildren<{
   className?: string;
@@ -33,15 +35,41 @@ type ListHeaderProps = PropsWithChildren<{
 
 interface DataTableProps<TData> extends React.ComponentProps<"div"> {
   table: TanstackTable<TData>;
+  isQuerying?: boolean;
+  onQuery?: () => void;
 }
 
 export const ListToolbar = <TData,>({
-  table
+  table,
+  isQuerying = false,
+  onQuery,
 }: DataTableProps<TData>) => {
-  return (<DataTableToolbar table={table} >
+  const translate = useTranslate();
+
+  return (<DataTableToolbar table={table}>
     <DataTableFilterList table={table} />
     <DataTableSortList table={table}></DataTableSortList>
-  </DataTableToolbar >
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className="ml-auto"
+      disabled={isQuerying}
+      onClick={() => {
+        table.setPageIndex(0);
+        onQuery?.();
+      }}
+    >
+      {isQuerying ? (
+        <Loader2 className="h-4 w-4 animate-spin" />
+      ) : (
+        <Search className="h-4 w-4" />
+      )}
+      {isQuerying
+        ? translate("buttons.querying", "Searching")
+        : translate("buttons.search", "Search")}
+    </Button>
+  </DataTableToolbar>
   );
 }
 

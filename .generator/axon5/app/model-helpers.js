@@ -119,6 +119,13 @@ function uniqueFieldLabel(concept, fieldName) {
 
 function normalizedFieldExpression(field, receiver) {
     const value = receiver ? `${receiver}.${field.name}` : field.name;
+    const valueType = valueTypeForField(field);
+    if (valueType?.kind === 'scalar') {
+        const scalarValue = `${value}.value`;
+        return String(resolvedBaseType(valueType)).toLowerCase() === 'string'
+            ? `${scalarValue}.trim().lowercase()`
+            : `${scalarValue}.toString().trim().lowercase()`;
+    }
     const type = String(field.type).toLowerCase();
     return type === 'string'
         ? `${value}.trim().lowercase()`

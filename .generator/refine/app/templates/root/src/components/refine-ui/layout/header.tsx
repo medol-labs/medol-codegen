@@ -96,11 +96,15 @@ function MobileHeader() {
         className={cn(
           "whitespace-nowrap",
           "flex",
+          "min-w-0",
+          "flex-1",
           "flex-row",
           "h-full",
           "items-center",
           "justify-start",
           "gap-2",
+          "overflow-hidden",
+          "pr-1",
           "transition-discrete",
           "duration-200",
           {
@@ -109,11 +113,15 @@ function MobileHeader() {
           }
         )}
       >
-        <div>{title.icon}</div>
+        <div className={cn("flex", "h-9", "w-9", "shrink-0", "items-center", "justify-center")}>
+          {title.icon}
+        </div>
         <h2
           className={cn(
             "text-sm",
             "font-bold",
+            "min-w-0",
+            "truncate",
             "transition-opacity",
             "duration-200",
             {
@@ -126,7 +134,7 @@ function MobileHeader() {
         </h2>
       </div>
 
-      <div className={cn("flex", "items-center", "gap-1")}>
+      <div className={cn("flex", "shrink-0", "items-center", "gap-1")}>
         <ModuleSwitcher compact />
         <LanguageSwitcher compact />
         <ThemeToggle className={cn("h-8", "w-8")} />

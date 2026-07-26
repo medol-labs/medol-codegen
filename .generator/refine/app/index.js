@@ -17,6 +17,20 @@ const {
 let config = {};
 let codegenModel = {};
 
+function toDisplayName(value) {
+    const normalized = `${value ?? ''}`
+        .replace(/[_-]+/g, ' ')
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .trim()
+        .replace(/\s+/g, ' ');
+
+    if (!normalized) {
+        return 'Medol Domain';
+    }
+
+    return normalized.replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 module.exports = class extends Generator {
 
     constructor(args, opts) {
@@ -197,20 +211,22 @@ module.exports = class extends Generator {
     }
 
     _writeSkeleton() {
+        const appName = codegenModel?.domain ?? 'frontend-foundation';
+        const skeletonModel = {
+            appName,
+            appTitle: toDisplayName(appName)
+        };
+
         this.fs.copyTpl(
             this.templatePath('root'),
             this.destinationPath('.'),
-            {
-                appName: codegenModel?.domain ?? 'frontend-foundation'
-            }
+            skeletonModel
         );
         ['.env-example', '.gitignore', '.npmrc'].forEach((file) => {
             this.fs.copyTpl(
                 this.templatePath(`root/${file}`),
                 this.destinationPath(file),
-                {
-                    appName: codegenModel?.domain ?? 'frontend-foundation'
-                }
+                skeletonModel
             );
         });
         this._writeAgentSkills();

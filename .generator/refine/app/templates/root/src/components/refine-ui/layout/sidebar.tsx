@@ -311,29 +311,42 @@ function SidebarHeader() {
         className={cn(
           "whitespace-nowrap",
           "flex",
+          "min-w-0",
+          "flex-1",
           "flex-row",
           "h-full",
           "items-center",
-          "justify-start",
           "gap-2",
+          "overflow-hidden",
           "transition-discrete",
           "duration-200",
           {
-            "pl-3": !open,
-            "pl-5": open,
+            "justify-center px-1": !open,
+            "justify-start pl-5 pr-1": open,
           }
         )}
       >
-        <div>{title.icon}</div>
+        <div className={cn("flex", "shrink-0", "items-center", "justify-center", {
+          "h-8 w-8": !open,
+          "h-10 w-10": open,
+        })}>
+          {title.icon}
+        </div>
         <h2
+          title={typeof title.text === "string" ? title.text : undefined}
           className={cn(
             "text-sm",
             "font-bold",
+            "min-w-0",
+            "line-clamp-2",
+            "whitespace-normal",
+            "break-words",
+            "leading-snug",
             "transition-opacity",
             "duration-200",
             {
-              "opacity-0": !open,
-              "opacity-100": open,
+              "hidden w-0 opacity-0": !open,
+              "block flex-1 opacity-100": open,
             }
           )}
         >
@@ -342,8 +355,8 @@ function SidebarHeader() {
       </div>
 
       <ShadcnSidebarTrigger
-        className={cn("text-muted-foreground", "mr-1.5", {
-          "opacity-0": !open,
+        className={cn("text-muted-foreground", "mr-1.5", "shrink-0", {
+          "hidden opacity-0": !open && !isMobile,
           "opacity-100": open || isMobile,
           "pointer-events-auto": open || isMobile,
           "pointer-events-none": !open && !isMobile,

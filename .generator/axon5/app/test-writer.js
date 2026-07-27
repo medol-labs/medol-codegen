@@ -9,11 +9,13 @@ const {
     kotlinFieldImports,
     outboundEvents,
     pascal,
+    kebab,
     safeIdentifier,
     uniqueBy,
     constant,
     valueTypeForField,
-    stateTargetFor
+    stateTargetFor,
+    commandStartsLifecycle
 } = require('./model-helpers');
 const {infrastructurePortForCommand} = require('./infrastructure-port-writer');
 const {_commandTitle, _eventTitle} = require('../../common/util/naming');
@@ -271,6 +273,106 @@ ${tests.map((test) => test.body).join('\n\n')}
 `);
     },
 
+    _writeSliceIntegrationTest(packageName, context, slicePackage, slice, selection, events) {
+        const tests = this._sliceIntegrationTests(slice, selection, events);
+        if (tests.length === 0) return;
+
+        const testName = `${pascal(slice.name)}IntegrationTest`;
+        const commandImports = uniqueBy(tests.map((test) => test.command)
+            .map((command) => `import ${packageName}.${_commandTitle(command.title)}`), (value) => value);
+        const fieldImports = importLines([
+            kotlinFieldImports(tests.flatMap((test) => test.fields ?? []), this.model.rootPackage)
+        ]);
+
+        this.fs.write(this._testKotlinPath(`${context}/${slicePackage}/${testName}.kt`), `package ${packageName}
+
+import org.axonframework.messaging.commandhandling.gateway.CommandGateway
+import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.test.context.SpringBootTest
+${commandImports.join('\n')}
+${fieldImports.join('\n')}
+
+@SpringBootTest(properties = [
+    "spring.docker.compose.enabled=false",
+    "spring.flyway.enabled=false",
+    "spring.datasource.url=jdbc:h2:mem:${kebab(testName)};DB_CLOSE_DELAY=-1",
+    "spring.datasource.driver-class-name=org.h2.Driver",
+    "spring.datasource.username=sa",
+    "spring.datasource.password=",
+    "spring.jpa.hibernate.ddl-auto=create-drop",
+    "axon.axonserver.enabled=false",
+    "axon.axonserver.event-store.enabled=false",
+    "medol.axon.event-storage=inmemory"
+])
+class ${testName}(
+    @Autowired private val commandGateway: CommandGateway
+) {
+${tests.map((test) => test.body).join('\n\n')}
+}
+`);
+    },
+
+    _sliceIntegrationTests(slice, selection, events) {
+        const specificationTests = (slice.specifications ?? [])
+            .map((specification) => this._sliceIntegrationSpecificationTest(specification, slice, selection, events))
+            .filter(Boolean);
+        if (specificationTests.length > 0) return specificationTests;
+        return this._fallbackSliceIntegrationTests(slice, selection, events);
+    },
+
+    _sliceIntegrationSpecificationTest(specification, slice, selection, events) {
+        const specCommand = commandForSpec(this.model, asArray(specification.when)[0]);
+        if (!specCommand) return undefined;
+        if (!commandStartsLifecycle(specCommand)) return undefined;
+        const port = infrastructurePortForCommand(specCommand, events, slice, this.model);
+        if (port) return undefined;
+
+        const expectedEvents = asArray(specification.then)
+            .map((element) => eventForSpec(this.model, element))
+            .filter(Boolean);
+        if (expectedEvents.length === 0) return undefined;
+
+        return this._renderSliceIntegrationTest(
+            specification.title ?? `${specCommand.name} integration`,
+            specCommand,
+            selection
+        );
+    },
+
+    _fallbackSliceIntegrationTests(slice, selection, events) {
+        return (slice.commands ?? [])
+            .filter((command) => commandStartsLifecycle(command))
+            .filter((command) => !infrastructurePortForCommand(command, events, slice, this.model))
+            .map((command) => ({
+                command,
+                outputs: outboundEvents(command, events)
+            }))
+            .filter((item) => item.outputs.length > 0)
+            .slice(0, 1)
+            .map(({command, outputs}) => this._renderSliceIntegrationTest(
+                `${command.name} integration`,
+                command,
+                selection
+            ));
+    },
+
+    _renderSliceIntegrationTest(title, command, selection) {
+        const commandName = _commandTitle(command.title);
+        return {
+            command,
+            fields: commandFieldsWithSelection(command, selection),
+            body: `    @Test
+    fun ${testMethodName(title)}() {
+        val command = ${commandName}(
+${commandArguments(command, selection)}
+        )
+
+        commandGateway.send(command).getResultMessage().join()
+    }`
+        };
+    },
+
     _decisionSpecificationTest(specification, packageName, slice, selection, events, reservations, decisionName, stateName) {
         const specCommand = commandForSpec(this.model, asArray(specification.when)[0]);
         if (!specCommand) return undefined;
@@ -282,7 +384,7 @@ ${tests.map((test) => test.body).join('\n\n')}
             .filter(Boolean);
         const port = infrastructurePortForCommand(specCommand, events, slice, this.model);
         const commandName = _commandTitle(specCommand.title);
-        const includeState = !specCommand.startsLifecycle;
+        const includeState = !commandStartsLifecycle(specCommand);
         const fields = [
             ...commandFieldsWithSelection(specCommand, selection),
             ...givenEvents.flatMap((event) => event.fields ?? []),
@@ -293,7 +395,7 @@ ${tests.map((test) => test.body).join('\n\n')}
         const usesUuid = JSON.stringify(fields).includes('"UUID"') || JSON.stringify(specification).includes('runtime-infra-');
 
         if (expectedEvents.length === 0) {
-            if (!specCommand.startsLifecycle || !specHasUniqueReservation(specification) || reservations.length === 0) return undefined;
+            if (!commandStartsLifecycle(specCommand) || !specHasUniqueReservation(specification) || reservations.length === 0) return undefined;
             const reservationSetup = reservations.map((reservation) => `        val ${reservation.stateParam} = ${reservation.stateName}()
         ${reservation.stateParam}.evolve(
             ${reservation.eventName}(
@@ -324,9 +426,9 @@ ${givenEvents.map((event) => `        state.evolve(
 ${eventArguments(event)}
             )
         )`).join('\n')}` : '';
-        const reservationSetup = specCommand.startsLifecycle ? reservations.map((reservation) => `        val ${reservation.stateParam} = ${reservation.stateName}()`).join('\n') : '';
+        const reservationSetup = commandStartsLifecycle(specCommand) ? reservations.map((reservation) => `        val ${reservation.stateParam} = ${reservation.stateName}()`).join('\n') : '';
         const stateArg = includeState ? ',\n            state = state' : '';
-        const reservationArgs = specCommand.startsLifecycle
+        const reservationArgs = commandStartsLifecycle(specCommand)
             ? reservations.map((reservation) => `,\n            ${reservation.stateParam} = ${reservation.stateParam}`).join('')
             : '';
         const portResult = port ? renderPortResult(port, expectedEvents[0], specCommand) : undefined;
@@ -340,7 +442,7 @@ ${fieldAssertions || `        assertTrue(event is ${eventName})`}`;
         return {
             command: specCommand,
             events: [...givenEvents, ...expectedEvents],
-            reservations: specCommand.startsLifecycle ? reservations : [],
+            reservations: commandStartsLifecycle(specCommand) ? reservations : [],
             fields,
             port,
             usesState: includeState,
@@ -365,7 +467,7 @@ ${eventAssertions}
 
     _fallbackDecisionTests(slice, selection, events, reservations, decisionName) {
         return (slice.commands ?? [])
-            .filter((command) => command.startsLifecycle)
+            .filter((command) => commandStartsLifecycle(command))
             .map((command) => ({
                 command,
                 outputs: outboundEvents(command, events)

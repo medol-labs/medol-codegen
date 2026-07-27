@@ -421,6 +421,10 @@ function transitionForCommand(model, command) {
     );
 }
 
+function commandStartsLifecycle(command) {
+    return Boolean(command?.startsLifecycle || command?.createsAggregate);
+}
+
 function conceptStateEnumName(conceptName) {
     return `${pascal(conceptName)}StateEnum`;
 }
@@ -801,6 +805,7 @@ module.exports = {
     relatedEventsForSlice,
     outboundEvents,
     transitionForCommand,
+    commandStartsLifecycle,
     conceptStateEnumName,
     conceptHasState,
     transitionUsesConceptState,

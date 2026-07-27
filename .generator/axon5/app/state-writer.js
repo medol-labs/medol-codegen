@@ -35,6 +35,7 @@ const {
     relatedEventsForSlice,
     outboundEvents,
     transitionForCommand,
+    commandStartsLifecycle,
     conceptStateEnumName,
     conceptHasState,
     transitionUsesConceptState,
@@ -291,8 +292,8 @@ ${sourcingHandlers}
             const port = infrastructurePortForCommand(command, events, slice, this.model);
             const usePort = Boolean(port);
             const capability = port?.capability;
-            const commandReservations = command.startsLifecycle ? reservations : [];
-            const includeState = !command.startsLifecycle;
+            const commandReservations = commandStartsLifecycle(command) ? reservations : [];
+            const includeState = !commandStartsLifecycle(command);
             const stateParam = includeState ? `, state: ${stateName}` : '';
             const reservationParams = commandReservations.map((reservation) => `, ${reservation.stateParam}: ${reservation.stateName}`).join('');
             const portParams = usePort ? `, portResult: ${capability.resultName}, now: java.time.LocalDateTime` : '';
@@ -305,7 +306,7 @@ ${sourcingHandlers}
                 `            ${reservation.eventName}(${reservation.eventArgs.join(', ')})`
             );
             const transition = transitionForCommand(this.model, command);
-            const guard = command.startsLifecycle ? '' : `${renderStateGuard(this.model, transition)}\n`;
+            const guard = commandStartsLifecycle(command) ? '' : `${renderStateGuard(this.model, transition)}\n`;
             const eventLines = [
                 ...reservationEvents,
                 ...outputs.map((event) => `            ${_eventTitle(event.title)}(${eventArguments(event, command, selection)})`)

@@ -35,6 +35,7 @@ const {
     relatedEventsForSlice,
     outboundEvents,
     transitionForCommand,
+    commandStartsLifecycle,
     conceptStateEnumName,
     conceptHasState,
     transitionUsesConceptState,
@@ -96,7 +97,7 @@ const commandWriterMethods = {
     _writeCommand(packageName, context, slicePackage, command, selection, selectionPackageName = packageName, reservations = []) {
         const commandName = _commandTitle(command.title);
         const commandFields = commandFieldsWithSelection(command, selection);
-        const commandReservations = command.startsLifecycle ? reservations : [];
+        const commandReservations = commandStartsLifecycle(command) ? reservations : [];
         const imports = uniqueBy([
             kotlinFieldImports(commandFields, this.model.rootPackage),
             ...commandReservations.map((reservation) => `import ${reservation.packageName}.${reservation.selectionName}`)
@@ -138,8 +139,8 @@ ${reservationSelections ? `\n${reservationSelections}` : ''}
             const usePort = Boolean(port);
             const capability = port?.capability;
             const inputFields = port?.inputFields ?? [];
-            const commandReservations = command.startsLifecycle ? reservations : [];
-            const includeState = !command.startsLifecycle;
+            const commandReservations = commandStartsLifecycle(command) ? reservations : [];
+            const includeState = !commandStartsLifecycle(command);
             const methodParameters = [
                 `command: ${commandName}`,
                 includeState ? `@InjectEntity${injectEntity} state: ${stateName}` : undefined,
@@ -182,10 +183,10 @@ ${portStatements}\
         const portConstructorParams = ports.map((port) =>
             `,\n    private val ${lowerCamel(port.capability.portName)}: ${port.capability.portName}`
         ).join('');
-        const usesState = slice.commands.some((command) => !command.startsLifecycle);
+        const usesState = slice.commands.some((command) => !commandStartsLifecycle(command));
         const stateImport = usesState && stateTarget.packageName !== packageName ? `import ${stateTarget.packageName}.${stateName}\n` : '';
         const reservationStateImports = reservations.map((reservation) => `import ${reservation.packageName}.${reservation.stateName}`).join('\n');
-        const injectEntityImport = slice.commands.some((command) => !command.startsLifecycle || reservations.length > 0)
+        const injectEntityImport = slice.commands.some((command) => !commandStartsLifecycle(command) || reservations.length > 0)
             ? 'import org.axonframework.modelling.annotation.InjectEntity\n'
             : '';
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${pascal(slice.name)}CommandHandler.kt`), `package ${packageName}

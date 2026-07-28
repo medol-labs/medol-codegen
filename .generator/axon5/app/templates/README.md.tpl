@@ -10,18 +10,18 @@ Generated from Medol CodegenModel for Axon Framework 5.1.1.
 ## Run
 
 <% if (modulePrefix) { -%>
-Run this module from the generated multi-module root so Maven can include the sibling `shared-kernel` and `axon-event-storage-umadb` modules in the reactor:
+Run this module from the generated multi-module root so Maven can include the sibling `shared-kernel` and `axon-event-storage-umadb` modules in the reactor. Spring Boot uses this module's own `docker-compose.yml`:
 
 ```bash
 cd ..
-docker compose --profile axon-server up -d
+cp <%= modulePrefix %>/.env.example <%= modulePrefix %>/.env
 ./mvnw -pl <%= modulePrefix %> -am spring-boot:run
 ```
 <% } else if (hasInfra) { -%>
-Run a backend module from this generated multi-module root:
+Run a backend module from this generated multi-module root. Each deployment module owns its own `docker-compose.yml`:
 
 ```bash
-docker compose --profile axon-server up -d
+cp <module-name>/.env.example <module-name>/.env
 ./mvnw -pl <module-name> -am spring-boot:run
 ```
 <% } else { -%>
@@ -43,8 +43,9 @@ OpenAPI endpoints:
 Default ports:
 
 - Application: `<%= appPort %>`; override with `SERVER_PORT`
-- PostgreSQL host port: `<%= dbPort %>`; override with `DB_PORT`
+- PostgreSQL host port: `<%= dbPort %>`; override with `DB_PORT` in this module's `.env`
 - PostgreSQL database: `<%= dbName %>`; override the full connection with `DB_URL`
+- UmaDB host port: `<%= umadbPort %>`; override with `UMADB_PORT` in this module's `.env`
 - Axon Server UI: `http://localhost:8024`; override with `AXON_SERVER_HTTP_PORT`
 - Axon Server gRPC: `localhost:8124`; override with `AXON_SERVER_SERVERS`
 
@@ -77,21 +78,35 @@ MEDOL_AXON_EVENT_STORAGE=inmemory AXON_SERVER_ENABLED=false ./mvnw spring-boot:r
 ```
 
 <% if (hasInfra) { -%>
-Use the generated UmaDB DCB event store adapter from the `axon-event-storage-umadb` module with the root `.env` file:
+Use the generated UmaDB DCB event store adapter from the `axon-event-storage-umadb` module with this deployment module's `.env` file:
 
 ```bash
 <% if (modulePrefix) { -%>
 cd ..
-<% } -%>
-cp .env.example .env
-# Edit .env if local ports or endpoints differ.
-docker compose up -d umadb <% if (modulePrefix) { -%><%= modulePrefix %>-postgres<% } else { -%><module-name>-postgres<% } -%>
-<% if (modulePrefix) { -%>
+cp <%= modulePrefix %>/.env.example <%= modulePrefix %>/.env
+docker compose -f <%= modulePrefix %>/docker-compose.yml up -d postgres umadb
 ./mvnw -pl <%= modulePrefix %> -am spring-boot:run
 <% } else if (hasInfra) { -%>
+cp <module-name>/.env.example <module-name>/.env
+docker compose -f <module-name>/docker-compose.yml up -d postgres umadb
 ./mvnw -pl <module-name> -am spring-boot:run
 <% } else { -%>
+cp .env.example .env
+docker compose up -d postgres umadb
 ./mvnw spring-boot:run
+<% } -%>
+```
+
+To run the generated application as a container instead of `spring-boot:run`:
+
+```bash
+<% if (modulePrefix) { -%>
+cd ..
+docker compose -f <%= modulePrefix %>/docker-compose.yml up -d <%= appName %>
+<% } else if (hasInfra) { -%>
+docker compose -f <module-name>/docker-compose.yml up -d <module-name>
+<% } else { -%>
+docker compose up -d <%= appName %>
 <% } -%>
 ```
 

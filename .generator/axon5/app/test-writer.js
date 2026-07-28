@@ -392,7 +392,7 @@ ${commandArguments(command, selection)}
             ...(port ? [...(port.successEvent.fields ?? []), ...(port.failureEvent.fields ?? [])] : []),
             ...reservations.flatMap((reservation) => [...reservation.idFields, ...reservation.originalFields, ...reservation.normalizedFields])
         ];
-        const usesUuid = JSON.stringify(fields).includes('"UUID"') || JSON.stringify(specification).includes('runtime-infra-');
+        const usesUuid = JSON.stringify(fields).includes('"UUID"');
 
         if (expectedEvents.length === 0) {
             if (!commandStartsLifecycle(specCommand) || !specHasUniqueReservation(specification) || reservations.length === 0) return undefined;

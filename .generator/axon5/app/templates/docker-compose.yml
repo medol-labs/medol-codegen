@@ -41,9 +41,42 @@ services:
   umadb:
     image: umadb/umadb:latest
     ports:
-      - "50051:50051"
+      - "${UMADB_PORT:-<%= umadbPort %>}:50051"
     volumes:
       - umadb_data:/data
+
+  <%= appName %>:
+    image: ${APP_IMAGE:-medol/<%= appName %>:0.0.1-SNAPSHOT}
+    profiles:
+      - application
+    depends_on:
+      postgres:
+        condition: service_healthy
+      umadb:
+        condition: service_started
+    ports:
+      - "${APP_PORT:-<%= appPort %>}:<%= appPort %>"
+    environment:
+      SERVER_PORT: <%= appPort %>
+      SPRING_DOCKER_COMPOSE_ENABLED: "false"
+      DB_URL: jdbc:postgresql://postgres:5432/<%= dbName %>
+      DB_USERNAME: medol
+      DB_PASSWORD: medol
+      MEDOL_AXON_EVENT_STORAGE: ${MEDOL_AXON_EVENT_STORAGE:-umadb}
+      UMADB_TARGET: ${UMADB_TARGET:-umadb:50051}
+      UMADB_PLAINTEXT: ${UMADB_PLAINTEXT:-true}
+      UMADB_API_KEY: ${UMADB_API_KEY:-}
+      UMADB_BATCH_SIZE: ${UMADB_BATCH_SIZE:-256}
+      UMADB_REQUEST_TIMEOUT: ${UMADB_REQUEST_TIMEOUT:-PT10S}
+      AXON_SERVER_ENABLED: "false"
+      AXON_SERVER_EVENT_STORE_ENABLED: "false"
+      AXON_UPDATE_CHECK_DISABLED: ${AXON_UPDATE_CHECK_DISABLED:-true}
+<% externalSystems.forEach((external) => { -%>
+      <%= external.endpointEnv %>: ${<%= external.endpointEnv %>:-}
+<% }) -%>
+<% integrationClients.forEach((client) => { -%>
+      <%= client.endpointEnv %>: ${<%= client.endpointEnv %>:-}
+<% }) -%>
 
 volumes:
   postgres_data:

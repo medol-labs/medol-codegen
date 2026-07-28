@@ -37,23 +37,12 @@ const applicationWriterMethods = {
             rootPackage: this.model.rootPackage,
             appPort: 8080,
             dbPort: 5432,
+            umadbPort: 50051,
             dbName: safeDatabaseName(appName),
             modulePrefix: '',
             hasInfra: true
         });
-        this.fs.copyTpl(this.templatePath('mono-docker-compose.yml.tpl'), this.destinationPath('docker-compose.yml'), {
-            deployments: deployments.map((deployment, index) => {
-                const serviceName = this._deploymentModuleName(deployment);
-                return {
-                    serviceName,
-                    envPrefix: serviceName.toUpperCase().replace(/[^A-Z0-9]+/g, '_'),
-                    dbPort: 5432 + index,
-                    dbName: safeDatabaseName(serviceName)
-                };
-            })
-        });
         this.fs.copy(this.templatePath('gitignore'), this.destinationPath('.gitignore'));
-        this.fs.copy(this.templatePath('env.example'), this.destinationPath('.env.example'));
         this._copyMavenWrapper();
         this._writeDevSeedScript();
         this._writeAgentSkills();
@@ -132,6 +121,7 @@ const applicationWriterMethods = {
             hasInfra,
             appPort: runtime.appPort,
             dbPort: runtime.dbPort,
+            umadbPort: runtime.umadbPort,
             dbName: runtime.dbName
         });
         this.fs.copyTpl(this.templatePath('ApplicationTest.kt.tpl'), this._rootTestKotlinPath('ApplicationTest.kt'), {
@@ -145,17 +135,17 @@ const applicationWriterMethods = {
             ...runtime,
             hasInfra
         });
-        if (!this.modulePrefix) {
-            this.fs.copyTpl(this.templatePath('docker-compose.yml'), this._destPath('docker-compose.yml'), runtime);
-        }
+        this.fs.copyTpl(this.templatePath('docker-compose.yml'), this._destPath('docker-compose.yml'), runtime);
         this.fs.copy(this.templatePath('V1__baseline.sql'), this._destPath('src/main/resources/db/migration/V1__baseline.sql'));
         this.fs.copy(this.templatePath('gitignore'), this._destPath('.gitignore'));
         if (!this.modulePrefix) {
             if (hasInfra) {
-                this.fs.copy(this.templatePath('env.example'), this._destPath('.env.example'));
+                this.fs.copyTpl(this.templatePath('env.example'), this._destPath('.env.example'), runtime);
             }
             this._copyMavenWrapper();
             this._writeDevSeedScript();
+        } else if (hasInfra) {
+            this.fs.copyTpl(this.templatePath('env.example'), this._destPath('.env.example'), runtime);
         }
         this._writeValueTypes();
         if (!this._usesSharedKernelModule()) {
@@ -230,10 +220,11 @@ const applicationWriterMethods = {
             appName,
             appPort: 8080 + index,
             dbPort: 5432 + index,
+            umadbPort: 50051 + index,
             dbName: safeDatabaseName(appName),
-            composeFile: this.modulePrefix ? '../docker-compose.yml' : 'docker-compose.yml',
-            envFile: this.modulePrefix ? '../.env' : '.env',
-            dockerComposeEnabled: this.modulePrefix ? 'false' : 'true',
+            composeFile: this.modulePrefix ? `${this.modulePrefix}/docker-compose.yml` : 'docker-compose.yml',
+            envFile: this.modulePrefix ? `${this.modulePrefix}/.env` : '.env',
+            dockerComposeEnabled: 'true',
             externalSystems: this._externalSystemConfigs(),
             integrationClients: this._integrationClientConfigs()
         };

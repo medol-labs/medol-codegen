@@ -95,8 +95,12 @@ function portInputFields(command) {
     return (command.fields ?? []).filter((field) => !isPortOutputField(field));
 }
 
-function resultFieldsForEvent(event) {
-    return (event.fields ?? []).filter((field) => !field.idAttribute && !field.technicalAttribute);
+function resultFieldsForEvent(event, command = null) {
+    const commandFieldNames = new Set((command?.fields ?? []).map((field) => field.name));
+    return (event.fields ?? []).filter((field) =>
+        !commandFieldNames.has(field.name)
+        && !(field.idAttribute && field.generated)
+    );
 }
 
 function constructorArgsFromCommand(fields) {
@@ -161,21 +165,21 @@ const infrastructurePortWriterMethods = {
         const capability = port.capability;
         const inputImports = kotlinFieldImports(port.inputFields, this.model.rootPackage);
         const resultImports = kotlinFieldImports(uniqueFields([
-            ...resultFieldsForEvent(port.successEvent),
-            ...resultFieldsForEvent(port.failureEvent)
+            ...resultFieldsForEvent(port.successEvent, command),
+            ...resultFieldsForEvent(port.failureEvent, command)
         ]), this.model.rootPackage);
         const inputProperties = port.inputFields.map((field) =>
             `    val ${field.name}: ${mappedType(field, field.optional)}`
         ).join(',\n');
-        const successProperties = resultFieldsForEvent(port.successEvent).map((field) =>
+        const successProperties = resultFieldsForEvent(port.successEvent, command).map((field) =>
             `        val ${field.name}: ${mappedType(field, field.optional)}`
         ).join(',\n');
-        const failureProperties = resultFieldsForEvent(port.failureEvent).map((field) =>
+        const failureProperties = resultFieldsForEvent(port.failureEvent, command).map((field) =>
             `        val ${field.name}: ${mappedType(field, field.optional)}`
         ).join(',\n');
         const unavailableProperties = [
             '        val failureReason: String',
-            resultFieldsForEvent(port.failureEvent).some((field) => field.name === 'remediationHint') ? '        val remediationHint: String? = null' : undefined
+            resultFieldsForEvent(port.failureEvent, command).some((field) => field.name === 'remediationHint') ? '        val remediationHint: String? = null' : undefined
         ].filter(Boolean).join(',\n');
         const imports = importLines([
             inputImports,

@@ -142,9 +142,17 @@ function selectionTagValueExpression(field) {
 }
 
 function resultEventArgument(field, command, resultVariable) {
+    const commandField = (command.fields ?? []).find((candidate) => candidate.name === field.name);
+    const commandArgument = () => {
+        if (field.optional || !commandField.optional) return `${field.name} = command.${field.name}`;
+        return `${field.name} = command.${field.name} ?: ${fallbackValue(field)} /* TODO: provide non-null ${field.name} */`;
+    };
     if (field.idAttribute || field.technicalAttribute) {
-        const commandField = (command.fields ?? []).find((candidate) => candidate.name === field.name);
-        if (commandField) return `${field.name} = command.${field.name}`;
+        if (commandField) return commandArgument();
+    }
+    if (field.name === 'failureReason') {
+        if (commandField) return commandArgument();
+        return `${field.name} = "${escapeKotlin(command.title ?? command.name ?? 'Command')} rejected."`;
     }
     if (field.name === 'failedAt' || field.name === 'verifiedAt') {
         return `${field.name} = ${resultVariable}.${field.name}`;

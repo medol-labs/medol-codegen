@@ -196,9 +196,11 @@ export const <%= command.pageComponent %> = () => {
     <CreateView>
       <CreateViewHeader title={t("<%= command.i18nKey %>", "<%= command.label %>")} />
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
+        <form onSubmit={form.handleSubmit(onSubmit, (errors) => console.error("<%= command.component %> validation failed", errors))} className="space-y-8">
 <% command.hiddenPrefillFields.forEach((field) => { -%>
-          <input type="hidden" {...form.register("<%= field.name %>" as never)} />
+          {defaultValues.<%= field.name %> !== undefined && defaultValues.<%= field.name %> !== null ? (
+            <input type="hidden" {...form.register("<%= field.name %>" as never)} />
+          ) : null}
 <% }) -%>
 <% command.fields.forEach((field) => { -%>
 <% if (field.object && field.list) { -%>

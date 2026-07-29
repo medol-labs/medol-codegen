@@ -120,15 +120,20 @@ function payloadExpression(command, event, eventParameter = 'event') {
     return `${commandRequestClass(command)}(${args.join(', ')})`;
 }
 
-function conditionExpression(processor, readmodel, sourceParameter = 'todo') {
+function conditionExpression(processor, sourceElement, sourceParameter = 'todo') {
     const expression = processor.metadata?.condition;
     if (!expression) return 'true';
-    const fieldNames = new Set((readmodel.fields ?? []).map((field) => field.name));
-    return String(expression).replace(/\b[A-Za-z_][A-Za-z0-9_]*\b/g, (token) => {
+    const fieldNames = new Set((sourceElement.fields ?? []).map((field) => field.name));
+    let unresolved = false;
+    const rendered = String(expression).replace(/\b[A-Za-z_][A-Za-z0-9_]*\b/g, (token) => {
         if (token === 'true' || token === 'false' || token === 'null') return token;
         if (fieldNames.has(token)) return `${sourceParameter}.${token}`;
+        if (/^[A-Z][A-Z0-9_]*$/.test(token)) return `"${token}"`;
+        unresolved = true;
         return token;
     });
+    if (unresolved) return 'true';
+    return rendered;
 }
 
 function readModelRepositoryPageCall(readmodel) {
@@ -185,7 +190,7 @@ const processorWriterMethods = {
         const eventImport = `${this.model.rootPackage}.${contextPackage(eventRef.slice.context)}.events.${eventClass}`;
 
         if (isLocalCommand) {
-            this._writeLocalCommandProcessor(packageName, context, slicePackage, processorClass, eventImport, commandRef, eventRef);
+            this._writeLocalCommandProcessor(packageName, context, slicePackage, processorClass, eventImport, commandRef, eventRef, processor);
         } else {
             const targetDeployment = deploymentForContext(this, commandRef.slice.context);
             if (!targetDeployment) return;
@@ -257,13 +262,21 @@ class ${processorClass}(
 `);
     },
 
-    _writeLocalCommandProcessor(packageName, context, slicePackage, processorClass, eventImport, commandRef, eventRef) {
+    _writeLocalCommandProcessor(packageName, context, slicePackage, processorClass, eventImport, commandRef, eventRef, processor) {
         const command = commandRef.command;
         const selection = selectionFor(commandRef.slice, this.model);
         const commandClass = _commandTitle(command.title);
         const commandImport = `${this.model.rootPackage}.${contextPackage(commandRef.slice.context)}.${_sliceTitle(commandRef.slice.title)}.${commandClass}`;
         const commandFields = commandFieldsWithSelection(command, selection);
         const fieldImports = kotlinFieldImports(commandFields, this.model.rootPackage);
+        const condition = conditionExpression(processor, eventRef.event, 'event');
+        const body = condition === 'true'
+            ? `        commandGateway.send(${commandExpression(command, eventRef.event, 'event', selection)}).resultMessage`
+            : `        if (${condition}) {
+            commandGateway.send(${commandExpression(command, eventRef.event, 'event', selection)}).resultMessage
+        } else {
+            java.util.concurrent.CompletableFuture.completedFuture(null)
+        }`;
         const imports = importLines([
             eventImport,
             commandImport,
@@ -280,7 +293,7 @@ import org.springframework.stereotype.Component
 class ${processorClass}(private val commandGateway: CommandGateway) {
     @EventHandler
     fun on(event: ${eventClassName(eventImport)}): java.util.concurrent.CompletableFuture<*> =
-        commandGateway.send(${commandExpression(command, eventRef.event, 'event', selection)}).resultMessage
+${body}
 }
 `);
     },

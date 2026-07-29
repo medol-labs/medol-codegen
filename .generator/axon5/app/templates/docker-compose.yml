@@ -15,28 +15,28 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
-  axon-server:
-    image: axoniq/axonserver:2026.0.3-jdk-21
-    hostname: axon-server
-    profiles:
-      - axon-server
-    ports:
-      - "${AXON_SERVER_HTTP_PORT:-8024}:8024"
-      - "${AXON_SERVER_GRPC_PORT:-8124}:8124"
-    environment:
-      axoniq_axonserver_hostname: axon-server
-      axoniq_axonserver_autocluster_first: axon-server
-      axoniq_axonserver_autocluster_dcb: "true"
-      axoniq_axonserver_autocluster_contexts: _admin,default
-    volumes:
-      - axon_server_data:/axonserver/data
-      - axon_server_events:/axonserver/events
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8024/actuator/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
+  # axon-server:
+  #   image: axoniq/axonserver:2026.0.3-jdk-21
+  #   hostname: axon-server
+  #   profiles:
+  #     - axon-server
+  #   ports:
+  #     - "${AXON_SERVER_HTTP_PORT:-8024}:8024"
+  #     - "${AXON_SERVER_GRPC_PORT:-8124}:8124"
+  #   environment:
+  #     axoniq_axonserver_hostname: axon-server
+  #     axoniq_axonserver_autocluster_first: axon-server
+  #     axoniq_axonserver_autocluster_dcb: "true"
+  #     axoniq_axonserver_autocluster_contexts: _admin,default
+  #   volumes:
+  #     - axon_server_data:/axonserver/data
+  #     - axon_server_events:/axonserver/events
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:8024/actuator/health"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 10
+  #     start_period: 30s
 
   umadb:
     image: umadb/umadb:latest

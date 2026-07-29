@@ -222,8 +222,8 @@ const applicationWriterMethods = {
             dbPort: 5432 + index,
             umadbPort: 50051 + index,
             dbName: safeDatabaseName(appName),
-            composeFile: this.modulePrefix ? `${this.modulePrefix}/docker-compose.yml` : 'docker-compose.yml',
-            envFile: this.modulePrefix ? `${this.modulePrefix}/.env` : '.env',
+            composeFile: 'docker-compose.yml',
+            envFile: '.env',
             dockerComposeEnabled: 'true',
             externalSystems: this._externalSystemConfigs(),
             integrationClients: this._integrationClientConfigs()

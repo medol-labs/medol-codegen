@@ -217,13 +217,46 @@ function rowIdExpression(fields = []) {
 }
 
 function optionLabelField(readModel) {
-    return readModel?.fields?.find((field) => {
+    const fields = readModel?.fields ?? [];
+    const id = idFieldName(readModel);
+    const displayField = fields.find((field) => field.display);
+    if (displayField?.name) {
+        return displayField.name;
+    }
+
+    const candidates = fields.filter((field) => {
         const lower = field.name?.toLowerCase();
         return field.type?.toLowerCase() === 'string'
             && !field.idAttribute
             && !['state', 'status', 'type'].includes(lower)
             && !lower.endsWith('id');
-    })?.name ?? idFieldName(readModel);
+    });
+    if (candidates.length === 0) {
+        return id;
+    }
+
+    const titleWords = cleanTitle(readModel?.title ?? readModel?.name ?? '')
+        .split(/\s+/)
+        .map((word) => word.toLowerCase())
+        .filter(Boolean)
+        .filter((word) => !['catalog', 'directory', 'overview', 'readiness', 'capability', 'latest', 'view', 'log'].includes(word));
+    const primaryWord = titleWords[0];
+
+    return candidates
+        .map((field, index) => ({ field, index, score: optionLabelFieldScore(field.name, primaryWord) }))
+        .sort((left, right) => right.score - left.score || left.index - right.index)[0]
+        .field.name;
+}
+
+function optionLabelFieldScore(name, primaryWord) {
+    const lower = name?.toLowerCase() ?? '';
+    if (lower === 'displayname') return 100;
+    if (primaryWord && lower === `${primaryWord}name`) return 95;
+    if (['name', 'title', 'label'].includes(lower)) return 90;
+    if (lower.endsWith('name')) return lower === 'organizationname' ? 70 : 80;
+    if (lower.endsWith('code')) return 60;
+    if (lower.includes('version')) return 50;
+    return 10;
 }
 
 function dictionaryProviderFor(readModel) {

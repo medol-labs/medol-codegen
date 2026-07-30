@@ -45,6 +45,54 @@ const isLoadingSelect = (select: ReturnType<typeof useSelect>) =>
         ?.isLoading,
   );
 
+const readableOptionLabel = (
+  item: BaseRecord,
+  preferred?: string | ((item: BaseRecord) => string),
+  optionValue?: string | ((item: BaseRecord) => string | number),
+) => {
+  if (typeof preferred === "function") {
+    const value = preferred(item);
+    if (hasText(value)) {
+      return String(value);
+    }
+  }
+
+  const preferredValue =
+    typeof preferred === "string" ? item[preferred] : undefined;
+  if (hasText(preferredValue)) {
+    return String(preferredValue);
+  }
+
+  for (const key of [
+    "displayName",
+    "datasetName",
+    "runtimeName",
+    "organizationName",
+    "federationName",
+    "featureDomain",
+    "name",
+    "title",
+    "label",
+    "code",
+    "valueCode",
+  ]) {
+    if (hasText(item[key])) {
+      return String(item[key]);
+    }
+  }
+
+  const value =
+    typeof optionValue === "function"
+      ? optionValue(item)
+      : typeof optionValue === "string"
+        ? item[optionValue]
+        : item.id;
+  return hasText(value) ? String(value) : "Unnamed";
+};
+
+const hasText = (value: unknown) =>
+  value !== null && value !== undefined && String(value).trim().length > 0;
+
 export const ResourceSelect = React.forwardRef<
   React.ComponentRef<typeof SelectTrigger>,
   ResourceSelectProps
@@ -77,7 +125,8 @@ export const ResourceSelect = React.forwardRef<
   ) => {
     const select = useSelect<BaseRecord>({
       resource,
-      optionLabel: optionLabel as UseSelectParams["optionLabel"],
+      optionLabel: ((item: BaseRecord) =>
+        readableOptionLabel(item, optionLabel, optionValue)) as UseSelectParams["optionLabel"],
       optionValue: optionValue as UseSelectParams["optionValue"],
       defaultValue,
       dataProviderName,

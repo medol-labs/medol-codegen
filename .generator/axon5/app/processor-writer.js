@@ -12,6 +12,8 @@ const {
     pascal,
     kebab,
     selectionFor,
+    eventFieldsWithTags,
+    eventTagFieldsFor,
     safeIdentifier,
     uniqueBy
 } = require('./model-helpers');
@@ -82,15 +84,16 @@ function sourceFieldNullable(field, readModelSource = false) {
 
 function commandExpression(command, sourceElement, sourceParameter = 'event', selection = {fields: []}, readModelSource = false) {
     const sourceFields = new Map((sourceElement.fields ?? []).map((field) => [field.name, field]));
-    const args = commandFieldsWithSelection(command, selection).map((field) => {
+    const args = commandFieldsWithSelection(command, selection).flatMap((field) => {
         const match = sourceFieldMatch(field, sourceFields);
         if (match) {
             const value = sourceFieldNullable(match.sourceField, readModelSource) && !field.optional
                 ? `${sourceParameter}.${match.sourceName}!!`
                 : `${sourceParameter}.${match.sourceName}`;
-            return `${field.name} = ${value}`;
+            return [`${field.name} = ${value}`];
         }
-        return `${field.name} = ${fallbackValue(field)} /* TODO: provide ${field.name} */`;
+        if (field.generated) return [];
+        return [`${field.name} = ${fallbackValue(field)} /* TODO: provide ${field.name} */`];
     });
     return `${_commandTitle(command.title)}(${args.join(', ')})`;
 }
@@ -105,7 +108,7 @@ function requiredSourcePredicates(command, sourceElement, sourceParameter = 'tod
 
 function payloadExpression(command, event, eventParameter = 'event') {
     const eventFields = new Map((event.fields ?? []).map((field) => [field.name, field]));
-    const args = commandFieldsWithSelection(command, {fields: []}).map((field) => {
+    const args = commandFieldsWithSelection(command, {fields: []}).flatMap((field) => {
         const source = field.source?.from?.find((name) => {
             const sourceField = eventFields.get(String(name).split('.').pop());
             return sourceField && fieldsCompatible(field, sourceField);
@@ -115,7 +118,8 @@ function payloadExpression(command, event, eventParameter = 'event') {
         const value = sourceField && fieldsCompatible(field, sourceField)
             ? `${eventParameter}.${sourceName}`
             : `${fallbackValue(field)} /* TODO: provide ${field.name} */`;
-        return `${field.name} = ${value}`;
+        if (!sourceField && field.generated) return [];
+        return [`${field.name} = ${value}`];
     });
     return `${commandRequestClass(command)}(${args.join(', ')})`;
 }
@@ -270,10 +274,15 @@ class ${processorClass}(
         const commandFields = commandFieldsWithSelection(command, selection);
         const fieldImports = kotlinFieldImports(commandFields, this.model.rootPackage);
         const condition = conditionExpression(processor, eventRef.event, 'event');
+        const eventSelection = selectionFor(eventRef.slice, this.model);
+        const sourceEvent = {
+            ...eventRef.event,
+            fields: eventFieldsWithTags(eventRef.event.fields ?? [], eventTagFieldsFor(eventRef.slice, eventRef.event, eventSelection, true))
+        };
         const body = condition === 'true'
-            ? `        commandGateway.send(${commandExpression(command, eventRef.event, 'event', selection)}).resultMessage`
+            ? `        commandGateway.send(${commandExpression(command, sourceEvent, 'event', selection)}).resultMessage`
             : `        if (${condition}) {
-            commandGateway.send(${commandExpression(command, eventRef.event, 'event', selection)}).resultMessage
+            commandGateway.send(${commandExpression(command, sourceEvent, 'event', selection)}).resultMessage
         } else {
             java.util.concurrent.CompletableFuture.completedFuture(null)
         }`;
@@ -300,6 +309,12 @@ ${body}
 
     _writeRemoteCommandProcessor(packageName, context, slicePackage, processorClass, eventImport, clientClass, commandRef, eventRef) {
         const requestClass = commandRequestClass(commandRef.command);
+        const selection = selectionFor(commandRef.slice, this.model);
+        const eventSelection = selectionFor(eventRef.slice, this.model);
+        const sourceEvent = {
+            ...eventRef.event,
+            fields: eventFieldsWithTags(eventRef.event.fields ?? [], eventTagFieldsFor(eventRef.slice, eventRef.event, eventSelection, true))
+        };
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${processorClass}.kt`), `package ${packageName}
 
 import ${eventImport}
@@ -312,7 +327,7 @@ import org.springframework.stereotype.Component
 class ${processorClass}(private val client: ${clientClass}) {
     @EventHandler
     fun on(event: ${eventClassName(eventImport)}) {
-        client.${lowerCamel(commandRef.command.name)}(${payloadExpression(commandRef.command, eventRef.event)})
+        client.${lowerCamel(commandRef.command.name)}(${payloadExpression(commandRef.command, sourceEvent)})
     }
 }
 `);

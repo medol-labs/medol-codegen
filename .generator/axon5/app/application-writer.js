@@ -133,6 +133,7 @@ const applicationWriterMethods = {
         }
         this.fs.copyTpl(this.templatePath('application.yml'), this._destPath('src/main/resources/application.yml'), {
             ...runtime,
+            rootPackage: this.model.rootPackage,
             hasInfra
         });
         this.fs.copyTpl(this.templatePath('docker-compose.yml'), this._destPath('docker-compose.yml'), runtime);
@@ -191,6 +192,9 @@ const applicationWriterMethods = {
             rootPackage: this.model.rootPackage
         });
         this._writeMetadataSupport();
+        this.fs.copyTpl(this.templatePath('AxonFlowLoggingConfiguration.kt.tpl'), this._sharedKernelKotlinPath('shared/application/axon/AxonFlowLoggingConfiguration.kt'), {
+            rootPackage: this.model.rootPackage
+        });
         this.fs.copyTpl(this.templatePath('AxonEventStorageConfig.kt.tpl'), this._sharedKernelKotlinPath('shared/infrastructure/configuration/AxonEventStorageConfig.kt'), {
             rootPackage: this.model.rootPackage,
             hasInfra

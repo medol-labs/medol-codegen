@@ -141,27 +141,24 @@ function selectionTagValueExpression(field) {
         : `${value}.toString()`;
 }
 
-function resultEventArgument(field, command, resultVariable) {
-    const commandField = (command.fields ?? []).find((candidate) => candidate.name === field.name);
+function resultEventArgument(field, command, resultVariable, selection = {fields: []}) {
+    const commandField = commandFieldsWithSelection(command, selection).find((candidate) => candidate.name === field.name);
     const commandArgument = () => {
         if (field.optional || !commandField.optional) return `${field.name} = command.${field.name}`;
         return `${field.name} = command.${field.name} ?: ${fallbackValue(field)} /* TODO: provide non-null ${field.name} */`;
     };
-    if (field.idAttribute || field.technicalAttribute) {
-        if (commandField) return commandArgument();
-    }
     if (field.name === 'failureReason') {
-        if (commandField) return commandArgument();
-        return `${field.name} = "${escapeKotlin(command.title ?? command.name ?? 'Command')} rejected."`;
+        return `${field.name} = ${resultVariable}.failureReason`;
     }
     if (field.name === 'failedAt' || field.name === 'verifiedAt') {
         return `${field.name} = ${resultVariable}.${field.name}`;
     }
+    if (commandField) return commandArgument();
     return `${field.name} = ${resultVariable}.${field.name}`;
 }
 
-function unavailableEventArgument(field, command, resultVariable, fallbackTime = 'now') {
-    const commandField = (command.fields ?? []).find((candidate) => candidate.name === field.name);
+function unavailableEventArgument(field, command, resultVariable, fallbackTime = 'now', selection = {fields: []}) {
+    const commandField = commandFieldsWithSelection(command, selection).find((candidate) => candidate.name === field.name);
     if (field.name === 'failedAt' || field.name === 'verifiedAt') return `${field.name} = ${fallbackTime}`;
     if (field.name === 'failureReason') return `${field.name} = ${resultVariable}.failureReason`;
     if (field.name === 'remediationHint') return `${field.name} = ${resultVariable}.remediationHint`;
@@ -323,9 +320,11 @@ ${sourcingHandlers}
                 ? (() => {
                     const success = port.successEvent;
                     const failure = port.failureEvent;
-                    const successArgs = success.fields.map((field) => resultEventArgument(field, command, 'portResult')).join(', ');
-                    const failureArgs = failure.fields.map((field) => resultEventArgument(field, command, 'portResult')).join(', ');
-                    const unavailableArgs = failure.fields.map((field) => unavailableEventArgument(field, command, 'portResult')).join(', ');
+                    const successFields = eventFieldsWithTags(success.fields ?? [], eventTagFieldsFor(slice, success, selection, true));
+                    const failureFields = eventFieldsWithTags(failure.fields ?? [], eventTagFieldsFor(slice, failure, selection, true));
+                    const successArgs = successFields.map((field) => resultEventArgument(field, command, 'portResult', selection)).join(', ');
+                    const failureArgs = failureFields.map((field) => resultEventArgument(field, command, 'portResult', selection)).join(', ');
+                    const unavailableArgs = failureFields.map((field) => unavailableEventArgument(field, command, 'portResult', 'now', selection)).join(', ');
                     return [
                         'return when (portResult) {',
                         `            is ${capability.resultName}.Succeeded -> listOf(${_eventTitle(success.title)}(${successArgs}))`,

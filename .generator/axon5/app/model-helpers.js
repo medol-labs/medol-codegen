@@ -227,6 +227,24 @@ function eventFieldsWithTags(fields, tagFields) {
     const existing = new Set(result.map((field) => field.name));
     const eventShape = {fields: result};
     (tagFields ?? [])
+        .filter((tagField) => !tagField.derived)
+        .filter((tagField) => !existing.has(tagField.alias))
+        .forEach((tagField) => {
+            result.push({
+                name: tagField.alias,
+                type: tagField.type,
+                cardinality: 'Single',
+                optional: false,
+                idAttribute: false,
+                generated: false,
+                technicalAttribute: true,
+                query: false,
+                eventTagKeys: [tagField.tag.name]
+            });
+            existing.add(tagField.alias);
+            eventShape.fields = result;
+        });
+    (tagFields ?? [])
         .filter((tagField) => tagField.derived)
         .filter((tagField) => (tagField.requiredSources ?? [tagField.source]).every((source) => fields.some((field) => field.name === source)))
         .forEach((tagField) => {
@@ -460,7 +478,7 @@ function renderStateGuard(model, transition) {
 }
 
 function eventArguments(event, command, selection) {
-    const eventFields = event.fields ?? [];
+    const eventFields = eventFieldsWithTags(event.fields ?? [], eventTagFieldsFor({tags: [], concepts: []}, event, selection ?? {fields: []}, true));
     const commandFields = commandFieldsWithSelection(command, selection ?? {fields: []});
     const renderCommandField = (field, source) => {
         if (field.optional || !source.optional) return `command.${source.name}`;

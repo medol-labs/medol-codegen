@@ -3,7 +3,10 @@ server:
 
 spring:
   config:
-    import: optional:file:<%= envFile %>[.properties]
+    import:
+      - optional:classpath:application-infrastructure.yml
+      - optional:file:./config/application-infrastructure.yml
+      - optional:file:<%= envFile %>[.properties]
   application:
     name: <%= appName %>
   docker:
@@ -42,6 +45,8 @@ axon:
 
 medol:
   axon:
+    flow-logging:
+      enabled: ${MEDOL_AXON_FLOW_LOGGING_ENABLED:true}
     event-storage: ${MEDOL_AXON_EVENT_STORAGE:umadb}
 <% if (hasInfra) { -%>
     umadb:
@@ -82,4 +87,5 @@ springdoc:
 
 logging:
   level:
+    <%= rootPackage %>.shared.application.axon: ${MEDOL_AXON_FLOW_LOG_LEVEL:INFO}
     org.axonframework: ${AXON_LOG_LEVEL:INFO}

@@ -15,9 +15,12 @@ const {
     constant,
     valueTypeForField,
     stateTargetFor,
-    commandStartsLifecycle
+    commandStartsLifecycle,
+    selectionFor,
+    eventFieldsWithTags,
+    eventTagFieldsFor
 } = require('./model-helpers');
-const {infrastructurePortForCommand} = require('./infrastructure-port-writer');
+const {infrastructurePortForCommand, resultFieldsForEvent} = require('./infrastructure-port-writer');
 const {_commandTitle, _eventTitle} = require('../../common/util/naming');
 
 function testMethodName(value) {
@@ -37,7 +40,7 @@ function allCommands(model) {
 }
 
 function allEvents(model) {
-    return (model.slices ?? []).flatMap((slice) => slice.events ?? []);
+    return (model.slices ?? []).flatMap((slice) => (slice.events ?? []).map((event) => ({...event, slice})));
 }
 
 function elementById(values, id, title) {
@@ -135,8 +138,14 @@ function commandArguments(command, selection) {
         .join(',\n');
 }
 
-function eventArguments(event) {
-    return enrichFields(event.fields ?? [], event.specElement)
+function eventFieldsForGeneratedClass(event, model) {
+    if (!event?.slice || !model) return event.fields ?? [];
+    const selection = selectionFor(event.slice, model);
+    return eventFieldsWithTags(event.fields ?? [], eventTagFieldsFor(event.slice, event, selection, true));
+}
+
+function eventArguments(event, model) {
+    return enrichFields(eventFieldsForGeneratedClass(event, model), event.specElement)
         .map((field) => `            ${field.name} = ${testValue(field)}`)
         .join(',\n');
 }
@@ -197,8 +206,7 @@ function renderPortResult(port, expectedEvent, command) {
     if (!port) return undefined;
     const outcome = expectedEvent.id === port.failureEvent?.id ? 'Rejected' : 'Succeeded';
     const sourceEvent = outcome === 'Rejected' ? port.failureEvent : port.successEvent;
-    const args = (sourceEvent.fields ?? [])
-        .filter((field) => !field.idAttribute && !field.technicalAttribute)
+    const args = resultFieldsForEvent(sourceEvent, command)
         .map((field) => {
             const expected = expectedFieldValue(field, expectedEvent, command) ?? testValue(field);
             return `                ${field.name} = ${expected}`;
@@ -423,7 +431,7 @@ ${reservationSetup}
         const stateSetup = includeState ? `        val state = ${stateName}()
 ${givenEvents.map((event) => `        state.evolve(
             ${_eventTitle(event.title)}(
-${eventArguments(event)}
+${eventArguments(event, this.model)}
             )
         )`).join('\n')}` : '';
         const reservationSetup = commandStartsLifecycle(specCommand) ? reservations.map((reservation) => `        val ${reservation.stateParam} = ${reservation.stateName}()`).join('\n') : '';

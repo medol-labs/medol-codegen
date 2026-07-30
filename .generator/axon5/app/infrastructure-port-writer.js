@@ -98,13 +98,22 @@ function portInputFields(command) {
 function resultFieldsForEvent(event, command = null) {
     const commandFieldNames = new Set((command?.fields ?? []).map((field) => field.name));
     return (event.fields ?? []).filter((field) =>
-        !commandFieldNames.has(field.name)
+        (!commandFieldNames.has(field.name) || isPortOutputField(field))
         && !(field.idAttribute && field.generated)
     );
 }
 
 function constructorArgsFromCommand(fields) {
     return fields.map((field) => `${field.name} = command.${field.name}`).join(', ');
+}
+
+function resultVariant(name, properties, resultName) {
+    if (!String(properties ?? '').trim()) {
+        return `    class ${name} : ${resultName}`;
+    }
+    return `    data class ${name}(
+${properties}
+    ) : ${resultName}`;
 }
 
 function infrastructureConceptPackage(slice) {
@@ -181,6 +190,9 @@ const infrastructurePortWriterMethods = {
             '        val failureReason: String',
             resultFieldsForEvent(port.failureEvent, command).some((field) => field.name === 'remediationHint') ? '        val remediationHint: String? = null' : undefined
         ].filter(Boolean).join(',\n');
+        const successVariant = resultVariant('Succeeded', successProperties, capability.resultName);
+        const rejectedVariant = resultVariant('Rejected', failureProperties, capability.resultName);
+        const unavailableVariant = resultVariant('Unavailable', unavailableProperties, capability.resultName);
         const imports = importLines([
             inputImports,
             resultImports
@@ -200,17 +212,11 @@ ${inputProperties}
 )
 
 sealed interface ${capability.resultName} {
-    data class Succeeded(
-${successProperties}
-    ) : ${capability.resultName}
+${successVariant}
 
-    data class Rejected(
-${failureProperties}
-    ) : ${capability.resultName}
+${rejectedVariant}
 
-    data class Unavailable(
-${unavailableProperties}
-    ) : ${capability.resultName}
+${unavailableVariant}
 }
 `);
 
@@ -260,5 +266,6 @@ module.exports = {
     infrastructurePortForCommand,
     manualInfrastructurePortPath,
     manualInfrastructurePortPathForCommand,
+    resultFieldsForEvent,
     infrastructurePortWriterMethods
 };

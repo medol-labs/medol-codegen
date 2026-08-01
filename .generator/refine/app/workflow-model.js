@@ -125,12 +125,15 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
                     .filter((dependency) => dependencyDirection(dependency) === 'OUTBOUND' && dependency.elementType === 'COMMAND')
                     .map((dependency) => commandsById.get(dependency.id) ?? commandsById.get(String(dependency.title ?? '')))
                     .filter(Boolean)));
+            const reactiveCommands = uniqueElements(inboundEvents
+                .flatMap((event) => commandsReactingToEvent(commandsById, event)));
 
             if (producerCommands.length > 0) {
                 producerCommandsByReadModelId.set(readModel.id, producerCommands);
             }
-            if (nextCommands.length > 0) {
-                nextCommandsByReadModelId.set(readModel.id, nextCommands);
+            const itemCommands = uniqueElements([...nextCommands, ...reactiveCommands]);
+            if (itemCommands.length > 0) {
+                nextCommandsByReadModelId.set(readModel.id, itemCommands);
             }
         });
 
@@ -227,6 +230,24 @@ function eventTargetsReadModel(event, readModel) {
     ].filter(Boolean).some((key) => readModelKeys.has(String(key))));
 }
 
+function commandsReactingToEvent(commandsById, event) {
+    const eventKeys = new Set([
+        event.id,
+        event.name,
+        event.title,
+        cleanTitle(event.title)
+    ].filter(Boolean).map(String));
+    const commands = uniqueElements(Array.from(commandsById.values()));
+    return commands.filter((command) => (command.dependencies ?? [])
+        .filter((dependency) => dependencyDirection(dependency) === 'INBOUND' && dependency.elementType === 'EVENT')
+        .some((dependency) => [
+            dependency.id,
+            dependency.name,
+            dependency.title,
+            cleanTitle(dependency.title)
+        ].filter(Boolean).some((key) => eventKeys.has(String(key)))));
+}
+
 function buildAutomationCommandKeys(slices) {
     const keys = new Set();
     const addReference = (reference) => {
@@ -302,22 +323,55 @@ function stateControlForTransition(transition, readModel) {
     return {
         allowedStates,
         targetState: transition?.to,
-        stateField: allowedStates.length > 0 ? stateFieldForReadModel(readModel, conceptName) : undefined
+        stateField: allowedStates.length > 0 ? stateFieldForReadModel(readModel, conceptName, transition) : undefined
     };
 }
 
-function stateFieldForReadModel(readModel, conceptName) {
+function stateFieldForReadModel(readModel, conceptName, transition) {
     const fields = normalizeFields(readModel?.fields ?? []);
     const conceptStateType = conceptName ? `${conceptName}.State` : undefined;
+    const workflowStateTokens = workflowTokensForTransition(transition);
+    const statusFields = fields.filter((field) => /Status$/.test(field.name ?? ''));
     const candidates = [
         fields.find((field) => conceptStateType && field.type === conceptStateType),
         fields.find((field) => field.name === 'state'),
         fields.find((field) => conceptName && field.name === `${camel(conceptName)}State`),
         fields.find((field) => conceptName && field.name === `${camel(conceptName)}Status`),
-        fields.find((field) => /Status$/.test(field.name ?? '')),
+        statusFields.find((field) => workflowStateTokens.some((token) => statusFieldMatchesToken(field.name, token))),
+        statusFields[0],
         fields.find((field) => field.name === 'status')
     ];
     return candidates.filter(Boolean)[0]?.name;
+}
+
+function workflowTokensForTransition(transition) {
+    return unique([
+        ...normalizeArray(transition?.from),
+        transition?.to
+    ].filter(Boolean)
+        .flatMap(splitWorkflowStateName)
+        .map((token) => token.toLowerCase())
+        .filter((token) => token.length >= 4)
+        .filter((token) => !['state', 'status', 'completed', 'failed'].includes(token)));
+}
+
+function splitWorkflowStateName(value) {
+    return String(value)
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .replace(/[_-]+/g, ' ')
+        .split(/\s+/)
+        .filter(Boolean);
+}
+
+function statusFieldMatchesToken(fieldName, token) {
+    const normalized = String(fieldName ?? '').toLowerCase();
+    if (normalized.includes(token)) {
+        return true;
+    }
+    if (token.startsWith('approv') && normalized.includes('approval')) {
+        return true;
+    }
+    return false;
 }
 
 function dependencyDirection(dependency) {

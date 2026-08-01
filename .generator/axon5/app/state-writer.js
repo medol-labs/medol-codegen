@@ -141,7 +141,41 @@ function selectionTagValueExpression(field) {
         : `${value}.toString()`;
 }
 
-function resultEventArgument(field, command, resultVariable, selection = {fields: []}) {
+function stateEventsForSlice(model, slice, events) {
+    const concept = primaryConcept(slice);
+    if (!concept) return events;
+    return uniqueBy((model.slices ?? [])
+        .filter((candidate) => candidate.context === slice.context && primaryConcept(candidate) === concept)
+        .flatMap((candidate) => relatedEventsForSlice(model, candidate)), (event) => event.id ?? event.name);
+}
+
+function stateFieldsBeforeCommand(model, slice, command, events, selection = {fields: []}) {
+    const outputIds = new Set(outboundEvents(command, events).map((event) => event.id));
+    return fieldsWithSelection(uniqueFields(stateEventsForSlice(model, slice, events)
+        .filter((event) => !outputIds.has(event.id))
+        .flatMap((event) => event.fields ?? [])), selection.fields ?? []);
+}
+
+function renderStateEventArgument(field, source) {
+    if (field.optional) return `${field.name} = state.${source.name}`;
+    return `${field.name} = requireNotNull(state.${source.name}) { "${field.name} is required from state." }`;
+}
+
+function stateFieldForEventField(field, stateFields) {
+    const sameName = stateFields.find((candidate) => candidate.name === field.name);
+    if (sameName) return sameName;
+    const source = field.source?.from?.find((name) => {
+        const sourceName = String(name).split('.').pop();
+        return stateFields.some((candidate) => candidate.name === sourceName);
+    });
+    return source ? stateFields.find((candidate) => candidate.name === String(source).split('.').pop()) : undefined;
+}
+
+function shouldReadPortEventFieldFromState(field) {
+    return Boolean(field.source?.from?.length || field.source?.rule || field.idAttribute);
+}
+
+function resultEventArgument(field, command, resultVariable, selection = {fields: []}, stateFields = []) {
     const commandField = commandFieldsWithSelection(command, selection).find((candidate) => candidate.name === field.name);
     const commandArgument = () => {
         if (field.optional || !commandField.optional) return `${field.name} = command.${field.name}`;
@@ -154,10 +188,12 @@ function resultEventArgument(field, command, resultVariable, selection = {fields
         return `${field.name} = ${resultVariable}.${field.name}`;
     }
     if (commandField) return commandArgument();
+    const stateField = shouldReadPortEventFieldFromState(field) ? stateFieldForEventField(field, stateFields) : undefined;
+    if (stateField) return renderStateEventArgument(field, stateField);
     return `${field.name} = ${resultVariable}.${field.name}`;
 }
 
-function unavailableEventArgument(field, command, resultVariable, fallbackTime = 'now', selection = {fields: []}) {
+function unavailableEventArgument(field, command, resultVariable, fallbackTime = 'now', selection = {fields: []}, stateFields = []) {
     const commandField = commandFieldsWithSelection(command, selection).find((candidate) => candidate.name === field.name);
     if (field.name === 'failedAt' || field.name === 'verifiedAt') return `${field.name} = ${fallbackTime}`;
     if (field.name === 'failureReason') return `${field.name} = ${resultVariable}.failureReason`;
@@ -166,6 +202,8 @@ function unavailableEventArgument(field, command, resultVariable, fallbackTime =
         if (field.optional || !commandField.optional) return `${field.name} = command.${field.name}`;
         return `${field.name} = command.${field.name} ?: ${fallbackValue(field)} /* TODO: provide non-null ${field.name} */`;
     }
+    const stateField = shouldReadPortEventFieldFromState(field) ? stateFieldForEventField(field, stateFields) : undefined;
+    if (stateField) return renderStateEventArgument(field, stateField);
     return `${field.name} = ${fallbackValue(field)} /* TODO: provide ${field.name} */`;
 }
 
@@ -221,7 +259,7 @@ ${properties}
         const stateEnumName = concept ? conceptStateEnumName(concept) : undefined;
         const stateFields = [
             ...(concept ? [`    var currentState: ${stateEnumName}? = null`] : []),
-            ...fields.map((field) => `    private var ${field.name}: ${stateFieldType(field)} = ${stateFieldDefault(field)}`),
+            ...fields.map((field) => `    var ${field.name}: ${stateFieldType(field)} = ${stateFieldDefault(field)}`),
             ...(hasChildMemberState ? ['    private val members: MutableMap<String, String> = mutableMapOf()'] : [])
         ].join('\n');
         const sourcingHandlers = events.map((event) => {
@@ -291,7 +329,8 @@ ${sourcingHandlers}
         const stateTarget = stateTargetFor(this.model, slice);
         const stateName = stateTarget.name;
         const decisionName = `${pascal(slice.name)}Decision`;
-        const methods = slice.commands.map((command) => {
+        const decisionComponentName = `${decisionName}Component`;
+        const methodDefinitions = slice.commands.map((command) => {
             const commandName = _commandTitle(command.title);
             const outputs = outboundEvents(command, events);
             const port = infrastructurePortForCommand(command, events, slice, this.model);
@@ -301,7 +340,8 @@ ${sourcingHandlers}
             const includeState = !commandStartsLifecycle(command);
             const stateParam = includeState ? `, state: ${stateName}` : '';
             const reservationParams = commandReservations.map((reservation) => `, ${reservation.stateParam}: ${reservation.stateName}`).join('');
-            const portParams = usePort ? `, portResult: ${capability.resultName}, now: java.time.LocalDateTime` : '';
+            const portParams = usePort ? `, portResult: ${capability.resultName}${port.failureEvent ? ', now: java.time.LocalDateTime' : ''}` : '';
+            const readableStateFields = includeState ? stateFieldsBeforeCommand(this.model, slice, command, events, selection) : [];
             const reservationGuard = commandReservations.map((reservation) => [
                 `        require(!${reservation.stateParam}.reserved) {`,
                 `            "${escapeKotlin(reservation.message)}"`,
@@ -314,17 +354,24 @@ ${sourcingHandlers}
             const guard = commandStartsLifecycle(command) ? '' : `${renderStateGuard(this.model, transition)}\n`;
             const eventLines = [
                 ...reservationEvents,
-                ...outputs.map((event) => `            ${_eventTitle(event.title)}(${eventArguments(event, command, selection)})`)
+                ...outputs.map((event) => `            ${_eventTitle(event.title)}(${eventArguments(event, command, selection, readableStateFields)})`)
             ];
             const returnStatement = usePort
                 ? (() => {
                     const success = port.successEvent;
                     const failure = port.failureEvent;
                     const successFields = eventFieldsWithTags(success.fields ?? [], eventTagFieldsFor(slice, success, selection, true));
+                    const successArgs = successFields.map((field) => resultEventArgument(field, command, 'portResult', selection, readableStateFields)).join(', ');
+                    if (!failure) {
+                        return [
+                            'return when (portResult) {',
+                            `            is ${capability.resultName}.Succeeded -> listOf(${_eventTitle(success.title)}(${successArgs}))`,
+                            '        }'
+                        ].join('\n        ');
+                    }
                     const failureFields = eventFieldsWithTags(failure.fields ?? [], eventTagFieldsFor(slice, failure, selection, true));
-                    const successArgs = successFields.map((field) => resultEventArgument(field, command, 'portResult', selection)).join(', ');
-                    const failureArgs = failureFields.map((field) => resultEventArgument(field, command, 'portResult', selection)).join(', ');
-                    const unavailableArgs = failureFields.map((field) => unavailableEventArgument(field, command, 'portResult', 'now', selection)).join(', ');
+                    const failureArgs = failureFields.map((field) => resultEventArgument(field, command, 'portResult', selection, readableStateFields)).join(', ');
+                    const unavailableArgs = failureFields.map((field) => unavailableEventArgument(field, command, 'portResult', 'now', selection, readableStateFields)).join(', ');
                     return [
                         'return when (portResult) {',
                         `            is ${capability.resultName}.Succeeded -> listOf(${_eventTitle(success.title)}(${successArgs}))`,
@@ -336,8 +383,11 @@ ${sourcingHandlers}
                 : outputs.length > 0
                     ? `return listOf(\n${eventLines.join(',\n')}\n        )`
                     : 'return emptyList() // TODO: return the event produced by this command.';
-            return `    fun decide(command: ${commandName}${stateParam}${reservationParams}${portParams}): List<Any> {\n${guard}${reservationGuard ? `${reservationGuard}\n` : ''}        ${returnStatement}\n    }`;
-        }).join('\n\n');
+            const signature = `fun decide(command: ${commandName}${stateParam}${reservationParams}${portParams}): List<Any>`;
+            const implementation = `    ${signature} {\n${guard}${reservationGuard ? `${reservationGuard}\n` : ''}        ${returnStatement}\n    }`;
+            return {signature, implementation};
+        });
+        const interfaceMethods = methodDefinitions.map((method) => method.implementation).join('\n\n');
         const commandImports = slice.commands.map((command) => `import ${packageName}.${_commandTitle(command.title)}`).join('\n');
         const portImports = uniqueBy(slice.commands
             .map((command) => {
@@ -360,7 +410,6 @@ ${sourcingHandlers}
         const fieldOptionImports = kotlinEnumImports(events.flatMap((event) => event.fields ?? []), this.model.rootPackage);
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${decisionName}.kt`), `package ${packageName}
 
-import org.springframework.stereotype.Component
 ${commandImports}
 ${portImports}
 ${eventImports}
@@ -369,10 +418,19 @@ ${reservationStateImports}
 ${stateEnumImports}
 ${fieldOptionImports}
 
-@Component
-class ${decisionName} {
-${methods}
+interface ${decisionName} {
+${interfaceMethods}
 }
+`);
+
+        const domainPackage = `${this.model.rootPackage}.domain.${context}.${slicePackage}`;
+        this._writeCreateOnly(this._rootKotlinPath(`domain/${context}/${slicePackage}/${decisionComponentName}.kt`), `package ${domainPackage}
+
+import org.springframework.stereotype.Component
+import ${packageName}.${decisionName}
+
+@Component
+class ${decisionComponentName} : ${decisionName}
 `);
     },
 

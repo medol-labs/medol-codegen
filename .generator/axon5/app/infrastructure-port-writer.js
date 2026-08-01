@@ -5,9 +5,12 @@
 
 const {
     outboundEvents,
+    commandStartsLifecycle,
     kotlinFieldImports,
     mappedType,
     pascal,
+    primaryConcept,
+    relatedEventsForSlice,
     safeIdentifier,
     uniqueBy,
     uniqueFields
@@ -67,7 +70,7 @@ function portCapability(slice, command) {
 function isInfrastructurePortCommand(command, events) {
     if (!command?.port) return false;
     const outputs = commandOutputEvents(command, events);
-    return outputs.length === 2 && outputs.some(isFailureOutcome) && outputs.some((event) => !isFailureOutcome(event));
+    return outputs.length > 0;
 }
 
 function isPortOutputField(field) {
@@ -95,10 +98,40 @@ function portInputFields(command) {
     return (command.fields ?? []).filter((field) => !isPortOutputField(field));
 }
 
-function resultFieldsForEvent(event, command = null) {
+function stateEventsForSlice(model, slice, events) {
+    const concept = primaryConcept(slice);
+    if (!concept) return events;
+    return uniqueBy((model.slices ?? [])
+        .filter((candidate) => candidate.context === slice.context && primaryConcept(candidate) === concept)
+        .flatMap((candidate) => relatedEventsForSlice(model, candidate)), (event) => event.id ?? event.name);
+}
+
+function stateFieldsBeforeCommand(command, events, slice, model) {
+    const outputIds = new Set(commandOutputEvents(command, events).map((event) => event.id));
+    return uniqueFields(stateEventsForSlice(model, slice, events)
+        .filter((event) => !outputIds.has(event.id))
+        .flatMap((event) => event.fields ?? []));
+}
+
+function stateFieldForEventField(field, stateFields) {
+    if ((stateFields ?? []).some((candidate) => candidate.name === field.name)) return true;
+    return Boolean(field.source?.from?.some((name) => {
+        const sourceName = String(name).split('.').pop();
+        return (stateFields ?? []).some((candidate) => candidate.name === sourceName);
+    }));
+}
+
+function isStateResolvableResultField(field, stateFields) {
+    return Boolean((field.idAttribute || field.source?.from?.length || field.source?.rule)
+        && stateFieldForEventField(field, stateFields));
+}
+
+function resultFieldsForEvent(event, command = null, stateFields = []) {
+    if (!event) return [];
     const commandFieldNames = new Set((command?.fields ?? []).map((field) => field.name));
     return (event.fields ?? []).filter((field) =>
         (!commandFieldNames.has(field.name) || isPortOutputField(field))
+        && !isStateResolvableResultField(field, stateFields)
         && !(field.idAttribute && field.generated)
     );
 }
@@ -153,12 +186,12 @@ function infrastructurePortForCommand(command, events, slice, model) {
     if (!isInfrastructurePortCommand(command, events)) return null;
     const outputs = commandOutputEvents(command, events);
     const successEvent = outputs.find((event) => !isFailureOutcome(event)) ?? outputs[0];
-    const failureEvent = outputs.find(isFailureOutcome) ?? outputs[1];
+    const failureEvent = outputs.find((event) => event.id !== successEvent.id && isFailureOutcome(event));
     return {
         capability: portCapability(slice, command),
         inputFields: portInputFields(command),
         successEvent,
-        failureEvent,
+        ...(failureEvent ? {failureEvent} : {}),
         packageName: slicePortPackage(model.rootPackage, slice),
         pathPrefix: slicePortPath(slice),
         secondaryPackageName: secondaryPortPackage(model.rootPackage, slice),
@@ -172,27 +205,30 @@ const infrastructurePortWriterMethods = {
         if (!port) return;
 
         const capability = port.capability;
+        const stateFields = commandStartsLifecycle(command) ? [] : stateFieldsBeforeCommand(command, events, slice, this.model);
         const inputImports = kotlinFieldImports(port.inputFields, this.model.rootPackage);
+        const successResultFields = resultFieldsForEvent(port.successEvent, command, stateFields);
+        const failureResultFields = resultFieldsForEvent(port.failureEvent, command, stateFields);
         const resultImports = kotlinFieldImports(uniqueFields([
-            ...resultFieldsForEvent(port.successEvent, command),
-            ...resultFieldsForEvent(port.failureEvent, command)
+            ...successResultFields,
+            ...failureResultFields
         ]), this.model.rootPackage);
         const inputProperties = port.inputFields.map((field) =>
             `    val ${field.name}: ${mappedType(field, field.optional)}`
         ).join(',\n');
-        const successProperties = resultFieldsForEvent(port.successEvent, command).map((field) =>
+        const successProperties = successResultFields.map((field) =>
             `        val ${field.name}: ${mappedType(field, field.optional)}`
         ).join(',\n');
-        const failureProperties = resultFieldsForEvent(port.failureEvent, command).map((field) =>
+        const failureProperties = failureResultFields.map((field) =>
             `        val ${field.name}: ${mappedType(field, field.optional)}`
         ).join(',\n');
         const unavailableProperties = [
             '        val failureReason: String',
-            resultFieldsForEvent(port.failureEvent, command).some((field) => field.name === 'remediationHint') ? '        val remediationHint: String? = null' : undefined
+            failureResultFields.some((field) => field.name === 'remediationHint') ? '        val remediationHint: String? = null' : undefined
         ].filter(Boolean).join(',\n');
         const successVariant = resultVariant('Succeeded', successProperties, capability.resultName);
-        const rejectedVariant = resultVariant('Rejected', failureProperties, capability.resultName);
-        const unavailableVariant = resultVariant('Unavailable', unavailableProperties, capability.resultName);
+        const rejectedVariant = port.failureEvent ? resultVariant('Rejected', failureProperties, capability.resultName) : undefined;
+        const unavailableVariant = port.failureEvent ? resultVariant('Unavailable', unavailableProperties, capability.resultName) : undefined;
         const imports = importLines([
             inputImports,
             resultImports
@@ -213,10 +249,8 @@ ${inputProperties}
 
 sealed interface ${capability.resultName} {
 ${successVariant}
-
-${rejectedVariant}
-
-${unavailableVariant}
+${rejectedVariant ? `\n${rejectedVariant}` : ''}
+${unavailableVariant ? `\n${unavailableVariant}` : ''}
 }
 `);
 
@@ -244,16 +278,16 @@ class ${routerClass}(private val adapters: ObjectProvider<${capability.portName}
             1 -> try {
                 candidates.first().${capability.methodName}(input)
             } catch (ex: Exception) {
-                ${capability.resultName}.Unavailable(
+                ${port.failureEvent ? `${capability.resultName}.Unavailable(
                     failureReason = ex.message ?: "${capability.portName} is unavailable."
-                )
+                )` : `throw ex`}
             }
-            0 -> ${capability.resultName}.Unavailable(
+            0 -> ${port.failureEvent ? `${capability.resultName}.Unavailable(
                 failureReason = "No ${capability.portName} adapter supports the requested input."
-            )
-            else -> ${capability.resultName}.Unavailable(
+            )` : `error("No ${capability.portName} adapter supports the requested input.")`}
+            else -> ${port.failureEvent ? `${capability.resultName}.Unavailable(
                 failureReason = "Multiple ${capability.portName} adapters support the requested input."
-            )
+            )` : `error("Multiple ${capability.portName} adapters support the requested input.")`}
         }
     }
 }

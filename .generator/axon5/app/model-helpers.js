@@ -136,15 +136,15 @@ function conceptSelectionFor(slice, model) {
     const concept = primaryConcept(slice);
     const conceptSlices = (model?.slices ?? [])
         .filter((candidate) => candidate.context === slice.context && primaryConcept(candidate) === concept && candidate.commands.length > 0);
-    const sourceSlice = conceptSlices.find((candidate) => candidate.startsLifecycle && explicitConsistencyTags(candidate).length > commandIdFields(candidate).length)
-        ?? conceptSlices.find((candidate) => explicitConsistencyTags(candidate).length > commandIdFields(candidate).length)
+    const sourceSlice = conceptSlices.find((candidate) => candidate.startsLifecycle && explicitConsistencyTags(candidate).length > 0)
+        ?? conceptSlices.find((candidate) => explicitConsistencyTags(candidate).length > 0)
         ?? conceptSlices.find((candidate) => candidate.startsLifecycle && commandIdFields(candidate).length > 0)
         ?? conceptSlices.find((candidate) => commandIdFields(candidate).length > 0)
         ?? conceptSlices.find((candidate) => candidate.startsLifecycle && (candidate.tags ?? []).length > 0)
         ?? conceptSlices.find((candidate) => (candidate.tags ?? []).length > 0)
         ?? slice;
     const explicitTags = explicitConsistencyTags(sourceSlice);
-    if (explicitTags.length > commandIdFields(sourceSlice).length) {
+    if (explicitTags.length > 0) {
         return selectionFromTags(sourceSlice, explicitTags, `${pascal(concept)}Selection`, concept, [concept]);
     }
     const idFields = commandIdFields(sourceSlice);
@@ -160,7 +160,7 @@ function sliceSelectionFor(slice) {
     const commandFields = firstCommand?.fields ?? [];
     const idFields = commandFields.filter((field) => field.idAttribute);
     const explicitTags = explicitConsistencyTags(slice);
-    const tags = explicitTags.length > idFields.length
+    const tags = explicitTags.length > 0
         ? explicitTags
         : idFields.length > 0
         ? idFields.map((field) => ({name: field.name, expression: field.name}))
@@ -477,9 +477,18 @@ function renderStateGuard(model, transition) {
     ].join('\n');
 }
 
-function eventArguments(event, command, selection) {
+function sourceNameOf(name) {
+    return String(name).split('.').pop();
+}
+
+function fieldsCompatible(target, source) {
+    return mappedType(target, false).replace(/\?$/, '') === mappedType(source, false).replace(/\?$/, '');
+}
+
+function eventArguments(event, command, selection, stateFields = []) {
     const eventFields = eventFieldsWithTags(event.fields ?? [], eventTagFieldsFor({tags: [], concepts: []}, event, selection ?? {fields: []}, true));
     const commandFields = commandFieldsWithSelection(command, selection ?? {fields: []});
+    const stateFieldMap = new Map((stateFields ?? []).map((field) => [field.name, field]));
     const renderCommandField = (field, source) => {
         if (field.optional || !source.optional) return `command.${source.name}`;
         const fieldType = mappedType(field, false).replace(/\?$/, '');
@@ -487,13 +496,30 @@ function eventArguments(event, command, selection) {
         if (fieldType !== sourceType) return `command.${source.name}`;
         return `command.${source.name} ?: ${fallbackValue(field)} /* TODO: provide non-null ${field.name} */`;
     };
+    const renderStateField = (field, source) => {
+        if (field.optional) return `state.${source.name}`;
+        return `requireNotNull(state.${source.name}) { "${field.name} is required from state." }`;
+    };
     return eventFields.map((field) => {
         const sameName = commandFields.find((candidate) => candidate.name === field.name);
         if (sameName) return `${field.name} = ${renderCommandField(field, sameName)}`;
-        const source = field.source?.from?.find((name) => commandFields.some((candidate) => candidate.name === name));
+        const stateSameName = stateFieldMap.get(field.name);
+        if (stateSameName) return `${field.name} = ${renderStateField(field, stateSameName)}`;
+        const source = field.source?.from?.find((name) => {
+            const sourceName = sourceNameOf(name);
+            return commandFields.some((candidate) => candidate.name === sourceName)
+                || stateFieldMap.has(sourceName);
+        });
         if (source) {
-            const sourceField = commandFields.find((candidate) => candidate.name === source);
-            if (sourceField) return `${field.name} = ${renderCommandField(field, sourceField)}`;
+            const sourceName = sourceNameOf(source);
+            const sourceField = commandFields.find((candidate) => candidate.name === sourceName);
+            if (sourceField) {
+                if (fieldsCompatible(field, sourceField)) return `${field.name} = ${renderCommandField(field, sourceField)}`;
+            }
+            const stateSourceField = stateFieldMap.get(sourceName);
+            if (stateSourceField) {
+                if (fieldsCompatible(field, stateSourceField)) return `${field.name} = ${renderStateField(field, stateSourceField)}`;
+            }
         }
         return `${field.name} = ${fallbackValue(field)} /* TODO: ${field.source?.rule ?? 'derive value'} */`;
     }).join(', ');

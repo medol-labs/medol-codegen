@@ -18,7 +18,9 @@ const {
     commandStartsLifecycle,
     selectionFor,
     eventFieldsWithTags,
-    eventTagFieldsFor
+    eventTagFieldsFor,
+    primaryConcept,
+    relatedEventsForSlice
 } = require('./model-helpers');
 const {infrastructurePortForCommand, resultFieldsForEvent} = require('./infrastructure-port-writer');
 const {_commandTitle, _eventTitle} = require('../../common/util/naming');
@@ -202,11 +204,11 @@ function specHasUniqueReservation(specification) {
         .some((expression) => String(expression ?? '').trim().toLowerCase().startsWith('unique '));
 }
 
-function renderPortResult(port, expectedEvent, command) {
+function renderPortResult(port, expectedEvent, command, stateFields = []) {
     if (!port) return undefined;
     const outcome = expectedEvent.id === port.failureEvent?.id ? 'Rejected' : 'Succeeded';
     const sourceEvent = outcome === 'Rejected' ? port.failureEvent : port.successEvent;
-    const args = resultFieldsForEvent(sourceEvent, command)
+    const args = resultFieldsForEvent(sourceEvent, command, stateFields)
         .map((field) => {
             const expected = expectedFieldValue(field, expectedEvent, command) ?? testValue(field);
             return `                ${field.name} = ${expected}`;
@@ -216,11 +218,19 @@ function renderPortResult(port, expectedEvent, command) {
 }
 
 function renderDecideCall(decisionName, commandName, command, selection, args) {
-    return `${decisionName}().decide(
+    return `(object : ${decisionName} {}).decide(
             ${commandName}(
 ${commandArguments(command, selection)}
             )${args}
         )`;
+}
+
+function stateEventsForSlice(model, slice, events) {
+    const concept = primaryConcept(slice);
+    if (!concept) return events;
+    return uniqueBy((model.slices ?? [])
+        .filter((candidate) => candidate.context === slice.context && primaryConcept(candidate) === concept)
+        .flatMap((candidate) => relatedEventsForSlice(model, candidate)), (event) => event.id ?? event.name);
 }
 
 const testWriterMethods = {
@@ -397,7 +407,7 @@ ${commandArguments(command, selection)}
             ...commandFieldsWithSelection(specCommand, selection),
             ...givenEvents.flatMap((event) => event.fields ?? []),
             ...expectedEvents.flatMap((event) => event.fields ?? []),
-            ...(port ? [...(port.successEvent.fields ?? []), ...(port.failureEvent.fields ?? [])] : []),
+            ...(port ? [...(port.successEvent.fields ?? []), ...(port.failureEvent?.fields ?? [])] : []),
             ...reservations.flatMap((reservation) => [...reservation.idFields, ...reservation.originalFields, ...reservation.normalizedFields])
         ];
         const usesUuid = JSON.stringify(fields).includes('"UUID"');
@@ -439,8 +449,12 @@ ${eventArguments(event, this.model)}
         const reservationArgs = commandStartsLifecycle(specCommand)
             ? reservations.map((reservation) => `,\n            ${reservation.stateParam} = ${reservation.stateParam}`).join('')
             : '';
-        const portResult = port ? renderPortResult(port, expectedEvents[0], specCommand) : undefined;
-        const portArgs = port ? `,\n            portResult = ${portResult},\n            now = LocalDateTime.parse("2026-01-01T00:00:00")` : '';
+        const outputIds = new Set(outboundEvents(specCommand, events).map((event) => event.id));
+        const stateFields = includeState ? uniqueBy(stateEventsForSlice(this.model, slice, events)
+            .filter((event) => !outputIds.has(event.id))
+            .flatMap((event) => event.fields ?? []), (field) => field.name) : [];
+        const portResult = port ? renderPortResult(port, expectedEvents[0], specCommand, stateFields) : undefined;
+        const portArgs = port ? `,\n            portResult = ${portResult}${port.failureEvent ? ',\n            now = LocalDateTime.parse("2026-01-01T00:00:00")' : ''}` : '';
         const eventAssertions = expectedEvents.map((event) => {
             const eventName = _eventTitle(event.title);
             const fieldAssertions = assertionsForEvent(event, specCommand);
@@ -454,7 +468,7 @@ ${fieldAssertions || `        assertTrue(event is ${eventName})`}`;
             fields,
             port,
             usesState: includeState,
-            usesNow: Boolean(port),
+            usesNow: Boolean(port?.failureEvent),
             usesUuid,
             body: `    @Test
     fun ${testMethodName(specification.title)}() {
@@ -464,7 +478,7 @@ ${stateSetup}${stateSetup && reservationSetup ? '\n' : ''}${reservationSetup}
 ${commandArguments(specCommand, selection)}
         )
 
-        val events = ${decisionName}().decide(
+        val events = (object : ${decisionName} {}).decide(
             command${stateArg}${reservationArgs}${portArgs}
         )
 
@@ -484,6 +498,9 @@ ${eventAssertions}
             .map(({command, outputs}) => {
                 const commandName = _commandTitle(command.title);
                 const expectedEventName = _eventTitle(outputs[0].title);
+                const port = infrastructurePortForCommand(command, events, slice, this.model);
+                const portResult = port ? renderPortResult(port, outputs[0], command) : undefined;
+                const portArgs = port ? `,\n            portResult = ${portResult}${port.failureEvent ? ',\n            now = LocalDateTime.parse("2026-01-01T00:00:00")' : ''}` : '';
                 const reservationArgs = reservations.map((reservation) =>
                     `,\n            ${reservation.stateParam} = ${reservation.stateName}()`
                 ).join('');
@@ -494,12 +511,15 @@ ${eventAssertions}
                     fields: [
                         ...commandFieldsWithSelection(command, selection),
                         ...outputs.flatMap((event) => event.fields ?? []),
+                        ...(port ? [...(port.successEvent.fields ?? []), ...(port.failureEvent?.fields ?? [])] : []),
                         ...reservations.flatMap((reservation) => [...reservation.idFields, ...reservation.originalFields, ...reservation.normalizedFields])
                     ],
+                    port,
+                    usesNow: Boolean(port?.failureEvent),
                     usesUuid: JSON.stringify(command.fields ?? []).includes('"UUID"'),
                     body: `    @Test
     fun ${testMethodName(command.name)}Emits${expectedEventName}() {
-        val events = ${renderDecideCall(decisionName, commandName, command, selection, reservationArgs)}
+        val events = ${renderDecideCall(decisionName, commandName, command, selection, `${reservationArgs}${portArgs}`)}
 
         assertTrue(events.any { it is ${expectedEventName} })
     }`

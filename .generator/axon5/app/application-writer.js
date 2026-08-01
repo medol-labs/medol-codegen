@@ -362,10 +362,17 @@ ${eventMethods}
     _writeManualInfrastructureDirectories() {
         this.fs.write(this._manualInfrastructurePath('.gitkeep'), '');
         this.fs.write(this._manualTestInfrastructurePath('.gitkeep'), '');
+        this._writeCreateOnly(this._manualDomainPath('.gitkeep'), '');
+        this._writeCreateOnly(this._manualTestDomainPath('.gitkeep'), '');
         for (const directory of this._manualInfrastructurePortDirectories()) {
             this.fs.write(this._manualInfrastructurePath(`${directory}/.gitkeep`), '');
             this.fs.write(this._manualTestInfrastructurePath(`${directory}/.gitkeep`), '');
         }
+    },
+
+    _writeCreateOnly(targetPath, contents) {
+        if (this.fs.exists(targetPath)) return;
+        this.fs.write(targetPath, contents);
     },
 
     _manualInfrastructurePortDirectories() {
@@ -408,6 +415,14 @@ ${eventMethods}
 
     _manualTestInfrastructurePath(relative) {
         return this.destinationPath(this._modulePath(`src/test/kotlin/${this.model.rootPackage.split('.').join('/')}/infrastructure/${relative}`));
+    },
+
+    _manualDomainPath(relative) {
+        return this.destinationPath(this._modulePath(`src/main/kotlin/${this.model.rootPackage.split('.').join('/')}/domain/${relative}`));
+    },
+
+    _manualTestDomainPath(relative) {
+        return this.destinationPath(this._modulePath(`src/test/kotlin/${this.model.rootPackage.split('.').join('/')}/domain/${relative}`));
     },
 
     _modulePath(relative) {

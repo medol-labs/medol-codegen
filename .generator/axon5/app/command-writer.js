@@ -156,12 +156,13 @@ ${reservationSelections ? `\n${reservationSelections}` : ''}
                 'command',
                 ...(includeState ? ['state'] : []),
                 ...commandReservations.map((reservation) => reservation.stateParam),
-                ...(usePort ? ['portResult', 'now'] : [])
+                ...(usePort ? ['portResult'] : []),
+                ...(port?.failureEvent ? ['now'] : [])
             ].join(', ');
             const portStatements = usePort
                 ? `        val input = ${capability.inputName}(${constructorArgsFromCommand(inputFields)})
         val portResult = ${lowerCamel(capability.portName)}.${capability.methodName}(input)
-        val now = java.time.LocalDateTime.now()
+${port?.failureEvent ? '        val now = java.time.LocalDateTime.now()\n' : ''}
 `
                 : '';
             return `    @CommandHandler

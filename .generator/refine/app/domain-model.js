@@ -17,7 +17,7 @@ function buildDomainModel(source) {
     source = withResolvedValueTypes(source);
     const slices = source.slices ?? [];
     const automationCommandKeys = buildAutomationCommandKeys(slices);
-    const valueTypes = (source.valueTypes ?? []).map((valueType) => ({
+    const valueTypes = uniqueValueTypes(source.valueTypes ?? []).map((valueType) => ({
         ...valueType,
         tsBaseType: tsValueType(valueType),
         schema: zodValueTypeExpression(valueType)
@@ -41,7 +41,12 @@ function buildDomainModel(source) {
 }
 
 function withResolvedValueTypes(source) {
-    const valueTypesByName = new Map((source.valueTypes ?? []).map((valueType) => [valueType.name, valueType]));
+    const valueTypesByName = new Map();
+    for (const valueType of source.valueTypes ?? []) {
+        if (!valueTypesByName.has(valueType.name)) {
+            valueTypesByName.set(valueType.name, valueType);
+        }
+    }
     const enrichField = (field) => ({
         ...field,
         valueType: field.valueType ?? valueTypesByName.get(field.type)
@@ -67,6 +72,16 @@ function withResolvedValueTypes(source) {
         }))
     }));
     return {...source, valueTypes, slices};
+}
+
+function uniqueValueTypes(valueTypes) {
+    const byName = new Map();
+    for (const valueType of valueTypes.filter(Boolean)) {
+        if (!byName.has(valueType.name)) {
+            byName.set(valueType.name, valueType);
+        }
+    }
+    return Array.from(byName.values());
 }
 
 function uniqueCommands(commands) {

@@ -154,7 +154,16 @@ function semanticWords(value) {
         install: 'deployment',
         succeeded: 'ready',
         success: 'ready',
-        established: 'connected'
+        established: 'connected',
+        profiled: 'metadata',
+        profiling: 'metadata',
+        profile: 'metadata',
+        reprofiled: 'metadata',
+        reprofiling: 'metadata',
+        validated: 'contract',
+        validation: 'contract',
+        revalidated: 'contract',
+        revalidation: 'contract'
     };
     return splitWords(value)
         .map((word) => synonyms[word] ?? word)
@@ -702,6 +711,14 @@ ${includeEventTime ? `
         }
 
         if (stateChange?.to) {
+            const statusField = bestSemanticFieldMatch(event, (readmodel.fields ?? []).filter((field) =>
+                !assignedFieldNames.has(field.name)
+                && isStringStatusField(field)
+            ), stateChange.to);
+            if (statusField) {
+                addAssignment(statusField, `entity.${statusField.name} = "${escapeKotlin(stateChange.to)}"`);
+            }
+
             const stateAtSuffix = `${lowerCamel(stateChange.to)}At`;
             const candidates = (readmodel.fields ?? []).filter((field) =>
                 !assignedFieldNames.has(field.name)
@@ -736,6 +753,14 @@ ${includeEventTime ? `
         }
 
         if (isFailureEvent(event)) {
+            const statusField = bestSemanticFieldMatch(event, (readmodel.fields ?? []).filter((field) =>
+                !assignedFieldNames.has(field.name)
+                && isStringStatusField(field)
+            ), 'failed');
+            if (statusField) {
+                addAssignment(statusField, `entity.${statusField.name} = "Failed"`);
+            }
+
             const failedAtField = bestSemanticFieldMatch(event, (readmodel.fields ?? []).filter((field) =>
                 !assignedFieldNames.has(field.name)
                 && field.type === 'DateTime'
@@ -833,6 +858,12 @@ function lastPathSegment(value) {
         return undefined;
     }
     return String(value).split('.').filter(Boolean).at(-1);
+}
+
+function isStringStatusField(field) {
+    return field.type === 'String'
+        && field.cardinality !== 'Multiple'
+        && /Status$/.test(field.name ?? '');
 }
 
 module.exports = {readModelWriterMethods};

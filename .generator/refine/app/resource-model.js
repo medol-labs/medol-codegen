@@ -55,10 +55,10 @@ function toReadModelResource(group, readModel, allEvents, workflow) {
         .filter((command) => command.aggregateRoute === resourceAggregateRoute);
     const createCommand = aggregateProducerCommands.find((command) => command.startsLifecycle && isCreateCommand(command))
         ?? aggregateProducerCommands.find((command) => command.startsLifecycle);
+    const primaryIdField = idField?.name ?? 'id';
     const rowCommands = normalizedCommands
         .filter((command) => itemCommandKeys.has(command.id))
-        .filter((command) => canAddressCommandFromReadModel(command, queryFields));
-    const primaryIdField = idField?.name ?? 'id';
+        .filter((command) => canAddressCommandFromReadModel(command, queryFields, primaryIdField));
     const primaryRowCommands = rowCommands.filter((command) =>
         command.matchingFields.some((field) => field.name === primaryIdField)
     );
@@ -209,19 +209,25 @@ function isCommandFormField(field) {
     return true;
 }
 
-function canAddressCommandFromReadModel(command, queryFields) {
-    return sharesIdentifierField(command.fields, queryFields)
-        || sharesSourcedIdentifierField(command.matchingFields, queryFields);
+function canAddressCommandFromReadModel(command, queryFields, primaryIdField) {
+    return sharesPrimaryIdentifierField(command.matchingFields, primaryIdField)
+        || sharesSourcedPrimaryIdentifierField(command.matchingFields, queryFields, primaryIdField);
 }
 
-function sharesSourcedIdentifierField(commandFields, readModelFields) {
+function sharesPrimaryIdentifierField(commandFields, primaryIdField) {
+    return commandFields
+        .filter(isIdentifierField)
+        .some((field) => field.name === primaryIdField);
+}
+
+function sharesSourcedPrimaryIdentifierField(commandFields, readModelFields, primaryIdField) {
     const readModelIdentifiers = new Set(readModelFields
         .filter(isIdentifierField)
         .map((field) => field.name));
     return commandFields
         .filter(isIdentifierField)
         .filter(hasSourceMapping)
-        .some((field) => readModelIdentifiers.has(field.name));
+        .some((field) => field.name === primaryIdField && readModelIdentifiers.has(field.name));
 }
 
 function hasSourceMapping(field) {

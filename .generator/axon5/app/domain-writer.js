@@ -35,7 +35,7 @@ const domainWriterMethods = {
                         ? renderObjectValueType(valueType, this.model.rootPackage)
                         : renderScalarValueType(valueType, baseType)
             ].filter((line, index, lines) => line !== '' || lines[index - 1] !== '').join('\n');
-            this.fs.write(this._kotlinPath(`${contextPackage(valueType.context)}/domain/types/${valueType.name}.kt`), `${lines}\n`);
+            this.fs.write(this._rootKotlinPath(`${contextPackage(valueType.context)}/domain/types/${valueType.name}.kt`), `${lines}\n`);
         }
     },
 
@@ -56,7 +56,7 @@ const domainWriterMethods = {
             const typeName = conceptStateEnumName(concept.name);
             const values = concept.states.map((state) => `    ${constant(state)}`).join(',\n');
             this.fs.write(
-                this._kotlinPath(`${contextPackage(concept.context)}/domain/states/${typeName}.kt`),
+                this._rootKotlinPath(`${contextPackage(concept.context)}/domain/states/${typeName}.kt`),
                 `package ${packageName}\n\nenum class ${typeName} {\n${values}\n}\n`
             );
         }
@@ -74,7 +74,7 @@ const domainWriterMethods = {
                 '    }'
             ].join('\n')).join('\n\n');
             this.fs.write(
-                this._kotlinPath(`${contextPackage(context)}/domain/Concepts.kt`),
+                this._rootKotlinPath(`${contextPackage(context)}/domain/Concepts.kt`),
                 `package ${packageName}\n\nobject Concepts {\n${body}\n}\n`
             );
         }

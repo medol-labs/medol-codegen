@@ -286,6 +286,7 @@ function normalizeFields(fields = []) {
             readOnly: !!field.readOnly,
             technicalAttribute: !!field.technicalAttribute,
             idAttribute: !!field.idAttribute,
+            file: !!field.file,
             cardinality: field.cardinality ?? 'Single',
             source: field.source,
             valueType: field.valueType
@@ -296,6 +297,7 @@ function decorateField(field) {
     const object = isObjectField(field);
     const list = isListField(field);
     const json = object;
+    const file = !!field.file;
     const optionSet = !object ? optionSetForField(field) : undefined;
     const textArea = !object && (field.name.toLowerCase().includes('content')
         || field.name.toLowerCase().includes('description')
@@ -314,7 +316,8 @@ function decorateField(field) {
         filterable: isFilterable(field),
         cellValue: cellValue(field),
         inputComponent: textArea ? 'Textarea' : 'Input',
-        inputType: inputType(field),
+        inputType: file ? 'file' : inputType(field),
+        file,
         boolean,
         enumName: optionSet?.enumName ?? null,
         enumOptions: optionSet?.values ?? [],
@@ -323,7 +326,7 @@ function decorateField(field) {
         scalarList: list && !object,
         json,
         jsonEmptyValue: isListField(field) ? '[]' : '{}',
-        placeholder: optionSet ? `Select ${field.label}` : json ? jsonPlaceholder(field) : `Enter ${field.label}`,
+        placeholder: file ? `Select ${field.label}` : optionSet ? `Select ${field.label}` : json ? jsonPlaceholder(field) : `Enter ${field.label}`,
         fieldArrayName: `${camel(field.name)}Fields`,
         defaultValue: defaultValueExpression(field),
         searchParamDefault: searchParamDefaultExpression(field),

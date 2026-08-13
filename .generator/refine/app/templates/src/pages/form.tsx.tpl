@@ -118,6 +118,15 @@ export const <%= command.pageComponent %> = () => {
                 </Select>
 <% } else { -%>
                 <FormControl>
+<% if (field.file) { -%>
+                  <Input
+                    type="file"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      field.onChange(file ? `file://${file.name}` : "");
+                    }}
+                  />
+<% } else { -%>
                   <<%= field.inputComponent %>
 <% if (field.inputType) { -%>
                     type="<%= field.inputType %>"
@@ -135,6 +144,7 @@ export const <%= command.pageComponent %> = () => {
                     rows={<%= field.rows %>}
 <% } -%>
                   />
+<% } -%>
                 </FormControl>
 <% } -%>
                 <FormMessage />

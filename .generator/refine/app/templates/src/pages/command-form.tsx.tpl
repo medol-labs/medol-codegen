@@ -1,6 +1,12 @@
 // Generated from config.json by the refine generator.
 import { useParsed } from "@refinedev/core";
 import { useTranslate } from "@refinedev/core";
+<% if (command.hasFileFields) { -%>
+import { useNotification } from "@refinedev/core";
+<% } -%>
+<% if (command.hasFileFields) { -%>
+import { useState } from "react";
+<% } -%>
 import { useNavigate, useSearchParams } from "react-router";
 <% if (command.hasArrayFields) { -%>
 import type { Control } from "react-hook-form";
@@ -38,7 +44,9 @@ import { <%= command.schemaName %>, type <%= command.inputTypeName %> } from "@/
 <% if (command.hasSelectFields) { -%>
 import { ResourceSelect } from "@/components/refine-ui/form/resource-select";
 <% } -%>
-
+<% if (command.hasFileFields) { -%>
+import { uploadFile, type PendingFileUpload } from "@/lib/upload-file";
+<% } -%>
 <% if (command.hasArrayFields) { -%>
 type ScalarArrayFieldProps = {
   control: Control<any>;
@@ -138,9 +146,15 @@ function ScalarArrayField({
 
 export const <%= command.pageComponent %> = () => {
   const t = useTranslate();
+<% if (command.hasFileFields) { -%>
+  const { open } = useNotification();
+<% } -%>
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { id } = useParsed();
+<% if (command.hasFileFields) { -%>
+  const [pendingFileUploads, setPendingFileUploads] = useState<Record<string, PendingFileUpload | undefined>>({});
+<% } -%>
   const defaultValues = {
 <% command.prefillFields.forEach((field) => { -%>
     <%= field.name %>: <%- field.searchParamDefault %>,
@@ -175,7 +189,15 @@ export const <%= command.pageComponent %> = () => {
     },
     formProps: {
       defaultValues,
+<% if (command.fileUploadProducer) { -%>
+      resolver: zodResolver(<%= command.schemaName %>.pick({
+<% command.fields.forEach((field) => { -%>
+        <%= field.name %>: true,
+<% }) -%>
+      })) as never,
+<% } else { -%>
       resolver: zodResolver(<%= command.schemaName %>) as never,
+<% } -%>
     },
   });
 <% command.fields.filter((field) => field.object && field.list).forEach((field) => { -%>
@@ -184,12 +206,77 @@ export const <%= command.pageComponent %> = () => {
     name: "<%= field.name %>" as never,
   });
 <% }) -%>
+<% if (command.hasFileFields) { -%>
 
-  function onSubmit(values: <%= command.inputTypeName %>) {
+  function setPendingFile(fieldName: string, file: File | undefined, onChange: (value: string) => void) {
+    const uploadId = file ? crypto.randomUUID() : "";
+    setPendingFileUploads((current) => ({
+      ...current,
+      [fieldName]: file ? { file, uploadId } : undefined,
+    }));
+    onChange(uploadId);
+  }
+<% } -%>
+
+  async function onSubmit(values: <%= command.inputTypeName %>) {
+<% if (command.hasFileFields) { -%>
+    const nextValues = {
+      ...defaultValues,
+      ...values,
+    } as <%= command.inputTypeName %>;
+<% command.fileFields.forEach((field) => { -%>
+<% if (command.fileUploadProducer || !field.optional) { -%>
+    if (!pendingFileUploads.<%= field.name %>) {
+      open?.({
+        type: "error",
+        message: t("notifications.fileUpload.required", "File is required"),
+        description: t("notifications.fileUpload.chooseFile", "Choose a file before submitting."),
+      });
+      return;
+    }
+<% } -%>
+    if (pendingFileUploads.<%= field.name %>) {
+      let uploadedId: string;
+      try {
+        uploadedId = await uploadFile({
+          file: pendingFileUploads.<%= field.name %>!.file,
+          uploadId: pendingFileUploads.<%= field.name %>!.uploadId,
+          source: "<%= resource.name %>.<%= command.name %>.<%= field.name %>",
+          values: {
+            ...nextValues,
+            <%= field.name %>: pendingFileUploads.<%= field.name %>!.uploadId,
+          } as Record<string, unknown>,
+        });
+      } catch (error) {
+        open?.({
+          type: "error",
+          message: t("notifications.fileUpload.failed", "File upload failed"),
+          description: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
+      nextValues.<%= field.name %> = uploadedId as never;
+<% if (command.fileUploadProducer) { -%>
+      open?.({
+        type: "success",
+        message: t("notifications.fileUpload.staged", "File staged"),
+        description: uploadedId,
+      });
+<% } -%>
+    }
+<% }) -%>
+<% if (command.fileUploadProducer) { -%>
+    navigate(-1);
+    return;
+<% } else { -%>
+    return onFinish(nextValues);
+<% } -%>
+<% } else { -%>
     return onFinish({
       ...defaultValues,
       ...values,
     });
+<% } -%>
   }
 
   return (
@@ -459,12 +546,12 @@ export const <%= command.pageComponent %> = () => {
                 </Select>
 <% } else { -%>
                 <FormControl>
-<% if (field.file) { -%>
+<% if (field.fileInput) { -%>
                   <Input
                     type="file"
                     onChange={(event) => {
                       const file = event.target.files?.[0];
-                      field.onChange(file ? `file://${file.name}` : "");
+                      setPendingFile("<%= field.name %>", file, field.onChange);
                     }}
                   />
 <% } else { -%>
@@ -497,7 +584,9 @@ export const <%= command.pageComponent %> = () => {
           <div className="flex gap-2">
             <Button
               type="submit"
+<% if (!command.hasFileFields) { -%>
               {...form.saveButtonProps}
+<% } -%>
               disabled={form.formState.isSubmitting}
             >
               {form.formState.isSubmitting ? t("buttons.submitting", "Submitting...") : t("buttons.submit", "Submit")}

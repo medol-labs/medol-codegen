@@ -118,7 +118,7 @@ export const <%= command.pageComponent %> = () => {
                 </Select>
 <% } else { -%>
                 <FormControl>
-<% if (field.file) { -%>
+<% if (field.fileInput) { -%>
                   <Input
                     type="file"
                     onChange={(event) => {

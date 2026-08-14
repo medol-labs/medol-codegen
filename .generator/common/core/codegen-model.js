@@ -384,6 +384,8 @@ function normalizeFields(fields, valueTypes = []) {
         generated: !!field.generated,
         technicalAttribute: !!field.technicalAttribute,
         query: !!field.query,
+        display: !!field.display,
+        uploadFile: !!field.uploadFile,
         file: !!field.file,
         ...(byName.has(field.type) ? { valueType: byName.get(field.type) } : {}),
         ...(field.mappings && !field.source ? { source: field.mappings[0] } : {})

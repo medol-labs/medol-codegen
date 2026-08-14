@@ -34,7 +34,16 @@ function importLines(values) {
         .split('\n')
         .map((line) => line.trim())
         .filter(Boolean)
-        .map((line) => line.startsWith('import ') ? line : `import ${line}`)), (value) => value);
+        .map(normalizeImportLine)), normalizeImportKey);
+}
+
+function normalizeImportLine(line) {
+    const importLine = line.startsWith('import ') ? line : `import ${line}`;
+    return importLine.replace(/;$/, '');
+}
+
+function normalizeImportKey(line) {
+    return normalizeImportLine(String(line ?? '').trim());
 }
 
 function allCommands(model) {
@@ -272,18 +281,21 @@ const testWriterMethods = {
             tests.some((test) => test.throws) ? 'import org.junit.jupiter.api.assertThrows' : undefined
         ].filter(Boolean), (value) => value);
         const timeImport = tests.some((test) => test.usesNow) ? ['import java.time.LocalDateTime'] : [];
+        const imports = uniqueBy([
+            ...assertionImports,
+            'import org.junit.jupiter.api.Test',
+            ...commandImports,
+            ...eventImports,
+            ...reservationImports,
+            ...stateImport,
+            ...portImports,
+            ...fieldImports,
+            ...timeImport
+        ].filter(Boolean).map(normalizeImportLine), normalizeImportKey);
 
         this.fs.write(this._testKotlinPath(`${context}/${slicePackage}/${testName}.kt`), `package ${packageName}
 
-${assertionImports.join('\n')}
-import org.junit.jupiter.api.Test
-${commandImports.join('\n')}
-${eventImports.join('\n')}
-${reservationImports.join('\n')}
-${stateImport.join('\n')}
-${portImports.join('\n')}
-${fieldImports.join('\n')}
-${timeImport.join('\n')}
+${imports.join('\n')}
 
 class ${testName} {
 ${tests.map((test) => test.body).join('\n\n')}

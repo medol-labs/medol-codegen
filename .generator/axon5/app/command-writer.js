@@ -93,6 +93,34 @@ function lowerCamel(value) {
     return safeIdentifier(name.charAt(0).toLowerCase() + name.slice(1));
 }
 
+function uploadFileFields(command) {
+    return (command.fields ?? []).filter((field) => field.uploadFile);
+}
+
+function hasUploadFile(command) {
+    return uploadFileFields(command).length > 0;
+}
+
+function uploadMetadataExpression(field, storedVariable) {
+    switch (field.name) {
+        case 'originalFileName': return `${storedVariable}.originalFileName`;
+        case 'contentType': return `${storedVariable}.contentType`;
+        case 'sizeBytes': return `${storedVariable}.sizeBytes`;
+        case 'stagedFileLocation': return `${storedVariable}.location`;
+        case 'checksum': return `${storedVariable}.checksum`;
+        case 'expiresAt': return `${storedVariable}.expiresAt`;
+        default: return null;
+    }
+}
+
+function uploadStorageName(command) {
+    return `${pascal(command.name ?? command.title)}UploadedFileStorage`;
+}
+
+function storedUploadName(command) {
+    return `${pascal(command.name ?? command.title)}StoredUploadedFile`;
+}
+
 const commandWriterMethods = {
     _writeCommand(packageName, context, slicePackage, command, selection, selectionPackageName = packageName, reservations = []) {
         const commandName = _commandTitle(command.title);
@@ -213,15 +241,31 @@ ${handlers}
     _writeCommandResource(packageName, context, slicePackage, slice) {
         const resourceName = `${pascal(slice.name)}Resource`;
         const conceptRoute = httpRoute(slice.concepts[0] ?? slice.name);
+        const uploadCommands = slice.commands.filter(hasUploadFile);
+        uploadCommands.forEach((command) => this._writeUploadFileStoragePort(packageName, context, slicePackage, command));
+        const constructorParams = [
+            'private val commandGateway: CommandGateway',
+            ...uploadCommands.map((command) => `private val ${lowerCamel(uploadStorageName(command))}: ${uploadStorageName(command)}`)
+        ].join(',\n    ');
         const methods = slice.commands.map((command) => {
             const commandName = _commandTitle(command.title);
-            return `    @PostMapping("/${httpRoute(command.title)}")
+            const jsonEndpoint = hasUploadFile(command) ? '' : `    @PostMapping("/${httpRoute(command.title)}")
     fun ${safeIdentifier(command.name)}(
         @Valid @RequestBody command: ${commandName},
         request: HttpServletRequest
     ): CompletableFuture<${commandName}> =
         commandGateway.send(command, MetadataFactory.from(request)).resultMessage.thenApply { command }`;
+            const multipartEndpoint = this._renderUploadFileCommandEndpoint(command);
+            return [jsonEndpoint, multipartEndpoint].filter(Boolean).join('\n\n');
         }).join('\n\n');
+        const commandFieldImports = kotlinFieldImports(uniqueFields(slice.commands.flatMap((command) => command.fields ?? [])), this.model.rootPackage);
+        const uploadImports = uploadCommands.length > 0
+            ? `import org.springframework.http.MediaType
+import org.springframework.web.bind.annotation.RequestParam
+import org.springframework.web.bind.annotation.RequestPart
+import org.springframework.web.multipart.MultipartFile
+${commandFieldImports ? `${commandFieldImports}\n` : ''}`
+            : '';
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${resourceName}.kt`), `package ${packageName}
 
 import jakarta.servlet.http.HttpServletRequest
@@ -233,15 +277,103 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 import ${this.model.rootPackage}.shared.application.metadata.MetadataFactory
+${uploadImports}
 import java.util.concurrent.CompletableFuture
 
 @CrossOrigin
 @RestController
 @RequestMapping("/${conceptRoute}")
-class ${resourceName}(private val commandGateway: CommandGateway) {
+class ${resourceName}(
+    ${constructorParams}
+) {
 ${methods}
 }
 `);
+    },
+
+    _writeUploadFileStoragePort(packageName, context, slicePackage, command) {
+        const storageName = uploadStorageName(command);
+        const storedName = storedUploadName(command);
+        this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${storageName}.kt`), `package ${packageName}
+
+import java.io.InputStream
+import java.time.LocalDateTime
+
+interface ${storageName} {
+    fun save(
+        uploadId: String?,
+        fieldName: String,
+        originalFileName: String,
+        contentType: String?,
+        inputStream: InputStream
+    ): ${storedName}
+}
+
+data class ${storedName}(
+    val location: String,
+    val originalFileName: String,
+    val contentType: String?,
+    val sizeBytes: Long?,
+    val checksum: String?,
+    val expiresAt: LocalDateTime
+)
+`);
+    },
+
+    _renderUploadFileCommandEndpoint(command) {
+        const commandName = _commandTitle(command.title);
+        const uploadFields = uploadFileFields(command);
+        if (uploadFields.length === 0) return '';
+        const primaryStoredVariable = `${uploadFields[0].name}Stored`;
+        const storageProperty = lowerCamel(uploadStorageName(command));
+        const requestParts = uploadFields.map((field) =>
+            `        @RequestPart("${field.name}") ${field.name}: MultipartFile`
+        );
+        const requestParams = (command.fields ?? [])
+            .filter((field) => !field.uploadFile)
+            .filter((field) => !uploadMetadataExpression(field, primaryStoredVariable))
+            .map((field) => {
+                const required = field.optional || field.generated ? ', required = false' : '';
+                const type = mappedType(field, field.optional || field.generated);
+                return `        @RequestParam("${field.name}"${required}) ${field.name}: ${type}`;
+            });
+        const parameters = [
+            ...requestParts,
+            ...requestParams,
+            '        request: HttpServletRequest'
+        ].join(',\n');
+        const idField = (command.fields ?? []).find((field) => field.idAttribute);
+        const uploadIdExpression = idField ? `${idField.name}?.toString()` : 'null';
+        const storeStatements = uploadFields.map((field) => `        val ${field.name}Stored = ${storageProperty}.save(
+            uploadId = ${uploadIdExpression},
+            fieldName = "${field.name}",
+            originalFileName = ${field.name}.originalFilename ?: "${kebab(field.name)}",
+            contentType = ${field.name}.contentType,
+            inputStream = ${field.name}.inputStream
+        )`).join('\n');
+        const constructorArgs = (command.fields ?? []).map((field) => {
+            if (field.uploadFile) {
+                return `            ${field.name} = ${field.name}Stored.location`;
+            }
+            const metadataExpression = uploadMetadataExpression(field, primaryStoredVariable);
+            if (metadataExpression) {
+                return `            ${field.name} = ${metadataExpression}`;
+            }
+            if (field.generated) {
+                return `            ${field.name} = ${field.name} ?: ${fallbackValue(field).replaceAll('java.util.UUID.', 'UUID.')}`;
+            }
+            return `            ${field.name} = ${field.name}`;
+        }).join(',\n');
+        return `    @PostMapping("/${httpRoute(command.title)}/file", consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
+    fun ${safeIdentifier(command.name)}File(
+${parameters}
+    ): CompletableFuture<${commandName}> {
+${storeStatements}
+        val command = ${commandName}(
+${constructorArgs}
+        )
+        return commandGateway.send(command, MetadataFactory.from(request)).resultMessage.thenApply { command }
+    }`;
     },
 };
 

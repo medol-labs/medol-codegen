@@ -15,6 +15,8 @@ export const backendModules = [
 <% }) -%>
 ];
 
+export const fileUploadCapability = <%- fileUploadCapability ? JSON.stringify(fileUploadCapability, null, 2) : 'null' %> as const;
+
 export const resources: IResourceItem[] = [
   {
     name: "dashboard",

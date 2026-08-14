@@ -151,6 +151,7 @@ function withResourceComponent(command, resourceComponent) {
 function toCommand(command, resourceRoute, resourceComponent, readModel, allEvents, workflow) {
     const title = cleanTitle(command.title);
     const component = pascal(title);
+    const rawFields = command.fields ?? [];
     const normalizedFields = normalizeFields(command.fields).filter((field) => !field.generated);
     const formFields = normalizedFields.filter(isCommandFormField);
     const workflowFields = commandWorkflowFields(command, readModel, allEvents, workflow);
@@ -181,7 +182,7 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
         stateField: stateControl.stateField,
         fields: formFields.map((field) => ({
             ...field,
-            select: workflowFields.selects.get(field.name) ?? null
+            select: field.fileInput ? null : workflowFields.selects.get(field.name) ?? null
         })),
         matchingFields: normalizedFields,
         prefillCandidateFields: [
@@ -198,8 +199,15 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
             })),
         hasSelectFields: formFields.some((field) => workflowFields.selects.has(field.name)),
         hasObjectFields: formFields.some((field) => field.object),
-        hasArrayFields: formFields.some((field) => field.list || hasNestedArrayField(field))
+        hasArrayFields: formFields.some((field) => field.list || hasNestedArrayField(field)),
+        hasFileFields: formFields.some((field) => field.fileInput),
+        fileFields: formFields.filter((field) => field.fileInput),
+        fileUploadProducer: isFileUploadProducerCommand(command, rawFields)
     };
+}
+
+function isFileUploadProducerCommand(command, rawFields) {
+    return rawFields.some((field) => field.uploadFile);
 }
 
 function isCommandFormField(field) {

@@ -286,6 +286,7 @@ function normalizeFields(fields = []) {
             readOnly: !!field.readOnly,
             technicalAttribute: !!field.technicalAttribute,
             idAttribute: !!field.idAttribute,
+            uploadFile: !!field.uploadFile,
             file: !!field.file,
             cardinality: field.cardinality ?? 'Single',
             source: field.source,
@@ -297,7 +298,9 @@ function decorateField(field) {
     const object = isObjectField(field);
     const list = isListField(field);
     const json = object;
+    const uploadFile = !!field.uploadFile;
     const file = !!field.file;
+    const fileInput = uploadFile || file;
     const optionSet = !object ? optionSetForField(field) : undefined;
     const textArea = !object && (field.name.toLowerCase().includes('content')
         || field.name.toLowerCase().includes('description')
@@ -316,8 +319,10 @@ function decorateField(field) {
         filterable: isFilterable(field),
         cellValue: cellValue(field),
         inputComponent: textArea ? 'Textarea' : 'Input',
-        inputType: file ? 'file' : inputType(field),
+        inputType: fileInput ? 'file' : inputType(field),
+        uploadFile,
         file,
+        fileInput,
         boolean,
         enumName: optionSet?.enumName ?? null,
         enumOptions: optionSet?.values ?? [],

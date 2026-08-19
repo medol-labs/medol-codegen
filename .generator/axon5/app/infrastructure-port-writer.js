@@ -74,6 +74,7 @@ function isInfrastructurePortCommand(command, events) {
 }
 
 function isPortOutputField(field) {
+    if (field.portOutput) return true;
     if ([
         'verificationPassed',
         'authorizationPassed',

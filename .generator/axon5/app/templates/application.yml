@@ -86,6 +86,7 @@ springdoc:
     path: /v3/api-docs
 
 logging:
+  exception-conversion-word: "%ex{10}"
   level:
     <%= rootPackage %>.shared.application.axon: ${MEDOL_AXON_FLOW_LOG_LEVEL:INFO}
     org.axonframework: ${AXON_LOG_LEVEL:INFO}

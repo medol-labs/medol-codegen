@@ -77,14 +77,27 @@ function sourceFieldMatch(field, sourceFields) {
     return null;
 }
 
+function fanOutFieldExpression(field, fanOut) {
+    if (!fanOut?.alias || !fanOut?.itemParameter) return null;
+    const source = field.source?.from?.find((name) => String(name).startsWith(`${fanOut.alias}.`));
+    if (!source) return null;
+    const parts = String(source).split('.');
+    if (parts.length < 2) return null;
+    return `${fanOut.itemParameter}.${parts.slice(1).join('.')}`;
+}
+
 function sourceFieldNullable(field, readModelSource = false) {
     if (field.optional) return true;
     return readModelSource && field.cardinality !== 'Many';
 }
 
-function commandExpression(command, sourceElement, sourceParameter = 'event', selection = {fields: []}, readModelSource = false) {
+function commandExpression(command, sourceElement, sourceParameter = 'event', selection = {fields: []}, readModelSource = false, fanOut = null) {
     const sourceFields = new Map((sourceElement.fields ?? []).map((field) => [field.name, field]));
     const args = commandFieldsWithSelection(command, selection).flatMap((field) => {
+        const fanOutExpression = fanOutFieldExpression(field, fanOut);
+        if (fanOutExpression) {
+            return [`${field.name} = ${fanOutExpression}`];
+        }
         const match = sourceFieldMatch(field, sourceFields);
         if (match) {
             const value = sourceFieldNullable(match.sourceField, readModelSource) && !field.optional
@@ -96,6 +109,17 @@ function commandExpression(command, sourceElement, sourceParameter = 'event', se
         return [`${field.name} = ${fallbackValue(field)} /* TODO: provide ${field.name} */`];
     });
     return `${_commandTitle(command.title)}(${args.join(', ')})`;
+}
+
+function fanOutSourceExpression(processor, sourceElement, sourceParameter = 'event') {
+    const source = processor.metadata?.fanOutSource;
+    if (!source) return null;
+    const sourceParts = String(source).split('.');
+    const sourceName = sourceParts.length > 1 ? sourceParts.at(-1) : sourceParts[0];
+    const sourceField = (sourceElement.fields ?? []).find((field) => field.name === sourceName);
+    if (!sourceField) return null;
+    const expression = `${sourceParameter}.${sourceName}`;
+    return sourceField.optional ? `${expression}.orEmpty()` : expression;
 }
 
 function requiredSourcePredicates(command, sourceElement, sourceParameter = 'todo', selection = {fields: []}, readModelSource = false) {
@@ -274,15 +298,22 @@ class ${processorClass}(
         const commandFields = commandFieldsWithSelection(command, selection);
         const fieldImports = kotlinFieldImports(commandFields, this.model.rootPackage);
         const condition = conditionExpression(processor, eventRef.event, 'event');
+        const fanOutSource = fanOutSourceExpression(processor, eventRef.event, 'event');
+        const fanOutAlias = processor.metadata?.fanOutAlias ? safeIdentifier(processor.metadata.fanOutAlias) : null;
         const eventSelection = selectionFor(eventRef.slice, this.model);
         const sourceEvent = {
             ...eventRef.event,
             fields: eventFieldsWithTags(eventRef.event.fields ?? [], eventTagFieldsFor(eventRef.slice, eventRef.event, eventSelection, true))
         };
+        const commandSend = fanOutSource && fanOutAlias
+            ? `        java.util.concurrent.CompletableFuture.allOf(*${fanOutSource}.map { ${fanOutAlias} ->
+            commandGateway.send(${commandExpression(command, sourceEvent, 'event', selection, false, {alias: fanOutAlias, itemParameter: fanOutAlias})}).resultMessage
+        }.toTypedArray())`
+            : `        commandGateway.send(${commandExpression(command, sourceEvent, 'event', selection)}).resultMessage`;
         const body = condition === 'true'
-            ? `        commandGateway.send(${commandExpression(command, sourceEvent, 'event', selection)}).resultMessage`
+            ? commandSend
             : `        if (${condition}) {
-            commandGateway.send(${commandExpression(command, sourceEvent, 'event', selection)}).resultMessage
+${commandSend.replace(/^        /gm, '            ')}
         } else {
             java.util.concurrent.CompletableFuture.completedFuture(null)
         }`;

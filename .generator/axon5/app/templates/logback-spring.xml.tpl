@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <turboFilter class="<%= rootPackage %>.shared.application.logging.SuppressScheduledHibernateSqlLogFilter"/>
+
+    <include resource="org/springframework/boot/logging/logback/base.xml"/>
+</configuration>

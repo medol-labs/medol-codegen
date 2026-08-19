@@ -136,6 +136,9 @@ const applicationWriterMethods = {
             rootPackage: this.model.rootPackage,
             hasInfra
         });
+        this.fs.copyTpl(this.templatePath('logback-spring.xml.tpl'), this._destPath('src/main/resources/logback-spring.xml'), {
+            rootPackage: this.model.rootPackage
+        });
         this.fs.copyTpl(this.templatePath('docker-compose.yml'), this._destPath('docker-compose.yml'), runtime);
         this.fs.copy(this.templatePath('V1__baseline.sql'), this._destPath('src/main/resources/db/migration/V1__baseline.sql'));
         this.fs.copy(this.templatePath('gitignore'), this._destPath('.gitignore'));
@@ -193,6 +196,9 @@ const applicationWriterMethods = {
         });
         this._writeMetadataSupport();
         this.fs.copyTpl(this.templatePath('AxonFlowLoggingConfiguration.kt.tpl'), this._sharedKernelKotlinPath('shared/application/axon/AxonFlowLoggingConfiguration.kt'), {
+            rootPackage: this.model.rootPackage
+        });
+        this.fs.copyTpl(this.templatePath('SuppressScheduledHibernateSqlLogFilter.kt.tpl'), this._sharedKernelKotlinPath('shared/application/logging/SuppressScheduledHibernateSqlLogFilter.kt'), {
             rootPackage: this.model.rootPackage
         });
         this.fs.copyTpl(this.templatePath('AxonEventStorageConfig.kt.tpl'), this._sharedKernelKotlinPath('shared/infrastructure/configuration/AxonEventStorageConfig.kt'), {

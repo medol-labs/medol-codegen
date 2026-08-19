@@ -181,6 +181,9 @@ function resultEventArgument(field, command, resultVariable, selection = {fields
         if (field.optional || !commandField.optional) return `${field.name} = command.${field.name}`;
         return `${field.name} = command.${field.name} ?: ${fallbackValue(field)} /* TODO: provide non-null ${field.name} */`;
     };
+    if (field.portOutput) {
+        return `${field.name} = ${resultVariable}.${field.name}`;
+    }
     if (field.name === 'failureReason') {
         return `${field.name} = ${resultVariable}.failureReason`;
     }

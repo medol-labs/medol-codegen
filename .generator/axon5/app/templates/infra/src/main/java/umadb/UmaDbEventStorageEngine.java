@@ -39,6 +39,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -120,10 +121,11 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
     @Override
     public MessageStream<EventMessage> stream(StreamingCondition condition) {
         var after = new AtomicLong(condition.position().position().orElse(-1L) - 1);
+        var subscription = new AtomicReference<UmaDbClient.Subscription>();
         return new ContinuousMessageStream<>(
-                () -> nextSubscribedBatch(after, condition),
+                () -> nextSubscribedBatch(after, condition, subscription),
                 UmaDbEventStorageEngine::trackedEntry,
-                UmaDbEventStorageEngine::registerCallback
+                (stream, callback) -> registerCallback(stream, subscription, callback)
         );
     }
 
@@ -190,28 +192,53 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
         );
     }
 
-    private List<UmaDbClient.SequencedStoredEvent> nextSubscribedBatch(AtomicLong after, StreamingCondition condition) {
-        var request = new UmaDbClient.SubscribeRequest(
-                after.get(),
-                properties.batchSize(),
-                queryItems(condition)
-        );
-        List<UmaDbClient.SequencedStoredEvent> events;
+    private List<UmaDbClient.SequencedStoredEvent> nextSubscribedBatch(
+            AtomicLong after,
+            StreamingCondition condition,
+            AtomicReference<UmaDbClient.Subscription> subscription
+    ) {
         try {
-            events = client.subscribe(request).join().events().stream()
+            var activeSubscription = subscription.updateAndGet(current ->
+                    current == null ? openSubscription(after.get(), condition) : current
+            );
+            var events = activeSubscription.nextBatch().events();
+            events.stream()
+                    .mapToLong(UmaDbClient.SequencedStoredEvent::position)
+                    .max()
+                    .ifPresent(after::set);
+            return events.stream()
                     .filter(event -> matches(event, condition))
                     .toList();
         } catch (CompletionException ex) {
+            closeSubscription(subscription);
+            if (isDeadlineExceeded(ex)) {
+                return List.of();
+            }
+            throw ex;
+        } catch (RuntimeException ex) {
+            closeSubscription(subscription);
             if (isDeadlineExceeded(ex)) {
                 return List.of();
             }
             throw ex;
         }
-        events.stream()
-                .mapToLong(UmaDbClient.SequencedStoredEvent::position)
-                .max()
-                .ifPresent(after::set);
-        return events;
+    }
+
+    private UmaDbClient.Subscription openSubscription(long after, StreamingCondition condition) {
+        var request = new UmaDbClient.SubscribeRequest(
+                after,
+                properties.batchSize(),
+                queryItems(condition)
+        );
+        logger.debug("Opening UmaDB subscription. after={}, batchSize={}, queryItems={}", request.after(), request.batchSize(), request.queryItems());
+        return client.openSubscription(request);
+    }
+
+    private static void closeSubscription(AtomicReference<UmaDbClient.Subscription> subscription) {
+        var current = subscription.getAndSet(null);
+        if (current != null) {
+            current.close();
+        }
     }
 
     private CompletableFuture<TrackingToken> readTokenAt(Instant instant, long start) {
@@ -339,9 +366,16 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
         return new SimpleEntry<>(toEventMessage(event.event()), trackedContext(event));
     }
 
-    private static Registration registerCallback(ContinuousMessageStream<?> ignored, Runnable callback) {
+    private static Registration registerCallback(
+            ContinuousMessageStream<?> ignored,
+            AtomicReference<UmaDbClient.Subscription> subscription,
+            Runnable callback
+    ) {
         callback.run();
-        return () -> true;
+        return () -> {
+            closeSubscription(subscription);
+            return true;
+        };
     }
 
     private static ConsistencyMarker afterCommitMarker(UmaDbClient.AppendResult result) {

@@ -13,6 +13,10 @@ import type {
 } from "@refinedev/core";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import camelcaseKeys from "camelcase-keys";
+import {
+  appendSpringCriteriaFilters,
+  canUseSpringCriteriaFilters,
+} from "../lib/query-filters";
 import { dataProvider as supabaseDataProvider } from "./data";
 
 type AxonMeta = Record<string, unknown> & {
@@ -313,16 +317,6 @@ const currentPage = (pagination: GetListParams["pagination"]): number =>
 const pageSize = (pagination: GetListParams["pagination"]): number =>
   Number(pagination?.pageSize ?? 10);
 
-type FieldCrudFilter = CrudFilter & {
-  field: string;
-  operator: string;
-  value: unknown;
-};
-
-const isConditionalFilter = (filter: CrudFilter): filter is FieldCrudFilter =>
-  "field" in filter &&
-  typeof (filter as { field?: unknown }).field === "string";
-
 const serverFilterFields = (meta?: AxonMeta): Set<string> =>
   new Set(Array.isArray(meta?.queryFields) ? meta.queryFields : []);
 
@@ -330,39 +324,15 @@ const canUseServerFilters = (
   meta?: AxonMeta,
   filters?: CrudFilter[],
 ): boolean => {
-  if (!filters?.length) {
-    return false;
-  }
-
   const fields = serverFilterFields(meta);
-  if (fields.size === 0) {
-    return false;
-  }
-
-  return filters.every((filter) => {
-    if (!isConditionalFilter(filter)) {
-      return false;
-    }
-
-    return fields.has(filter.field) && filter.operator === "eq";
-  });
+  return canUseSpringCriteriaFilters(filters, fields);
 };
 
 const appendFilters = (
   params: URLSearchParams,
   filters?: CrudFilter[],
 ): URLSearchParams => {
-  filters?.forEach((filter) => {
-    if (!isConditionalFilter(filter)) {
-      return;
-    }
-
-    if (filter.operator === "eq") {
-      params.set(filter.field, String(filter.value));
-    }
-  });
-
-  return params;
+  return appendSpringCriteriaFilters(params, filters);
 };
 
 export const commandDataProvider = (

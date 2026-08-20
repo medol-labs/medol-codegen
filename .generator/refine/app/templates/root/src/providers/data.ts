@@ -10,6 +10,7 @@ import type {
 } from "@refinedev/core";
 import { dataProvider as supabaseDataProvider } from "@refinedev/supabase";
 import camelcaseKeys from "camelcase-keys";
+import { toSupabaseCrudFilters } from "../lib/query-filters";
 import { supabaseClient } from "./supabase-client";
 
 const provider = supabaseDataProvider(supabaseClient) as Required<DataProvider>;
@@ -28,6 +29,11 @@ const withTableName = <TParams extends { resource: string; meta?: Record<string,
     resource: tableName,
   };
 };
+
+const withSupabaseQueryFilters = (params: GetListParams): GetListParams => ({
+  ...params,
+  filters: toSupabaseCrudFilters(params.filters),
+});
 
 const camelcaseData = async <T extends { data?: unknown }>(
   promise: Promise<T>,
@@ -51,7 +57,7 @@ export const dataProvider: Required<DataProvider> = {
   getList: <TData extends BaseRecord = BaseRecord>(
     params: GetListParams,
   ): Promise<GetListResponse<TData>> =>
-    camelcaseData(provider.getList<TData>(withTableName(params))),
+    camelcaseData(provider.getList<TData>(withTableName(withSupabaseQueryFilters(params)))),
   getMany: <TData extends BaseRecord = BaseRecord>(
     params: GetManyParams,
   ): Promise<GetManyResponse<TData>> =>

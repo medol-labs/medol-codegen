@@ -16,6 +16,7 @@ import umadb.v1.Umadb;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -87,19 +88,8 @@ public final class GrpcUmaDbClient implements UmaDbClient, AutoCloseable {
     }
 
     @Override
-    public CompletableFuture<UmaDbClient.ReadResult> subscribe(UmaDbClient.SubscribeRequest request) {
-        return CompletableFuture.supplyAsync(() -> {
-            var responseIterator = deadlineBlockingStub().subscribe(toSubscribeRequest(request));
-            if (!responseIterator.hasNext()) {
-                return new UmaDbClient.ReadResult(List.of());
-            }
-            var response = responseIterator.next();
-            var events = new ArrayList<UmaDbClient.SequencedStoredEvent>();
-            for (Umadb.SequencedEvent event : response.getEventsList()) {
-                events.add(toSequencedStoredEvent(event));
-            }
-            return new UmaDbClient.ReadResult(events);
-        });
+    public UmaDbClient.Subscription openSubscription(UmaDbClient.SubscribeRequest request) {
+        return new GrpcSubscription(blockingStub.subscribe(toSubscribeRequest(request)));
     }
 
     @Override
@@ -119,6 +109,36 @@ public final class GrpcUmaDbClient implements UmaDbClient, AutoCloseable {
 
     private DCBGrpc.DCBBlockingStub deadlineBlockingStub() {
         return blockingStub.withDeadlineAfter(properties.requestTimeout().toMillis(), TimeUnit.MILLISECONDS);
+    }
+
+    private UmaDbClient.ReadResult toReadResult(Umadb.SubscribeResponse response) {
+        var events = new ArrayList<UmaDbClient.SequencedStoredEvent>();
+        for (Umadb.SequencedEvent event : response.getEventsList()) {
+            events.add(toSequencedStoredEvent(event));
+        }
+        return new UmaDbClient.ReadResult(events);
+    }
+
+    private final class GrpcSubscription implements UmaDbClient.Subscription {
+        private final Iterator<Umadb.SubscribeResponse> responseIterator;
+
+        private GrpcSubscription(Iterator<Umadb.SubscribeResponse> responseIterator) {
+            this.responseIterator = responseIterator;
+        }
+
+        @Override
+        public UmaDbClient.ReadResult nextBatch() {
+            if (!responseIterator.hasNext()) {
+                return new UmaDbClient.ReadResult(List.of());
+            }
+            return toReadResult(responseIterator.next());
+        }
+
+        @Override
+        public void close() {
+            // The gRPC blocking subscribe API exposes only an Iterator. The underlying call is
+            // released by gRPC when the iterator completes or when the client channel is closed.
+        }
     }
 
     private Umadb.AppendCondition toAppendCondition(UmaDbClient.AppendCondition condition) {

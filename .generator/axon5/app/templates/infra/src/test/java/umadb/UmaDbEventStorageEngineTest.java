@@ -296,12 +296,12 @@ class UmaDbEventStorageEngineTest {
         }
 
         @Override
-        public CompletableFuture<ReadResult> subscribe(SubscribeRequest request) {
+        public Subscription openSubscription(SubscribeRequest request) {
             subscribeRequest = request;
             if (subscribeFailure != null) {
-                return CompletableFuture.failedFuture(subscribeFailure);
+                throw subscribeFailure;
             }
-            return CompletableFuture.completedFuture(new ReadResult(selectAfter(request.after(), request.batchSize(), request.queryItems())));
+            return new RecordingSubscription(request);
         }
 
         @Override
@@ -333,6 +333,30 @@ class UmaDbEventStorageEngineTest {
                     .toList();
             var tagsMatch = item.tags().isEmpty() || eventTags.containsAll(item.tags());
             return typeMatches && tagsMatch;
+        }
+
+        private final class RecordingSubscription implements Subscription {
+            private final SubscribeRequest request;
+            private long after;
+
+            private RecordingSubscription(SubscribeRequest request) {
+                this.request = request;
+                this.after = request.after();
+            }
+
+            @Override
+            public ReadResult nextBatch() {
+                var selected = selectAfter(after, request.batchSize(), request.queryItems());
+                selected.stream()
+                        .mapToLong(UmaDbClient.SequencedStoredEvent::position)
+                        .max()
+                        .ifPresent(position -> after = position);
+                return new ReadResult(selected);
+            }
+
+            @Override
+            public void close() {
+            }
         }
     }
 }

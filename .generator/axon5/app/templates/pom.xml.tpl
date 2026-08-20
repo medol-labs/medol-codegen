@@ -15,6 +15,7 @@
         <java.version>21</java.version>
         <kotlin.version>2.3.20</kotlin.version>
         <axon.version>5.1.1</axon.version>
+        <jhipster-framework.version>8.9.0</jhipster-framework.version>
         <spring-cloud.version>2025.0.0</spring-cloud.version>
         <start-class><%= rootPackage %>.ApplicationKt</start-class>
         <jib-maven-plugin.version>3.4.5</jib-maven-plugin.version>
@@ -50,6 +51,11 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>tech.jhipster</groupId>
+            <artifactId>jhipster-framework</artifactId>
+            <version>${jhipster-framework.version}</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

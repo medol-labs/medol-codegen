@@ -317,6 +317,8 @@ function decorateField(field) {
         ...field,
         tsType: tsType(field),
         filterable: isFilterable(field),
+        filterVariant: filterVariant(field),
+        filterOperator: filterOperator(field),
         cellValue: cellValue(field),
         inputComponent: textArea ? 'Textarea' : 'Input',
         inputType: fileInput ? 'file' : inputType(field),
@@ -622,7 +624,44 @@ function cellValue(field) {
 }
 
 function isFilterable(field) {
-    return ['string', 'uuid'].includes((field.valueType?.resolvedBaseType ?? field.type)?.toLowerCase());
+    return !isListField(field) && !isObjectField(field);
+}
+
+function filterVariant(field) {
+    const lower = (field.valueType?.resolvedBaseType ?? field.type)?.toLowerCase();
+    if (optionSetForField(field)) {
+        return 'multiSelect';
+    }
+    if (lower === 'boolean') {
+        return 'boolean';
+    }
+    if (['int', 'integer', 'long', 'double', 'float', 'decimal', 'bigdecimal', 'number'].includes(lower)) {
+        return 'number';
+    }
+    if (['date', 'datetime', 'localdate', 'localdatetime'].includes(lower)) {
+        return 'date';
+    }
+    return 'text';
+}
+
+function filterOperator(field) {
+    const lower = (field.valueType?.resolvedBaseType ?? field.type)?.toLowerCase();
+    if (optionSetForField(field)) {
+        return 'inArray';
+    }
+    if (lower === 'boolean') {
+        return 'eq';
+    }
+    if (['int', 'integer', 'long', 'double', 'float', 'decimal', 'bigdecimal', 'number'].includes(lower)) {
+        return 'eq';
+    }
+    if (['date', 'datetime', 'localdate', 'localdatetime'].includes(lower)) {
+        return 'eq';
+    }
+    if (!['string', 'uuid'].includes(lower)) {
+        return 'eq';
+    }
+    return null;
 }
 
 function cleanTitle(value) {

@@ -167,7 +167,7 @@ export const BlogPostList = () => {
     },
     getRowId: (row) => row.id,
     refineCoreProps: {
-      syncWithLocation: true,
+      syncWithLocation: false,
       dataProviderName: "command",
       meta: {
         select: "*, categories(id,title)",

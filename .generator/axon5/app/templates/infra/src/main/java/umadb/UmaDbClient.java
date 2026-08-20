@@ -8,7 +8,15 @@ public interface UmaDbClient {
 
     CompletableFuture<ReadResult> read(ReadRequest request);
 
-    CompletableFuture<ReadResult> subscribe(SubscribeRequest request);
+    default CompletableFuture<ReadResult> subscribe(SubscribeRequest request) {
+        return CompletableFuture.supplyAsync(() -> {
+            try (var subscription = openSubscription(request)) {
+                return subscription.nextBatch();
+            }
+        });
+    }
+
+    Subscription openSubscription(SubscribeRequest request);
 
     CompletableFuture<HeadResult> head();
 
@@ -79,5 +87,12 @@ public interface UmaDbClient {
         public SubscribeRequest {
             queryItems = List.copyOf(queryItems);
         }
+    }
+
+    interface Subscription extends AutoCloseable {
+        ReadResult nextBatch();
+
+        @Override
+        void close();
     }
 }

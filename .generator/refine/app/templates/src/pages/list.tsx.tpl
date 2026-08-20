@@ -78,6 +78,21 @@ export const <%= resource.component %>List = () => {
         ),
         enableSorting: true,
         enableColumnFilter: <%= field.filterable ? "true" : "false" %>,
+        meta: {
+          label: t("<%= field.i18nKey %>", "<%= field.label %>"),
+          placeholder: <%- JSON.stringify(field.placeholder) %>,
+          variant: "<%= field.filterVariant %>",
+<% if (field.filterOperator) { -%>
+          filterOperator: "<%= field.filterOperator %>",
+<% } -%>
+<% if (field.enumOptions.length > 0) { -%>
+          options: [
+<% field.enumOptions.forEach((option) => { -%>
+            { label: <%- JSON.stringify(option.label) %>, value: <%- JSON.stringify(option.value) %> },
+<% }) -%>
+          ],
+<% } -%>
+        },
         cell: ({ getValue }) => <%- field.cellValue %>,
       }),
 <% }) -%>
@@ -157,11 +172,12 @@ export const <%= resource.component %>List = () => {
     getRowId: (row) => <%- resource.rowIdExpression %>,
     refineCoreProps: {
       dataProviderName: "<%= resource.dataProviderName %>",
-      syncWithLocation: true,
+      syncWithLocation: false,
       meta: {
         tableName: "<%= resource.tableName %>",
         idField: "<%= resource.idField %>",
         idFields: <%- JSON.stringify(resource.idFields) %>,
+        queryFields: <%- JSON.stringify(resource.queryFields) %>,
         label: t("<%= resource.i18nKey %>", "<%= resource.label %>"),
         aggregateRoute: "<%= resource.aggregateRoute %>",
         queryRoute: "<%= resource.queryRoute %>",

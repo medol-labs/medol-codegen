@@ -5,8 +5,10 @@
 ## Project Rules
 
 - Fix repeatable generated-code problems here, not by hand-patching generated projects.
-- Keep generator logic generic. Do not add Federation Learning business rules directly to templates or writers.
-- When a behavior is business-specific, express it in `medol/examples/fl/federation-learning.medol` or a generated project's hand-written extension point.
+- When a generated project is patched for framework-level behavior, mirror the same change in this generator before finishing the task. Framework-level means reusable generated scaffolding such as Refine data-table/filter behavior, generated providers/resources/forms, Spring/Axon skeletons, read model query support, logging, Docker compose, config templates, and other non-business-specific generated code.
+- Keep generator logic generic. Do not add any concrete business system's rules directly to templates or writers.
+- Do not encode concrete business-system behavior here, such as domain-specific commands, runtime rules, governance rules, adapter decisions, or resource names from the current example project. Put those in that system's MEDOL model or generated-project extension points; templates and writers should only consume generic model metadata.
+- When a behavior is business-specific, express it in the relevant `.medol` model or a generated project's hand-written extension point.
 - Axon 5 generated `context/...` code is overwriteable generated code. The generator should create stable hand-written extension points under `domain/...` and `infrastructure/...`.
 - Prefer adding templates or writer helpers over scattering string literals across generator files.
 - Do not commit generated scratch outputs under `example/generated-*` unless explicitly requested.

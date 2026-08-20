@@ -224,6 +224,49 @@ function isLongTextField(field) {
     return /(?:reason|reasons|message|description|error|output|log|hint|detail|stackTrace)$/i.test(field.name);
 }
 
+function isCriteriaField(field) {
+    return !isJsonJpaField(field);
+}
+
+function criteriaFilterType(field) {
+    const type = readModelStorageType(field, false);
+    switch (type) {
+        case 'String': return 'StringFilter';
+        case 'UUID': return 'StringFilter';
+        case 'Int': return 'IntegerFilter';
+        case 'Long': return 'LongFilter';
+        case 'Float': return 'FloatFilter';
+        case 'Double': return 'DoubleFilter';
+        case 'BigDecimal': return 'BigDecimalFilter';
+        case 'Boolean': return 'BooleanFilter';
+        case 'LocalDate': return 'LocalDateFilter';
+        case 'LocalDateTime': return 'RangeFilter<LocalDateTime>';
+        default: return `Filter<${type}>`;
+    }
+}
+
+function criteriaFilterImports(fields) {
+    const filterTypes = new Set((fields ?? []).map(criteriaFilterType).map((type) => type.replace(/<.*$/, '')));
+    return Array.from(filterTypes).sort().map((type) => `import tech.jhipster.service.filter.${type}`).join('\n');
+}
+
+function queryServiceSpecificationBuilder(field, entityName) {
+    const type = readModelStorageType(field, false);
+    const expression = type === 'UUID'
+        ? `Function<Root<${entityName}>, Expression<String>> { root -> (root.get<UUID>("${field.name}") as JpaExpression<UUID>).cast(String::class.java) }`
+        : `Function<Root<${entityName}>, Expression<${type}>> { root -> root.get("${field.name}") }`;
+    const builder = type === 'LocalDateTime'
+        ? 'buildLocalDateTimeRangeSpecification'
+        : type === 'LocalDate'
+            ? 'buildLocalDateRangeSpecification'
+            : isRangeCriteriaType(type) ? 'buildExpressionRangeSpecification' : 'buildSpecification';
+    return `            criteria.${field.name}?.let { specification = specification.and(${builder}(it, ${expression})) }`;
+}
+
+function isRangeCriteriaType(type) {
+    return ['Int', 'Long', 'Float', 'Double', 'BigDecimal', 'LocalDate', 'LocalDateTime'].includes(type);
+}
+
 function jsonTypeReference(field) {
     return `object : com.fasterxml.jackson.core.type.TypeReference<${readModelStorageFieldType(field)}>() {}`;
 }
@@ -272,6 +315,15 @@ const readModelWriterMethods = {
             : `data class ${name}Query(val ${id.name}: ${readModelStorageType(id, false)})`;
         const idType = compositeId ? keyName : readModelStorageType(id, false);
         const filterFields = readModelFilterFields(readmodel);
+        const criteriaFields = (readmodel.fields ?? []).filter(isCriteriaField);
+        const criteriaDeclaration = criteriaFields.length > 0
+            ? `
+class ${name}Criteria {
+${criteriaFields.map((field) => `    var ${field.name}: ${criteriaFilterType(field)}? = null`).join('\n')}
+}
+`
+            : '';
+        const criteriaImports = criteriaFields.length > 0 ? criteriaFilterImports(criteriaFields) : '';
         const filterParameters = filterFields
             .map((field) => `${field.name}: ${readModelStorageType(field, false)}?`)
             .join(', ');
@@ -286,8 +338,10 @@ const readModelWriterMethods = {
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 ${metadataFields.length > 0 ? `import ${this.model.rootPackage}.shared.application.metadata.MetadataProjection\n` : ''}${allImports}
+${criteriaImports ? `${criteriaImports}\n` : ''}
 
 ${keyDeclaration}${queryDeclaration}
+${criteriaDeclaration}
 
 class ${name}Projection${metadataFields.length > 0 ? ' : MetadataProjection' : ''} {
 ${projectionFields}
@@ -300,6 +354,7 @@ ${resultArguments}
 
 interface ${name}Repository {
     fun ${readModelRepositoryMethodName(filterFields)}(${filterSignaturePrefix}pageable: Pageable): Page<${name}>
+    fun findAllByCriteria(criteria: ${name}Criteria?, pageable: Pageable): Page<${name}>
 ${id ? `    fun findById(id: ${idType}): ${name}?\n` : ''}    fun findProjectionById(id: ${idType}): ${name}Projection?
 ${partialLookupMethods ? `${partialLookupMethods}\n` : ''}    fun save(projection: ${name}Projection)
 }
@@ -338,8 +393,9 @@ ${entityFields}
         const id = idFields[0];
         const idType = idFields.length > 1 ? `${name}Key` : readModelStorageType(id, false);
         const filterFields = readModelFilterFields(readmodel);
+        const criteriaFields = (readmodel.fields ?? []).filter(isCriteriaField);
         const jsonFields = (readmodel.fields ?? []).filter(isJsonJpaField);
-        const imports = readModelStorageImports([...idFields, ...filterFields, ...jsonFields], this.model.rootPackage);
+        const imports = readModelStorageImports([...idFields, ...filterFields, ...jsonFields, ...criteriaFields], this.model.rootPackage);
         const partialLookupMethods = idFields.length > 1
             ? idFields.map((field) =>
                 `    fun findAllBy${pascal(field.name)}(${field.name}: ${readModelStorageType(field, false)}): List<${entityName}>`
@@ -361,7 +417,9 @@ ${entityFields}
             ? `    override fun findAllByFilter(${filterSignaturePrefix}pageable: Pageable): Page<${name}> =
         jpaRepository.findAll(filters(${filterArguments}), pageable).map { it.toProjection().toReadModel() }`
             : `    override fun findAll(pageable: Pageable): Page<${name}> =
-        jpaRepository.findAll(pageable).map { it.toProjection().toReadModel() }`;
+        findAllByCriteria(null, pageable)`;
+        const criteriaImplementation = `    override fun findAllByCriteria(criteria: ${name}Criteria?, pageable: Pageable): Page<${name}> =
+        queryService.findByCriteria(criteria, pageable)`;
         const filterSpecification = filterFields.length > 0
             ? `
 
@@ -388,9 +446,10 @@ ${filterFields.map((field) => `            ${field.name}?.let { predicates.add(c
         this.fs.write(this._kotlinPath(`${readModelPersistencePath(context, name)}/${springDataRepositoryName}.kt`), `package ${packageName}
 
 import org.springframework.data.jpa.repository.JpaRepository
-${filterFields.length > 0 ? 'import org.springframework.data.jpa.repository.JpaSpecificationExecutor\n' : ''}${imports}
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor
+${imports}
 ${idFields.length > 1 ? `import ${readModelPackageName}.${name}Key\n` : ''}
-interface ${springDataRepositoryName} : JpaRepository<${entityName}, ${idType}>${filterFields.length > 0 ? `, JpaSpecificationExecutor<${entityName}>` : ''} {
+interface ${springDataRepositoryName} : JpaRepository<${entityName}, ${idType}>, JpaSpecificationExecutor<${entityName}> {
 ${partialLookupMethods}
 }
 `);
@@ -402,13 +461,19 @@ import org.springframework.stereotype.Repository
 ${hasJsonJpaFields ? 'import com.fasterxml.jackson.databind.ObjectMapper\n' : ''}${hasJsonJpaFields ? 'import com.fasterxml.jackson.module.kotlin.readValue\n' : ''}
 ${imports}
 import ${readModelPackageName}.${name}
+import ${readModelPackageName}.${name}Criteria
 ${idFields.length > 1 ? `import ${readModelPackageName}.${name}Key\n` : ''}import ${readModelPackageName}.${name}Projection
 import ${readModelPackageName}.${repositoryName}
 import ${readModelPackageName}.toReadModel
 
 @Repository
-class ${adapterName}(private val jpaRepository: ${springDataRepositoryName}${hasJsonJpaFields ? ', private val objectMapper: ObjectMapper' : ''}) : ${repositoryName} {
+class ${adapterName}(
+    private val jpaRepository: ${springDataRepositoryName},
+    private val queryService: ${name}QueryService${hasJsonJpaFields ? ',\n    private val objectMapper: ObjectMapper' : ''}
+) : ${repositoryName} {
 ${findAllImplementation}
+
+${criteriaImplementation}
 
     override fun findById(id: ${idType}): ${name}? =
         jpaRepository.findById(id).map { it.toProjection().toReadModel() }.orElse(null)
@@ -429,8 +494,134 @@ ${entityToProjectionAssignments}
         ${entityName}().also {
 ${projectionToEntityAssignments}
         }
+        }
+`);
+        if (criteriaFields.length > 0) {
+            const hasRangeCriteriaFields = criteriaFields.some((field) => isRangeCriteriaType(readModelStorageType(field, false)));
+            const hasLocalDateCriteriaFields = criteriaFields.some((field) => readModelStorageType(field, false) === 'LocalDate');
+            const hasLocalDateTimeCriteriaFields = criteriaFields.some((field) => readModelStorageType(field, false) === 'LocalDateTime');
+            this.fs.write(this._kotlinPath(`${readModelPersistencePath(context, name)}/${name}QueryService.kt`), `package ${packageName}
+
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.Pageable
+import org.springframework.data.jpa.domain.Specification
+import org.springframework.stereotype.Service
+import jakarta.persistence.criteria.Expression
+import jakarta.persistence.criteria.Root
+import org.hibernate.query.criteria.JpaExpression
+import tech.jhipster.service.QueryService
+${hasRangeCriteriaFields ? 'import tech.jhipster.service.filter.RangeFilter\n' : ''}import java.util.function.Function
+${imports}
+import ${readModelPackageName}.${name}
+import ${readModelPackageName}.${name}Criteria
+import ${readModelPackageName}.${name}Projection
+import ${readModelPackageName}.toReadModel
+
+@Service
+class ${name}QueryService(
+    private val repository: ${springDataRepositoryName}${hasJsonJpaFields ? ',\n    private val objectMapper: com.fasterxml.jackson.databind.ObjectMapper' : ''}
+) : QueryService<${entityName}>() {
+    fun findByCriteria(criteria: ${name}Criteria?, pageable: Pageable): Page<${name}> =
+        repository.findAll(createSpecification(criteria), pageable).map { it.toProjection().toReadModel() }
+
+    private fun createSpecification(criteria: ${name}Criteria?): Specification<${entityName}> {
+        var specification = Specification.where<${entityName}>(null)
+        if (criteria != null) {
+${criteriaFields.map((field) => queryServiceSpecificationBuilder(field, entityName)).join('\n')}
+        }
+        return specification
+    }
+
+${hasLocalDateTimeCriteriaFields ? `    private fun buildLocalDateTimeRangeSpecification(
+        filter: RangeFilter<*>,
+        field: Function<Root<${entityName}>, Expression<LocalDateTime>>
+    ): Specification<${entityName}> =
+        Specification { root, _, builder ->
+            val expression = field.apply(root)
+            val predicates = mutableListOf<jakarta.persistence.criteria.Predicate>()
+            filter.getEquals()?.let { predicates.add(builder.equal(expression, localDateTimeValue(it))) }
+            filter.getNotEquals()?.let { predicates.add(builder.notEqual(expression, localDateTimeValue(it))) }
+            filter.getSpecified()?.let { predicates.add(if (it) builder.isNotNull(expression) else builder.isNull(expression)) }
+            (filter.getIn() as List<*>?)?.takeIf { it.isNotEmpty() }?.let { predicates.add(expression.\`in\`(it.map { value -> localDateTimeValue(value) })) }
+            (filter.getNotIn() as List<*>?)?.takeIf { it.isNotEmpty() }?.let { predicates.add(builder.not(expression.\`in\`(it.map { value -> localDateTimeValue(value) }))) }
+            filter.getGreaterThan()?.let { predicates.add(builder.greaterThan(expression, localDateTimeValue(it))) }
+            filter.getGreaterThanOrEqual()?.let { predicates.add(builder.greaterThanOrEqualTo(expression, localDateTimeValue(it))) }
+            filter.getLessThan()?.let { predicates.add(builder.lessThan(expression, localDateTimeValue(it))) }
+            filter.getLessThanOrEqual()?.let { predicates.add(builder.lessThanOrEqualTo(expression, localDateTimeValue(it))) }
+            builder.and(*predicates.toTypedArray())
+        }
+
+    private fun localDateTimeValue(value: Any?): LocalDateTime =
+        when (value) {
+            is LocalDateTime -> value
+            null -> throw IllegalArgumentException("LocalDateTime filter value is required.")
+            else -> value.toString().let { raw ->
+                if (raw.all { it.isDigit() }) {
+                    java.time.Instant.ofEpochMilli(raw.toLong()).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime()
+                } else {
+                    LocalDateTime.parse(raw)
+                }
+            }
+        }
+
+` : ''}${hasLocalDateCriteriaFields ? `    private fun buildLocalDateRangeSpecification(
+        filter: RangeFilter<*>,
+        field: Function<Root<${entityName}>, Expression<LocalDate>>
+    ): Specification<${entityName}> =
+        Specification { root, _, builder ->
+            val expression = field.apply(root)
+            val predicates = mutableListOf<jakarta.persistence.criteria.Predicate>()
+            filter.getEquals()?.let { predicates.add(builder.equal(expression, localDateValue(it))) }
+            filter.getNotEquals()?.let { predicates.add(builder.notEqual(expression, localDateValue(it))) }
+            filter.getSpecified()?.let { predicates.add(if (it) builder.isNotNull(expression) else builder.isNull(expression)) }
+            (filter.getIn() as List<*>?)?.takeIf { it.isNotEmpty() }?.let { predicates.add(expression.\`in\`(it.map { value -> localDateValue(value) })) }
+            (filter.getNotIn() as List<*>?)?.takeIf { it.isNotEmpty() }?.let { predicates.add(builder.not(expression.\`in\`(it.map { value -> localDateValue(value) }))) }
+            filter.getGreaterThan()?.let { predicates.add(builder.greaterThan(expression, localDateValue(it))) }
+            filter.getGreaterThanOrEqual()?.let { predicates.add(builder.greaterThanOrEqualTo(expression, localDateValue(it))) }
+            filter.getLessThan()?.let { predicates.add(builder.lessThan(expression, localDateValue(it))) }
+            filter.getLessThanOrEqual()?.let { predicates.add(builder.lessThanOrEqualTo(expression, localDateValue(it))) }
+            builder.and(*predicates.toTypedArray())
+        }
+
+    private fun localDateValue(value: Any?): LocalDate =
+        when (value) {
+            is LocalDate -> value
+            null -> throw IllegalArgumentException("LocalDate filter value is required.")
+            else -> value.toString().let { raw ->
+                if (raw.all { it.isDigit() }) {
+                    java.time.Instant.ofEpochMilli(raw.toLong()).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+                } else {
+                    LocalDate.parse(raw)
+                }
+            }
+        }
+
+` : ''}${hasRangeCriteriaFields ? `    private fun <X : Comparable<in X>> buildExpressionRangeSpecification(
+        filter: RangeFilter<X>,
+        field: Function<Root<${entityName}>, Expression<X>>
+    ): Specification<${entityName}> =
+        Specification { root, _, builder ->
+            val expression = field.apply(root)
+            val predicates = mutableListOf<jakarta.persistence.criteria.Predicate>()
+            filter.getEquals()?.let { predicates.add(builder.equal(expression, it)) }
+            filter.getNotEquals()?.let { predicates.add(builder.notEqual(expression, it)) }
+            filter.getSpecified()?.let { predicates.add(if (it) builder.isNotNull(expression) else builder.isNull(expression)) }
+            filter.getIn()?.takeIf { it.isNotEmpty() }?.let { predicates.add(expression.\`in\`(it)) }
+            filter.getNotIn()?.takeIf { it.isNotEmpty() }?.let { predicates.add(builder.not(expression.\`in\`(it))) }
+            filter.getGreaterThan()?.let { predicates.add(builder.greaterThan(expression, it)) }
+            filter.getGreaterThanOrEqual()?.let { predicates.add(builder.greaterThanOrEqualTo(expression, it)) }
+            filter.getLessThan()?.let { predicates.add(builder.lessThan(expression, it)) }
+            filter.getLessThanOrEqual()?.let { predicates.add(builder.lessThanOrEqualTo(expression, it)) }
+            builder.and(*predicates.toTypedArray())
+        }
+
+` : ''}    private fun ${entityName}.toProjection(): ${name}Projection =
+        ${name}Projection().also {
+${entityToProjectionAssignments}
+        }
 }
 `);
+        }
     },
 
     _writeReadModelResource(packageName, context, slicePackage, slice, readmodel, name, idFields) {
@@ -442,14 +633,10 @@ ${projectionToEntityAssignments}
         const readmodelRoute = httpRoute(readmodel.title);
         const filterFields = readModelFilterFields(readmodel);
         const imports = readModelStorageImports([...idFields, ...filterFields], this.model.rootPackage);
-        const filterRequestParams = filterFields
-            .map((field) => `        @RequestParam(required = false) ${field.name}: ${readModelStorageType(field, false)}?`)
-            .join(',\n');
         const findAllParameters = [
-            filterRequestParams,
+            `        criteria: ${name}Criteria`,
             '        @PageableDefault(size = 20) pageable: Pageable'
         ].filter(Boolean).join(',\n');
-        const filterArguments = filterFields.length > 0 ? `${filterFields.map((field) => field.name).join(', ')}, ` : '';
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${resourceName}.kt`), `package ${packageName}
 
 import org.springframework.data.domain.Page
@@ -459,7 +646,7 @@ import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.CrossOrigin
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
-${filterFields.length > 0 ? 'import org.springframework.web.bind.annotation.RequestParam\n' : ''}import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 ${imports}
 
@@ -471,7 +658,7 @@ class ${resourceName}(private val repository: ${repositoryName}) {
     fun findAll(
 ${findAllParameters}
     ): Page<${name}> =
-        repository.${readModelRepositoryMethodName(filterFields)}(${filterArguments}pageable)
+        repository.findAllByCriteria(criteria, pageable)
 
 ${idFields.length === 1 ? `
     @GetMapping("/{id}")

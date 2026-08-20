@@ -3,7 +3,7 @@
  * Licensed under the MIT License.
  */
 
-const {uniqueChapters, buildI18nModel, normalizeFields, axonRoute, cleanTitle} = require('./model-utils');
+const {uniqueChapters, buildI18nModel, normalizeFields, axonRoute, cleanTitle, titleCase, constant} = require('./model-utils');
 const {buildBackendModules, backendModuleForContext, withModuleResourceRoutes} = require('./backend-modules');
 const {buildDomainModel, withResolvedValueTypes} = require('./domain-model');
 const {buildWorkflowModel} = require('./workflow-model');
@@ -14,6 +14,7 @@ const {aggregateName} = require('./resource-naming');
 
 function buildFrontendModel(source, selectedCommandKeys) {
     source = withResolvedValueTypes(source);
+    source = withStateFieldOptions(source);
     const slices = source.slices ?? [];
     const allAggregates = source.aggregates ?? [];
     const allContexts = source.contexts ?? source.context ?? [];
@@ -46,6 +47,62 @@ function buildFrontendModel(source, selectedCommandKeys) {
         resources: resources.sort((a, b) => a.route.localeCompare(b.route)),
         i18n
     };
+}
+
+function withStateFieldOptions(source) {
+    const stateOptionsByType = buildStateOptionsByType(source);
+    if (stateOptionsByType.size === 0) {
+        return source;
+    }
+
+    const enrichFields = (fields = []) => fields.forEach((field) => {
+        if (!field?.name) {
+            return;
+        }
+
+        const options = stateOptionsByType.get(field.type);
+        if (options && !field.optionSet && !field.options && !field.enumOptions) {
+            field.enumOptions = options;
+        }
+
+        if (field.valueType?.fields) {
+            enrichFields(field.valueType.fields);
+        }
+    });
+
+    (source.slices ?? []).forEach((slice) => {
+        (slice.commands ?? []).forEach((command) => enrichFields(command.fields));
+        (slice.events ?? []).forEach((event) => enrichFields(event.fields));
+        (slice.readmodels ?? []).forEach((readModel) => enrichFields(readModel.fields));
+    });
+    (source.valueTypes ?? []).forEach((valueType) => enrichFields(valueType.fields));
+
+    return source;
+}
+
+function buildStateOptionsByType(source) {
+    const stateOptionsByType = new Map();
+    const concepts = [
+        ...(source.concepts ?? []),
+        ...(source.contexts ?? []).flatMap((context) => context.concepts ?? [])
+    ];
+
+    concepts
+        .filter((concept) => concept?.name && (concept.states ?? []).length > 0)
+        .forEach((concept) => {
+            const options = concept.states.map((state) => ({
+                value: constant(state),
+                label: titleCase(state)
+            }));
+            [
+                `${concept.name}.State`,
+                `${concept.title}.State`,
+                `${cleanTitle(concept.name)}.State`,
+                `${cleanTitle(concept.title)}.State`
+            ].filter(Boolean).forEach((type) => stateOptionsByType.set(type, options));
+        });
+
+    return stateOptionsByType;
 }
 
 function buildFileUploadCapability(slices, aggregates, contexts, backendModules) {

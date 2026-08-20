@@ -56,7 +56,7 @@ export const CategoryList = () => {
   const table = useTable({
     columns,
     refineCoreProps: {
-      syncWithLocation: true,
+      syncWithLocation: false,
     },
   });
   const tableResult = refineUseTable<Category>({

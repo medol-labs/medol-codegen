@@ -9,7 +9,6 @@ import {
   Text,
   X,
 } from "lucide-react";
-import { useQueryState } from "nuqs";
 import * as React from "react";
 
 import { DataTableRangeFilter } from "@/components/data-table/data-table-range-filter";
@@ -40,7 +39,6 @@ import { useDebouncedCallback } from "@/hooks/use-debounced-callback";
 import { getDefaultFilterOperator, getFilterOperators } from "@/lib/data-table";
 import { formatDate } from "@/lib/format";
 import { generateId } from "@/lib/id";
-import { getFiltersStateParser } from "@/lib/parsers";
 import { cn } from "@/lib/utils";
 import type { ExtendedColumnFilter, FilterOperator } from "@/types/data-table";
 
@@ -67,6 +65,8 @@ export function DataTableFilterMenu<TData>({
   ...props
 }: DataTableFilterMenuProps<TData>) {
   const id = React.useId();
+  void throttleMs;
+  void shallow;
 
   const columns = React.useMemo(() => {
     return table
@@ -106,15 +106,8 @@ export function DataTableFilterMenu<TData>({
     [inputValue, selectedColumn],
   );
 
-  const [filters, setFilters] = useQueryState(
-    table.options.meta?.queryKeys?.filters ?? "filters",
-    getFiltersStateParser<TData>(columns.map((field) => field.id))
-      .withDefault([])
-      .withOptions({
-        clearOnDefault: true,
-        shallow,
-        throttleMs,
-      }),
+  const [filters, setFilters] = React.useState<ExtendedColumnFilter<TData>[]>(
+    [],
   );
   const debouncedSetFilters = useDebouncedCallback(setFilters, debounceMs);
 

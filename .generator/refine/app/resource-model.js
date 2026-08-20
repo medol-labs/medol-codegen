@@ -21,9 +21,17 @@ const {
     snake,
     axonRoute,
     camel,
-    pascal
+    pascal,
+    isListField,
+    isObjectField
 } = require('./model-utils');
 const {commandWorkflowFields, commandKey, actionControls, findActionControlField} = require('./workflow-model');
+
+function criteriaQueryFields(fields) {
+    return (fields ?? [])
+        .filter((field) => !isListField(field) && !isObjectField(field))
+        .map((field) => field.name);
+}
 
 function toReadModelResource(group, readModel, allEvents, workflow) {
     const aggregateTitle = cleanTitle(group.title);
@@ -84,6 +92,7 @@ function toReadModelResource(group, readModel, allEvents, workflow) {
         dataProviderName: deployment.dataProviderName,
         idField: idField?.name ?? 'id',
         idFields: (idFields.length > 0 ? idFields : [idField]).filter(Boolean).map((field) => field.name),
+        queryFields: criteriaQueryFields(queryFields),
         rowIdExpression: rowIdExpression((idFields.length > 0 ? idFields : [idField]).filter(Boolean)),
         readModelId: readModel?.id,
         canList: readModel ? !!readModel.listElement : true,

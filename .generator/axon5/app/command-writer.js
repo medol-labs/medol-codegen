@@ -187,8 +187,12 @@ ${reservationSelections ? `\n${reservationSelections}` : ''}
                 ...(usePort ? ['portResult'] : []),
                 ...(port?.failureEvent ? ['now'] : [])
             ].join(', ');
+            const transition = transitionForCommand(this.model, command);
+            const portPrecondition = usePort && includeState && transition?.from
+                ? `${renderStateGuard(this.model, transition)}\n`
+                : '';
             const portStatements = usePort
-                ? `        val input = ${capability.inputName}(${constructorArgsFromCommand(inputFields)})
+                ? `${portPrecondition}        val input = ${capability.inputName}(${constructorArgsFromCommand(inputFields)})
         val portResult = ${lowerCamel(capability.portName)}.${capability.methodName}(input)
 ${port?.failureEvent ? '        val now = java.time.LocalDateTime.now()\n' : ''}
 `
@@ -214,6 +218,14 @@ ${portStatements}\
         ).join('');
         const usesState = slice.commands.some((command) => !commandStartsLifecycle(command));
         const stateImport = usesState && stateTarget.packageName !== packageName ? `import ${stateTarget.packageName}.${stateName}\n` : '';
+        const stateEnumImports = uniqueBy(slice.commands
+            .map((command) => ({command, transition: transitionForCommand(this.model, command)}))
+            .filter(({command, transition}) =>
+                Boolean(infrastructurePortForCommand(command, events, slice, this.model))
+                && transitionUsesConceptState(this.model, transition)
+            )
+            .map(({transition}) => `import ${this.model.rootPackage}.${contextPackage(transition.context ?? slice.context)}.domain.states.${conceptStateEnumName(transition.owner.name)}`), (value) => value)
+            .join('\n');
         const reservationStateImports = reservations.map((reservation) => `import ${reservation.packageName}.${reservation.stateName}`).join('\n');
         const injectEntityImport = slice.commands.some((command) => !commandStartsLifecycle(command) || reservations.length > 0)
             ? 'import org.axonframework.modelling.annotation.InjectEntity\n'
@@ -227,6 +239,7 @@ import org.springframework.stereotype.Component
 ${commandImports}
 ${portImports}
 ${stateImport}
+${stateEnumImports}
 ${reservationStateImports}
 
 @Component

@@ -275,7 +275,7 @@ ${properties}
                     ?? [])
                 : undefined;
             const assignments = [
-                ...(concept && stateTransition && !transition && conceptHasState(this.model, slice.context, concept, stateTransition.to) ? [`        currentState = ${stateEnumName}.${constant(stateTransition.to)}`] : []),
+                ...(concept && stateTransition && stateTransition.from !== stateTransition.to && !transition && conceptHasState(this.model, slice.context, concept, stateTransition.to) ? [`        currentState = ${stateEnumName}.${constant(stateTransition.to)}`] : []),
                 ...(concept && inferredState && !transition ? [`        currentState = ${stateEnumName}.${constant(inferredState)}`] : []),
                 ...event.fields
                     .filter((field) => !(transition?.keyField && field.name === transition.keyField))

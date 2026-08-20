@@ -172,7 +172,7 @@ class UmaDbEventStorageEngineTest {
     }
 
     @Test
-    void streamUsesUmaDbSubscribeAndStartsAfterPreviousToken() {
+    void streamUsesUmaDbSubscribeAndReadsCatchUpAfterSubscribedBatch() {
         var client = new RecordingUmaDbClient();
         client.events.add(new UmaDbClient.SequencedStoredEvent(
                 10,
@@ -186,12 +186,13 @@ class UmaDbEventStorageEngineTest {
         var entry = stream.next().orElseThrow();
 
         assertEquals(3L, client.subscribeRequest.after());
+        assertEquals(11L, client.readRequest.start());
         assertEquals("streamed", entry.message().identifier());
         assertEquals(11L, TrackingToken.fromContext(entry).orElseThrow().position().orElseThrow());
     }
 
     @Test
-    void streamTreatsUmaDbSubscribeDeadlineAsEmptyBatch() {
+    void streamReadsCatchUpWhenUmaDbSubscribeDeadlineExpires() {
         var client = new RecordingUmaDbClient();
         client.subscribeFailure = new StatusRuntimeException(Status.DEADLINE_EXCEEDED);
         var stream = engine(client).stream(StreamingCondition.conditionFor(
@@ -201,6 +202,7 @@ class UmaDbEventStorageEngineTest {
 
         assertTrue(stream.next().isEmpty());
         assertEquals(3L, client.subscribeRequest.after());
+        assertEquals(4L, client.readRequest.start());
     }
 
     @Test
@@ -288,6 +290,7 @@ class UmaDbEventStorageEngineTest {
         private ReadRequest readRequest;
         private SubscribeRequest subscribeRequest;
         private RuntimeException appendFailure;
+        private RuntimeException readFailure;
         private RuntimeException subscribeFailure;
 
         @Override
@@ -306,6 +309,9 @@ class UmaDbEventStorageEngineTest {
         @Override
         public CompletableFuture<ReadResult> read(ReadRequest request) {
             readRequest = request;
+            if (readFailure != null) {
+                return CompletableFuture.failedFuture(readFailure);
+            }
             return CompletableFuture.completedFuture(new ReadResult(selectAfter(request.start() - 1, request.limit(), request.queryItems())));
         }
 

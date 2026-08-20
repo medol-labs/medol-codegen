@@ -24,7 +24,7 @@ const applicationWriterMethods = {
 
     _writeMonoSkeleton() {
         const deployments = this.model.deployments ?? [];
-        const modules = [SHARED_KERNEL_MODULE, UMA_DB_EVENT_STORAGE_MODULE, ...deployments.map((deployment) => this._deploymentModuleName(deployment))];
+        const modules = [UMA_DB_EVENT_STORAGE_MODULE, SHARED_KERNEL_MODULE, ...deployments.map((deployment) => this._deploymentModuleName(deployment))];
         const appName = this._rootAggregatorName();
         this.fs.copyTpl(this.templatePath('mono-pom.xml.tpl'), this.destinationPath('pom.xml'), {
             rootPackage: this.model.rootPackage,

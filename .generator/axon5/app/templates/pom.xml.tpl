@@ -20,6 +20,7 @@
         <start-class><%= rootPackage %>.ApplicationKt</start-class>
         <jib-maven-plugin.version>3.4.5</jib-maven-plugin.version>
         <docker.image.prefix>medol</docker.image.prefix>
+        <kotlin.compiler.daemon>false</kotlin.compiler.daemon>
     </properties>
     <dependencyManagement>
         <dependencies>

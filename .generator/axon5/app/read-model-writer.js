@@ -846,8 +846,9 @@ ${includeEventTime ? `
             (slice.events ?? []).some((candidate) => candidate.id === event.id)
         );
         const stateChange = ownerSlice?.stateChange?.eventId === event.id ? ownerSlice.stateChange : undefined;
+        const stateTransition = (this.model.transitions ?? []).find((transition) => transition.event?.id === event.id);
         const concept = ownerSlice?.concepts?.[0];
-        if (!stateChange || !concept) {
+        if (!stateChange || !concept || stateTransition?.from === stateTransition?.to) {
             return assignments;
         }
         const field = readmodel.fields.find((candidate) => candidate.type === `${concept}.State`);
@@ -871,6 +872,7 @@ ${includeEventTime ? `
             (slice.events ?? []).some((candidate) => candidate.id === event.id)
         );
         const stateChange = ownerSlice?.stateChange?.eventId === event.id ? ownerSlice.stateChange : undefined;
+        const stateTransition = (this.model.transitions ?? []).find((transition) => transition.event?.id === event.id);
 
         const addAssignment = (field, code, usesEventTime = false) => {
             if (!field || assignedFieldNames.has(field.name)) {
@@ -897,7 +899,7 @@ ${includeEventTime ? `
             }
         }
 
-        if (stateChange?.to) {
+        if (stateChange?.to && stateTransition?.from !== stateTransition?.to) {
             const statusField = bestSemanticFieldMatch(event, (readmodel.fields ?? []).filter((field) =>
                 !assignedFieldNames.has(field.name)
                 && isStringStatusField(field)

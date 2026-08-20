@@ -19,6 +19,7 @@
     <properties>
         <java.version>21</java.version>
         <kotlin.version>2.3.20</kotlin.version>
+        <kotlin.compiler.daemon>false</kotlin.compiler.daemon>
         <axon.version>5.1.1</axon.version>
     </properties>
 

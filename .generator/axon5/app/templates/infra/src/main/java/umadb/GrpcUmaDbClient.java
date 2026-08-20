@@ -89,7 +89,7 @@ public final class GrpcUmaDbClient implements UmaDbClient, AutoCloseable {
 
     @Override
     public UmaDbClient.Subscription openSubscription(UmaDbClient.SubscribeRequest request) {
-        return new GrpcSubscription(blockingStub.subscribe(toSubscribeRequest(request)));
+        return new GrpcSubscription(deadlineBlockingStub().subscribe(toSubscribeRequest(request)));
     }
 
     @Override

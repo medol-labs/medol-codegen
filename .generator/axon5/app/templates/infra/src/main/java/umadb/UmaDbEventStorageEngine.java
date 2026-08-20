@@ -202,26 +202,48 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
                     current == null ? openSubscription(after.get(), condition) : current
             );
             var events = activeSubscription.nextBatch().events();
-            events.stream()
-                    .mapToLong(UmaDbClient.SequencedStoredEvent::position)
-                    .max()
-                    .ifPresent(after::set);
-            return events.stream()
+            advanceAfter(after, events);
+            var catchUpEvents = readCatchUp(after, condition);
+            if (events.isEmpty()) {
+                return catchUpEvents.stream()
+                        .filter(event -> matches(event, condition))
+                        .toList();
+            }
+            var combined = new java.util.ArrayList<UmaDbClient.SequencedStoredEvent>(events);
+            combined.addAll(catchUpEvents);
+            return combined.stream()
                     .filter(event -> matches(event, condition))
                     .toList();
         } catch (CompletionException ex) {
-            closeSubscription(subscription);
             if (isDeadlineExceeded(ex)) {
-                return List.of();
+                closeSubscription(subscription);
+                return readCatchUp(after, condition).stream()
+                        .filter(event -> matches(event, condition))
+                        .toList();
             }
             throw ex;
         } catch (RuntimeException ex) {
-            closeSubscription(subscription);
             if (isDeadlineExceeded(ex)) {
-                return List.of();
+                closeSubscription(subscription);
+                return readCatchUp(after, condition).stream()
+                        .filter(event -> matches(event, condition))
+                        .toList();
             }
             throw ex;
         }
+    }
+
+    private List<UmaDbClient.SequencedStoredEvent> readCatchUp(AtomicLong after, StreamingCondition condition) {
+        var request = new UmaDbClient.ReadRequest(
+                Math.max(0, after.get() + 1),
+                properties.batchSize(),
+                properties.batchSize(),
+                queryItems(condition)
+        );
+        logger.debug("Reading UmaDB stream catch-up. start={}, batchSize={}, queryItems={}", request.start(), request.batchSize(), request.queryItems());
+        var events = client.read(request).join().events();
+        advanceAfter(after, events);
+        return events;
     }
 
     private UmaDbClient.Subscription openSubscription(long after, StreamingCondition condition) {
@@ -232,6 +254,13 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
         );
         logger.debug("Opening UmaDB subscription. after={}, batchSize={}, queryItems={}", request.after(), request.batchSize(), request.queryItems());
         return client.openSubscription(request);
+    }
+
+    private static void advanceAfter(AtomicLong after, List<UmaDbClient.SequencedStoredEvent> events) {
+        events.stream()
+                .mapToLong(UmaDbClient.SequencedStoredEvent::position)
+                .max()
+                .ifPresent(after::set);
     }
 
     private static void closeSubscription(AtomicReference<UmaDbClient.Subscription> subscription) {

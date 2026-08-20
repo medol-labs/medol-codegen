@@ -27,6 +27,7 @@ const {aggregateName} = require('./resource-naming');
 
 function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, backendModules, transitions = []) {
     const selectableReadModels = new Map();
+    const selectableReadModelsByFieldSource = new Map();
     let dictionaryProviderSelect = null;
     const commandsById = new Map();
     const eventsById = new Map();
@@ -91,6 +92,9 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
                 }
             };
             selectableReadModels.set(id, selectModel);
+            readModelFieldSourceKeys(readModel, id).forEach((key) => {
+                selectableReadModelsByFieldSource.set(key, selectModel);
+            });
             const dictionaryProvider = dictionaryProviderFor(readModel);
             if (dictionaryProvider) {
                 dictionaryProviderSelect = {
@@ -157,6 +161,9 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
                 ?? transitionsByCommandId.get(String(command.title ?? ''));
             return stateControlForTransition(transition, readModel);
         },
+        selectForField(field) {
+            return readModelSelectForFieldSource(field, selectableReadModelsByFieldSource);
+        },
         dictionaryValueSelect(dictionaryCode) {
             if (!dictionaryProviderSelect || !dictionaryProviderSelect.dictionaryCodeField || !dictionaryCode) {
                 return null;
@@ -202,6 +209,29 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
             };
         }
     };
+}
+
+function readModelFieldSourceKeys(readModel, idField) {
+    return unique([
+        readModel.id,
+        readModel.name,
+        readModel.title,
+        cleanTitle(readModel.title)
+    ].filter(Boolean)).flatMap((readModelKey) => [
+        `${readModelKey}.${idField}`,
+        `${cleanTitle(readModelKey)}.${idField}`
+    ]);
+}
+
+function readModelSelectForFieldSource(field, selectableReadModelsByFieldSource) {
+    const sources = normalizeArray(field?.source?.from);
+    for (const source of sources) {
+        const select = selectableReadModelsByFieldSource.get(String(source));
+        if (select) {
+            return select;
+        }
+    }
+    return null;
 }
 
 function queryFieldsForReadModel(readModel) {
@@ -303,7 +333,7 @@ function commandWorkflowFields(command, readModel, allEvents, workflow) {
                 prefill.add(field.name);
             }
 
-            const select = workflow.selectableReadModels.get(field.name);
+            const select = workflow.selectForField(field) ?? workflow.selectableReadModels.get(field.name);
             if (select && !field.idAttribute && isReferenceSelectField(field)) {
                 selects.set(field.name, select);
             }

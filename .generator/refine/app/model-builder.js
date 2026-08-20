@@ -3,7 +3,7 @@
  * Licensed under the MIT License.
  */
 
-const {uniqueChapters, buildI18nModel, normalizeFields, axonRoute, cleanTitle, titleCase, constant} = require('./model-utils');
+const {uniqueChapters, buildI18nModel, normalizeFields, axonRoute, cleanTitle, titleCase, pascal, constant} = require('./model-utils');
 const {buildBackendModules, backendModuleForContext, withModuleResourceRoutes} = require('./backend-modules');
 const {buildDomainModel, withResolvedValueTypes} = require('./domain-model');
 const {buildWorkflowModel} = require('./workflow-model');
@@ -84,7 +84,8 @@ function buildStateOptionsByType(source) {
     const stateOptionsByType = new Map();
     const concepts = [
         ...(source.concepts ?? []),
-        ...(source.contexts ?? []).flatMap((context) => context.concepts ?? [])
+        ...(source.contexts ?? []).flatMap((context) => context.concepts ?? []),
+        ...(source.slices ?? []).flatMap((slice) => slice.concepts ?? [])
     ];
 
     concepts
@@ -98,7 +99,9 @@ function buildStateOptionsByType(source) {
                 `${concept.name}.State`,
                 `${concept.title}.State`,
                 `${cleanTitle(concept.name)}.State`,
-                `${cleanTitle(concept.title)}.State`
+                `${cleanTitle(concept.title)}.State`,
+                `${pascal(concept.name)}.State`,
+                `${pascal(concept.title)}.State`
             ].filter(Boolean).forEach((type) => stateOptionsByType.set(type, options));
         });
 

@@ -199,9 +199,10 @@ public final class GrpcUmaDbClient implements UmaDbClient, AutoCloseable {
         for (StoredEventTag tag : event.tags()) {
             builder.addTags(tag.key() + "=" + tag.value());
         }
-        builder.addMetadata(metadata(AXON_TIMESTAMP, event.timestamp().toString()));
-        builder.addMetadata(metadata(AXON_PAYLOAD_TYPE, event.payload().getClass().getName()));
-        for (Map.Entry<String, Object> entry : event.metadata().entrySet()) {
+        var metadata = new HashMap<String, Object>(event.metadata());
+        metadata.putIfAbsent(AXON_TIMESTAMP, event.timestamp().toString());
+        metadata.putIfAbsent(AXON_PAYLOAD_TYPE, event.payload().getClass().getName());
+        for (Map.Entry<String, Object> entry : metadata.entrySet()) {
             builder.addMetadata(metadata(entry.getKey(), String.valueOf(entry.getValue())));
         }
         return builder.build();
@@ -285,7 +286,6 @@ public final class GrpcUmaDbClient implements UmaDbClient, AutoCloseable {
         var code = exception.getStatus().getCode();
         return code == Status.Code.ABORTED
                 || code == Status.Code.ALREADY_EXISTS
-                || code == Status.Code.FAILED_PRECONDITION
-                || code == Status.Code.INVALID_ARGUMENT;
+                || code == Status.Code.FAILED_PRECONDITION;
     }
 }

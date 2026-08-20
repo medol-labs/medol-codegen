@@ -59,6 +59,20 @@ class UmaDbEventStorageEngineTest {
     }
 
     @Test
+    void appendPassesZeroConsistencyMarkerToUmaDb() {
+        var client = new RecordingUmaDbClient();
+        var engine = engine(client);
+        var condition = AppendCondition
+                .withCriteria(EventCriteria.havingTags(Tag.of("Order", "order-1")))
+                .withMarker(new GlobalIndexConsistencyMarker(0));
+
+        commit(engine.appendEvents(condition, null, List.of(tagged("created", "OrderCreated", "Order", "order-1"))).join());
+
+        assertEquals(0L, client.appendRequest.condition().after());
+        assertEquals(List.of("Order=order-1"), client.appendRequest.condition().failIfEventsMatch().getFirst().tags());
+    }
+
+    @Test
     void appendAllowsMultipleDcbTagsPerEvent() {
         var client = new RecordingUmaDbClient();
         var engine = engine(client);

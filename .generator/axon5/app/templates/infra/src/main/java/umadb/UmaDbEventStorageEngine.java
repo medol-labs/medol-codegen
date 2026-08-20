@@ -301,7 +301,7 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
         if (position == Long.MAX_VALUE) {
             return Long.MAX_VALUE;
         }
-        return position <= 0 ? null : position - 1;
+        return position <= 0 ? 0L : position - 1;
     }
 
     private static Long globalPosition(ConsistencyMarker marker) {

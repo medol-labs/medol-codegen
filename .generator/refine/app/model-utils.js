@@ -290,6 +290,10 @@ function normalizeFields(fields = []) {
             file: !!field.file,
             cardinality: field.cardinality ?? 'Single',
             source: field.source,
+            optionSet: field.optionSet,
+            options: field.options,
+            enumName: field.enumName,
+            enumOptions: field.enumOptions,
             valueType: field.valueType
         }));
 }

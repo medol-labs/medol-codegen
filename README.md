@@ -153,6 +153,21 @@ update <workspace-id>
 update --workspace-id <workspace-id>
 ```
 
+To include stored MEDOL model translations in the exported CodegenModel, pass a locale:
+
+```bash
+update --locale zh-CN
+update --language zh-CN
+CODEGEN_MODEL_LOCALE=zh-CN update
+MEDOL_LOCALE=zh-CN update
+```
+
+This calls the MEDOL endpoint with `locale=zh-CN` and writes a single
+`codegen-model.json` containing `locales`, `defaultLocale`, and `translations`.
+The Refine generator reads those fields and emits the generated
+`src/i18n/messages.ts`. The generator does not load
+`model-translations.zh-CN.json` directly.
+
 The default Medol base URL from the container is `http://host.docker.internal:5172`. Override it when needed:
 
 ```bash
@@ -173,18 +188,21 @@ cd example
 ./test-codegen-model.sh update <workspace-id>
 ```
 
-Set `CODEGEN_MODEL_LOCALE` or `MEDOL_WORKSPACE_ID` for translated or environment-driven exports.
+Set `CODEGEN_MODEL_LOCALE` or `MEDOL_WORKSPACE_ID` for translated or environment-driven exports:
 
-Model translations are a separate optional input. Put the exported translation
-bundle next to the model as:
+```bash
+CODEGEN_MODEL_LOCALE=zh-CN ./test-codegen-model.sh update
+MEDOL_WORKSPACE_ID=<workspace-id> ./test-codegen-model.sh update
+```
+
+As a compatibility fallback, model translations may also be provided as a
+separate optional input next to the model:
 
 ```text
 /workspace/translations.json
 ```
 
-The translation file is not merged into `codegen-model.json`; the generator only
-loads it at generation time. The expected shape matches the MEDOL translation
-download:
+The expected shape matches the MEDOL translation download:
 
 ```json
 {

@@ -363,6 +363,7 @@ ${eventMethods}
 
     _writeDevSeedScript() {
         this.fs.copy(this.templatePath('seed-dev-data.mjs'), this.destinationPath('scripts/seed-dev-data.mjs'));
+        this.fs.copy(this.templatePath('clean-docker-compose-data.mjs'), this.destinationPath('scripts/clean-docker-compose-data.mjs'));
     },
 
     _writeManualInfrastructureDirectories() {

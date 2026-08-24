@@ -1,9 +1,6 @@
-# This Dockerfile uses `serve` npm package to serve the static files with node process.
-# You can find the Dockerfile for nginx in the following link:
-# https://github.com/refinedev/dockerfiles/blob/main/vite/Dockerfile.nginx
-FROM refinedev/node:18 AS base
+FROM node:22-bookworm-slim AS deps
 
-FROM base as deps
+WORKDIR /app
 
 COPY package.json yarn.lock* package-lock.json* pnpm-lock.yaml* .npmrc* ./
 
@@ -14,24 +11,30 @@ RUN \
   else echo "Lockfile not found." && exit 1; \
   fi
 
-FROM base as builder
+FROM node:22-bookworm-slim AS builder
 
-ENV NODE_ENV production
+WORKDIR /app
+ENV NODE_ENV=production
+ARG VITE_API_URL
+ARG VITE_SUPABASE_API_KEY
+ENV VITE_API_URL=${VITE_API_URL}
+ENV VITE_SUPABASE_API_KEY=${VITE_SUPABASE_API_KEY}
+<% backendModules.forEach((module) => { -%>
+ARG <%= module.envName %>
+ENV <%= module.envName %>=${<%= module.envName %>}
+<% }) -%>
 
-COPY --from=deps /app/refine/node_modules ./node_modules
+COPY --from=deps /app/node_modules ./node_modules
 
 COPY . .
 
 RUN npm run build
 
-FROM base as runner
+FROM nginx:1.27-alpine AS runner
 
-ENV NODE_ENV production
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=builder /app/dist /usr/share/nginx/html
 
-RUN npm install -g serve
+EXPOSE 80
 
-COPY --from=builder /app/refine/dist ./
-
-USER refine
-
-CMD ["serve"]
+CMD ["nginx", "-g", "daemon off;"]

@@ -98,7 +98,11 @@
     "dev": "refine dev",
     "build": "tsc && refine build",
     "start": "refine start",
-    "refine": "refine"
+    "refine": "refine",
+    "image:build": "node scripts/build-images.mjs",
+    "image:export": "node scripts/export-images.mjs",
+    "image:import": "node scripts/import-images.mjs",
+    "image:bundle": "node scripts/image-bundle.mjs all"
   },
   "browserslist": {
     "production": [

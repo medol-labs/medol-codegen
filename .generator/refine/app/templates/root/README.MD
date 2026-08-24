@@ -35,6 +35,47 @@ Refine's hooks and components simplifies the development process and eliminates 
     npm run start
 ```
 
+## Container Image
+
+Build the frontend image:
+
+```bash
+node scripts/build-images.mjs
+```
+
+Images default to `linux/amd64`. Override the target CPU architecture when needed:
+
+```bash
+node scripts/build-images.mjs --platform linux/arm64
+```
+
+Pass Vite backend URLs at image build time when the defaults are not suitable:
+
+<% backendModules.forEach((module) => { -%>
+- `<%= module.envName %>` for `<%= module.label %>`; default: `<%= module.defaultApiUrl %>`
+<% }) -%>
+
+```bash
+node scripts/build-images.mjs --build-arg <%= backendModules[0]?.envName ?? 'VITE_AXON_API_URL' %>=http://localhost:8080
+```
+
+Export and import the image for an offline environment:
+
+```bash
+node scripts/export-images.mjs --output ./frontend-images.tar
+node scripts/import-images.mjs --output ./frontend-images.tar
+```
+
+The image name defaults to `medol/<%= imageName %>:0.0.1-SNAPSHOT`. Override it with `--prefix`, `--image`, and `--version`.
+
+Run the built image with Docker Compose:
+
+```bash
+docker compose up -d
+```
+
+The compose file maps `${CONSOLE_PORT:-5173}` on the host to nginx port `80` in the container. Override `CONSOLE_IMAGE` when using a custom image name.
+
 ## Learn More
 
 To learn more about **Refine**, please check out the [Documentation](https://refine.dev/docs)

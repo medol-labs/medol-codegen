@@ -19,6 +19,8 @@
         <spring-cloud.version>2025.0.0</spring-cloud.version>
         <start-class><%= rootPackage %>.ApplicationKt</start-class>
         <jib-maven-plugin.version>3.4.5</jib-maven-plugin.version>
+        <jib.container.platform.os>linux</jib.container.platform.os>
+        <jib.container.platform.architecture>amd64</jib.container.platform.architecture>
         <docker.image.prefix>medol</docker.image.prefix>
         <kotlin.compiler.daemon>false</kotlin.compiler.daemon>
     </properties>
@@ -169,6 +171,12 @@
                 <configuration>
                     <from>
                         <image>eclipse-temurin:21-jre</image>
+                        <platforms>
+                            <platform>
+                                <os>${jib.container.platform.os}</os>
+                                <architecture>${jib.container.platform.architecture}</architecture>
+                            </platform>
+                        </platforms>
                     </from>
                     <to>
                         <image>${docker.image.prefix}/${project.artifactId}:${project.version}</image>

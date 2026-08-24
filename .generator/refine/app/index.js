@@ -6,6 +6,7 @@
 const YeomanGenerator = require('yeoman-generator');
 const Generator = YeomanGenerator.default ?? YeomanGenerator;
 var path = require('path');
+const fs = require('fs');
 const {loadGeneratorModel} = require("../../common/core/config-loader");
 const {
     buildFrontendModel,
@@ -16,6 +17,7 @@ const {
 
 let config = {};
 let codegenModel = {};
+const GENERATED_MARKER = '// Generated from config.json by the refine generator.';
 
 function toDisplayName(value) {
     const normalized = `${value ?? ''}`
@@ -29,6 +31,14 @@ function toDisplayName(value) {
     }
 
     return normalized.replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function toKebab(value) {
+    return `${value ?? ''}`
+        .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+        .replace(/[^a-zA-Z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .toLowerCase() || 'medol-console';
 }
 
 module.exports = class extends Generator {
@@ -115,6 +125,7 @@ module.exports = class extends Generator {
         }
 
         if (this.answers.generatorType === 'all' || this.answers.generatorType === 'pages') {
+            this._cleanupGeneratedPages(model.resources);
             model.resources.forEach((resource) => this._writePages(resource));
         }
     }
@@ -189,6 +200,88 @@ module.exports = class extends Generator {
         });
     }
 
+    _cleanupGeneratedPages(resources) {
+        const pagesRoot = this.destinationPath('./src/pages');
+        if (!fs.existsSync(pagesRoot)) {
+            return;
+        }
+
+        const expectedFilesByRoute = new Map(resources.map((resource) => [
+            resource.route,
+            this._expectedPageFiles(resource)
+        ]));
+
+        for (const entry of fs.readdirSync(pagesRoot, { withFileTypes: true })) {
+            if (!entry.isDirectory()) {
+                continue;
+            }
+
+            const route = entry.name;
+            const routePath = path.join(pagesRoot, route);
+            const expectedFiles = expectedFilesByRoute.get(route);
+
+            if (!expectedFiles) {
+                this._deleteGeneratedFiles(routePath);
+                this._deleteEmptyDirectory(routePath);
+                continue;
+            }
+
+            for (const file of fs.readdirSync(routePath)) {
+                if (!file.endsWith('.ts') && !file.endsWith('.tsx')) {
+                    continue;
+                }
+                if (!expectedFiles.has(file) && this._isGeneratedFile(path.join(routePath, file))) {
+                    fs.rmSync(path.join(routePath, file), { force: true });
+                }
+            }
+        }
+    }
+
+    _expectedPageFiles(resource) {
+        const files = new Set(['index.ts', 'show.tsx']);
+        if (resource.canList) {
+            files.add('list.tsx');
+        }
+        if (resource.createCommand) {
+            files.add(`${resource.createCommand.file}.tsx`);
+        }
+        if (resource.editCommand) {
+            files.add('edit.tsx');
+        }
+        if (resource.deleteCommand) {
+            files.add(`${resource.deleteCommand.file}.tsx`);
+        }
+        resource.itemCommands.forEach((command) => files.add(`${command.file}.tsx`));
+        return files;
+    }
+
+    _deleteGeneratedFiles(directory) {
+        for (const file of fs.readdirSync(directory)) {
+            const filePath = path.join(directory, file);
+            const stat = fs.statSync(filePath);
+            if (stat.isDirectory()) {
+                this._deleteGeneratedFiles(filePath);
+                this._deleteEmptyDirectory(filePath);
+            } else if ((file.endsWith('.ts') || file.endsWith('.tsx')) && this._isGeneratedFile(filePath)) {
+                fs.rmSync(filePath, { force: true });
+            }
+        }
+    }
+
+    _deleteEmptyDirectory(directory) {
+        if (fs.existsSync(directory) && fs.readdirSync(directory).length === 0) {
+            fs.rmdirSync(directory);
+        }
+    }
+
+    _isGeneratedFile(filePath) {
+        try {
+            return fs.readFileSync(filePath, 'utf8').startsWith(GENERATED_MARKER);
+        } catch {
+            return false;
+        }
+    }
+
     _writeDomainModel(model) {
         this.fs.copyTpl(
             this.templatePath('src/domain/value-types.ts.tpl'),
@@ -212,9 +305,13 @@ module.exports = class extends Generator {
 
     _writeSkeleton() {
         const appName = codegenModel?.domain ?? 'frontend-foundation';
+        const model = buildFrontendModel(codegenModel);
         const skeletonModel = {
             appName,
-            appTitle: toDisplayName(appName)
+            appTitle: toDisplayName(appName),
+            imageName: `${toKebab(appName)}-console`,
+            imageTarName: `${toKebab(appName)}-console-images.tar`,
+            backendModules: model.backendModules
         };
 
         this.fs.copyTpl(
@@ -222,7 +319,7 @@ module.exports = class extends Generator {
             this.destinationPath('.'),
             skeletonModel
         );
-        ['.env-example', '.gitignore', '.npmrc'].forEach((file) => {
+        ['.dockerignore', '.env-example', '.gitignore', '.npmrc'].forEach((file) => {
             this.fs.copyTpl(
                 this.templatePath(`root/${file}`),
                 this.destinationPath(file),

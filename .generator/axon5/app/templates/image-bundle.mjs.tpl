@@ -14,6 +14,8 @@ const imagePrefix = String(args.prefix ?? process.env.DOCKER_IMAGE_PREFIX ?? 'me
 const imageVersion = String(args.version ?? process.env.IMAGE_VERSION ?? '0.0.1-SNAPSHOT');
 const tarFile = resolve(root, args.output ?? args.file ?? process.env.IMAGE_TAR ?? defaultTar);
 const dryRun = Boolean(args['dry-run']);
+const jibGoal = 'com.google.cloud.tools:jib-maven-plugin:3.4.5:dockerBuild';
+const platform = parsePlatform(args.platform ?? process.env.DOCKER_DEFAULT_PLATFORM ?? 'linux/amd64');
 
 switch (command) {
     case 'build':
@@ -40,7 +42,14 @@ switch (command) {
 function buildImages() {
     ensureModules();
     ensureMavenWrapper();
-    run('./mvnw', ['-pl', modules.join(','), '-am', '-DskipTests', 'jib:dockerBuild']);
+    run('./mvnw', ['-pl', modules.join(','), '-am', '-DskipTests', 'install']);
+    run('./mvnw', [
+        '-pl', modules.join(','),
+        '-DskipTests',
+        `-Djib.container.platform.os=${platform.os}`,
+        `-Djib.container.platform.architecture=${platform.architecture}`,
+        jibGoal
+    ]);
 }
 
 function exportImages() {
@@ -49,7 +58,7 @@ function exportImages() {
 }
 
 function importImages() {
-    if (!existsSync(tarFile)) {
+    if (!dryRun && !existsSync(tarFile)) {
         fail(`Image archive was not found: ${tarFile}`);
     }
     run('docker', ['load', '-i', tarFile]);
@@ -65,6 +74,7 @@ function printPlan() {
         console.log(`  - ${imageName}`);
     }
     console.log(`[images] archive: ${tarFile}`);
+    console.log(`[images] platform: ${platform.os}/${platform.architecture}`);
 }
 
 function run(commandName, commandArgs) {
@@ -114,6 +124,15 @@ function valuesOf(value) {
     return Array.isArray(value) ? value : [value];
 }
 
+function parsePlatform(value) {
+    const normalized = String(value ?? '').trim();
+    const [os, architecture, variant] = normalized.split('/');
+    if (!os || !architecture || variant) {
+        fail(`Invalid platform: ${normalized || '<empty>'}. Expected format like linux/amd64 or linux/arm64.`);
+    }
+    return {os, architecture};
+}
+
 function parseArgs(argv) {
     const result = {_: []};
     for (let index = 0; index < argv.length; index += 1) {
@@ -154,6 +173,7 @@ Options:
   --module <name[,name]>   Limit to one or more generated deployment modules.
   --prefix <name>          Docker image prefix. Defaults to DOCKER_IMAGE_PREFIX or medol.
   --version <tag>          Image tag. Defaults to IMAGE_VERSION or 0.0.1-SNAPSHOT.
+  --platform <os/arch>     Target CPU architecture. Defaults to DOCKER_DEFAULT_PLATFORM or linux/amd64.
   --output <file>          Image archive path. Defaults to IMAGE_TAR or ${defaultTar}.
   --root <dir>             Generated backend root. Defaults to current directory.
   --dry-run                Print commands without running them.`);

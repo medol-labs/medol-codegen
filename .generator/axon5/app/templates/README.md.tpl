@@ -174,6 +174,12 @@ node scripts/build-images.mjs
 <% } -%>
 ```
 
+Images default to `linux/amd64`. Override the target CPU architecture when needed:
+
+```bash
+node scripts/build-images.mjs --platform linux/arm64
+```
+
 Export the generated images to a Docker archive for offline transfer:
 
 ```bash
@@ -185,10 +191,29 @@ node scripts/export-images.mjs
 <% } -%>
 ```
 
+Pull and export Docker Compose dependency images, such as databases and event stores, for the same target platform:
+
+```bash
+node scripts/export-dependency-images.mjs --platform linux/amd64 --output dependency-images.tar
+```
+
+Preview the discovered dependency images:
+
+```bash
+node scripts/dependency-images.mjs list
+```
+
+Collect deployment Docker Compose files and matching `.env.example` files into one folder:
+
+```bash
+node scripts/collect-deployment-compose-files.mjs --clean
+```
+
 Import the archive on another machine:
 
 ```bash
 node scripts/import-images.mjs --file <%= imageTarName %>
+docker load -i dependency-images.tar
 ```
 
 Build and export in one command:
@@ -207,11 +232,13 @@ The build script uses Maven/Jib under the hood:
 ```bash
 <% if (modulePrefix) { -%>
 cd ..
-./mvnw -pl <%= modulePrefix %> -am -DskipTests jib:dockerBuild
+./mvnw -pl <%= modulePrefix %> -am -DskipTests install
+./mvnw -pl <%= modulePrefix %> -DskipTests -Djib.container.platform.os=linux -Djib.container.platform.architecture=amd64 com.google.cloud.tools:jib-maven-plugin:3.4.5:dockerBuild
 <% } else if (hasInfra) { -%>
-./mvnw -pl <module-name> -am -DskipTests jib:dockerBuild
+./mvnw -pl <module-name> -am -DskipTests install
+./mvnw -pl <module-name> -DskipTests -Djib.container.platform.os=linux -Djib.container.platform.architecture=amd64 com.google.cloud.tools:jib-maven-plugin:3.4.5:dockerBuild
 <% } else { -%>
-./mvnw -DskipTests jib:dockerBuild
+./mvnw -DskipTests -Djib.container.platform.os=linux -Djib.container.platform.architecture=amd64 com.google.cloud.tools:jib-maven-plugin:3.4.5:dockerBuild
 <% } -%>
 ```
 

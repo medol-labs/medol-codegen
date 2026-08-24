@@ -40,7 +40,8 @@ const applicationWriterMethods = {
             umadbPort: 50051,
             dbName: safeDatabaseName(appName),
             modulePrefix: '',
-            hasInfra: true
+            hasInfra: true,
+            imageTarName: this._imageTarName()
         });
         this.fs.copy(this.templatePath('gitignore'), this.destinationPath('.gitignore'));
         this._copyMavenWrapper();
@@ -122,7 +123,8 @@ const applicationWriterMethods = {
             appPort: runtime.appPort,
             dbPort: runtime.dbPort,
             umadbPort: runtime.umadbPort,
-            dbName: runtime.dbName
+            dbName: runtime.dbName,
+            imageTarName: this._imageTarName()
         });
         this.fs.copyTpl(this.templatePath('ApplicationTest.kt.tpl'), this._rootTestKotlinPath('ApplicationTest.kt'), {
             rootPackage: this.model.rootPackage,
@@ -364,6 +366,27 @@ ${eventMethods}
     _writeDevSeedScript() {
         this.fs.copy(this.templatePath('seed-dev-data.mjs'), this.destinationPath('scripts/seed-dev-data.mjs'));
         this.fs.copy(this.templatePath('clean-docker-compose-data.mjs'), this.destinationPath('scripts/clean-docker-compose-data.mjs'));
+        const imageModules = this._deployableImageModules();
+        const imageTarName = this._imageTarName();
+        this.fs.copyTpl(this.templatePath('image-bundle.mjs.tpl'), this.destinationPath('scripts/image-bundle.mjs'), {
+            imageModules,
+            imageTarName
+        });
+        this.fs.copy(this.templatePath('build-images.mjs'), this.destinationPath('scripts/build-images.mjs'));
+        this.fs.copy(this.templatePath('export-images.mjs'), this.destinationPath('scripts/export-images.mjs'));
+        this.fs.copy(this.templatePath('import-images.mjs'), this.destinationPath('scripts/import-images.mjs'));
+    },
+
+    _deployableImageModules() {
+        const deployments = this.model.deployments ?? [];
+        if (deployments.length > 0) {
+            return deployments.map((deployment) => this._deploymentModuleName(deployment));
+        }
+        return [kebab(this.model.domain) || 'medol-application'];
+    },
+
+    _imageTarName() {
+        return `${kebab(this.model.domain) || 'medol-application'}-images.tar`;
     },
 
     _writeManualInfrastructureDirectories() {

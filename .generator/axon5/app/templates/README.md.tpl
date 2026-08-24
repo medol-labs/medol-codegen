@@ -161,25 +161,64 @@ cd ..
 
 ## Container Image
 
-Build a Docker image directly from Maven:
+Build all generated deployment images:
 
 ```bash
 <% if (modulePrefix) { -%>
 cd ..
-./mvnw -pl axon-event-storage-umadb -DskipTests install
-./mvnw -pl <%= modulePrefix %> jib:dockerBuild
+node scripts/build-images.mjs --module <%= modulePrefix %>
 <% } else if (hasInfra) { -%>
-./mvnw -pl axon-event-storage-umadb -DskipTests install
-./mvnw -pl <module-name> jib:dockerBuild
+node scripts/build-images.mjs
 <% } else { -%>
-./mvnw -pl <module-name> jib:dockerBuild
+node scripts/build-images.mjs
+<% } -%>
+```
+
+Export the generated images to a Docker archive for offline transfer:
+
+```bash
+<% if (modulePrefix) { -%>
+cd ..
+node scripts/export-images.mjs --module <%= modulePrefix %>
+<% } else { -%>
+node scripts/export-images.mjs
+<% } -%>
+```
+
+Import the archive on another machine:
+
+```bash
+node scripts/import-images.mjs --file <%= imageTarName %>
+```
+
+Build and export in one command:
+
+```bash
+<% if (modulePrefix) { -%>
+cd ..
+node scripts/image-bundle.mjs all --module <%= modulePrefix %>
+<% } else { -%>
+node scripts/image-bundle.mjs all
+<% } -%>
+```
+
+The build script uses Maven/Jib under the hood:
+
+```bash
+<% if (modulePrefix) { -%>
+cd ..
+./mvnw -pl <%= modulePrefix %> -am -DskipTests jib:dockerBuild
+<% } else if (hasInfra) { -%>
+./mvnw -pl <module-name> -am -DskipTests jib:dockerBuild
+<% } else { -%>
+./mvnw -DskipTests jib:dockerBuild
 <% } -%>
 ```
 
 <% if (modulePrefix) { -%>
 The generated image is `<%= "medol/" + appName %>:0.0.1-SNAPSHOT` and exposes port `<%= appPort %>`.
 <% } else { -%>
-The generated image is `medol/<module-name>:0.0.1-SNAPSHOT`.
+The generated images are `medol/<module-name>:0.0.1-SNAPSHOT`.
 <% } -%>
 The container disables Spring Boot docker-compose integration; pass `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` for the runtime database.
 

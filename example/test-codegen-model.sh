@@ -7,6 +7,7 @@ target="${1:-all}"
 workspace_id="${MEDOL_WORKSPACE_ID:-}"
 image="${CODEGEN_IMAGE:-es-codegen}"
 container_name="${CODEGEN_CONTAINER_NAME:-codegen}"
+host_port="${CODEGEN_HOST_PORT-3001}"
 generator_path="/opt/codegen/.generator/app/"
 output_root="${CODEGEN_OUTPUT_ROOT:-generated}"
 model_path="${CODEGEN_MODEL_PATH:-$script_dir/codegen-model.json}"
@@ -16,6 +17,7 @@ medol_base_url="${MEDOL_BASE_URL:-http://host.docker.internal:5172}"
 axon_workspace="$script_dir/$output_root/axon"
 axon5_workspace="$script_dir/$output_root/axon5"
 refine_workspace="$script_dir/$output_root/refine"
+deploy_workspace="$script_dir/$output_root/deploy"
 
 if [[ "$current_dir" != "$script_dir" ]]; then
   echo "Run this script from its own directory: $script_dir" >&2
@@ -23,9 +25,9 @@ if [[ "$current_dir" != "$script_dir" ]]; then
 fi
 
 case "$target" in
-  all|axon|axon5|refine|shell|update|model) ;;
+  all|axon|axon5|refine|deploy|shell|update|model) ;;
   *)
-    echo "Usage: ./test-codegen-model.sh [all|axon|axon5|refine|shell|update [workspace-id]]" >&2
+    echo "Usage: ./test-codegen-model.sh [all|axon|axon5|refine|deploy|shell|update [workspace-id]]" >&2
     exit 1
     ;;
 esac
@@ -40,7 +42,7 @@ require_image() {
 }
 
 verify_image() {
-  if ! docker run --rm "$image" /bin/sh -lc "command -v update >/dev/null && grep -q 'loadGeneratorModel' /opt/codegen/.generator/axon/app/index.js && grep -q 'allAggregates' /opt/codegen/.generator/axon/aggregates/index.js && grep -q 'loadCodegenModel' /opt/codegen/.generator/axon5/app/index.js"; then
+  if ! docker run --rm "$image" /bin/sh -lc "command -v update >/dev/null && grep -q 'loadGeneratorModel' /opt/codegen/.generator/axon/app/index.js && grep -q 'allAggregates' /opt/codegen/.generator/axon/aggregates/index.js && grep -q 'loadCodegenModel' /opt/codegen/.generator/axon5/app/index.js && test -f /opt/codegen/.generator/deploy/app/index.js"; then
     echo "Docker image $image does not include the latest codegen-model generator changes." >&2
     echo "Rebuild it from the code-generator root with:" >&2
     echo "  docker build -f Dockerfile.codegen -t $image ." >&2
@@ -104,10 +106,14 @@ prepare_workspace() {
 run_gen() {
   local workspace="$1"
   shift
+  local port_args=()
+  if [[ -n "$host_port" ]]; then
+    port_args=(-p "$host_port:3000")
+  fi
   prepare_workspace "$workspace"
   docker run \
     --rm \
-    -p 3001:3000 \
+    "${port_args[@]}" \
     -v "$workspace:/workspace" \
     --name "$container_name" \
     "$image" \
@@ -131,11 +137,17 @@ run_refine() {
   run_gen "$refine_workspace" --generator refine --generator-type all --all-commands --skip-install
 }
 
+run_deploy() {
+  rm -rf "$deploy_workspace"
+  run_gen "$deploy_workspace" --generator deploy --generator-type all --environment dev --skip-install
+}
+
 case "$target" in
   all)
     run_axon
     run_axon5
     run_refine
+    run_deploy
     ;;
   axon)
     run_axon
@@ -146,8 +158,15 @@ case "$target" in
   refine)
     run_refine
     ;;
+  deploy)
+    run_deploy
+    ;;
   shell)
     prepare_workspace "$script_dir/$output_root/shell"
-    docker run -it -p 3001:3000 -v "$script_dir/$output_root/shell:/workspace" --name "$container_name" --rm "$image"
+    shell_port_args=()
+    if [[ -n "$host_port" ]]; then
+      shell_port_args=(-p "$host_port:3000")
+    fi
+    docker run -it "${shell_port_args[@]}" -v "$script_dir/$output_root/shell:/workspace" --name "$container_name" --rm "$image"
     ;;
 esac

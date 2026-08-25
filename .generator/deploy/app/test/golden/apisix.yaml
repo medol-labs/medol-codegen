@@ -1,0 +1,37 @@
+routes:
+  - id: "console-root"
+    name: "Frontend Console Root"
+    uri: "/*"
+    upstream_id: "console"
+  - id: "federation-service-api"
+    name: "Federation Service API"
+    uri: "/api/federations/*"
+    upstream_id: "federation-service"
+    plugins:
+      proxy-rewrite:
+        regex_uri:
+          - "^/api/federations/(.*)"
+          - "/$1"
+  - id: "dataset-service-api"
+    name: "Dataset Service API"
+    uri: "/api/datasets/*"
+    upstream_id: "dataset-service"
+    plugins:
+      proxy-rewrite:
+        regex_uri:
+          - "^/api/datasets/(.*)"
+          - "/$1"
+upstreams:
+  - id: "console"
+    type: "roundrobin"
+    nodes:
+      "console:80": 1
+  - id: "federation-service"
+    type: "roundrobin"
+    nodes:
+      "federation-service:8080": 1
+  - id: "dataset-service"
+    type: "roundrobin"
+    nodes:
+      "dataset-service:8081": 1
+#END

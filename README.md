@@ -80,11 +80,12 @@ gen /opt/codegen/.generator/app/ --generator axon5 --generator-type slices --con
 gen /opt/codegen/.generator/app/ --generator axon5 --generator-type slices --all-slices
 ```
 
-The top-level generator supports three targets:
+The top-level generator supports four targets:
 
 - `axon` for the Kotlin/Spring Boot backend
 - `axon5` for the Axon Framework 5 backend generated directly from CodegenModel
 - `refine` for the React refine frontend foundation
+- `deploy` for Docker Compose, APISIX, Kubernetes, and K3s deployment artifacts
 
 When `codegen-model.json` contains lifecycle `transitions`, the Axon 5 generator
 uses them to generate command state guards for transitions with an inferred
@@ -128,6 +129,83 @@ You can invoke the bundled generator explicitly:
 ```bash
 gen /opt/codegen/.generator/app/ --generator refine --generator-type all
 ```
+
+## Generate Deploy Artifacts
+
+The `deploy` generator reads the same `codegen-model.json` and derives an intermediate `DeploymentModel` before rendering platform files. The model keeps application topology, infrastructure, gateway routes, images, ports, health checks, environment defaults, and per-environment overrides separate from renderer-specific details.
+
+Create a deployment workspace yourself, put `codegen-model.json` there, then run the generator from that directory. The generator creates one directory for the selected environment under the current directory.
+
+```bash
+mkdir -p deployment
+cp /path/to/codegen-model.json deployment/codegen-model.json
+cd deployment
+gen /opt/codegen/.generator/app/ --generator deploy --generator-type all --environment dev
+```
+
+Supported deploy targets are:
+
+- `all`: deployment model, APISIX, Docker Compose, Kubernetes, and K3s
+- `model`: only `<environment>/deployment-model.json`
+- `apisix`: APISIX standalone/declarative configuration
+- `docker-compose`: Docker Compose deployment files
+- `kubernetes`: Kubernetes base manifests plus the selected environment kustomization
+- `k3s`: K3s-flavored manifests rendered from the same Kubernetes renderer
+
+Generated deployment files are written under the selected environment directory:
+
+```text
+deployment/
+  codegen-model.json
+  deploy.config.json
+  dev/
+    deployment-model.json
+    README.md
+    .env.example
+    docker-compose/docker-compose.yml
+    infrastructure/apisix/config.yaml
+    infrastructure/apisix/apisix.yaml
+    infrastructure/postgres/init/01-create-databases.sql
+    kubernetes/base/
+    kubernetes/environments/dev/
+    k3s/base/
+    k3s/environments/dev/
+```
+
+APISIX is generated in standalone mode with declarative YAML and Admin API disabled. Docker Compose is the primary runnable target and includes generated backend services, the generated frontend console, runtime dependencies such as PostgreSQL and UMA DB, optional/profiled Axon Server, optional Redis, volumes, networks, environment placeholders, health checks, and service startup dependencies.
+
+Deployment overrides can be supplied with `deploy.config.json` or `deployment.config.json` in the deployment workspace:
+
+```json
+{
+  "deployment": {
+    "imagePrefix": "registry.example.com/team",
+    "imageTag": "2026.08.25",
+    "eventStorage": "umadb",
+    "gateway": {
+      "routes": {
+        "federation-service": {
+          "path": "/api/federations"
+        }
+      }
+    },
+    "infrastructure": {
+      "redis": { "enabled": true },
+      "axonServer": { "enabled": false }
+    },
+    "environments": {
+      "prod": {
+        "variables": { "GATEWAY_PORT": "80" },
+        "applicationOverrides": {
+          "federation-service": { "replicas": 3 }
+        }
+      }
+    }
+  }
+}
+```
+
+The generated files use placeholder environment references only. Real passwords, tokens, certificates, and Kubernetes Secret objects must be supplied by the deployment environment.
 
 ## Configuration
 
@@ -230,7 +308,7 @@ cd example
 ./test-codegen-model.sh
 ```
 
-This generates Axon 4, Axon 5, and Refine projects without opening generator prompts.
+This generates Axon 4, Axon 5, Refine, and Deploy projects without opening generator prompts.
 
 Generated files are separated by target:
 
@@ -238,6 +316,7 @@ Generated files are separated by target:
 example/generated/axon
 example/generated/axon5
 example/generated/refine
+example/generated/deploy/dev
 ```
 
 Skeleton generation also writes a runtime-neutral agent kit into the generated
@@ -312,6 +391,7 @@ To jump directly into a target:
 ./test-codegen-model.sh axon
 ./test-codegen-model.sh axon5
 ./test-codegen-model.sh refine
+./test-codegen-model.sh deploy
 ```
 
 To test Refine generation with a separate translation bundle:
@@ -344,7 +424,7 @@ If only `config.json` exists and these fields are present, the generator uses th
 The generator now uses the Event Modeling Toolkit `CodegenModel` as its core input:
 
 ```text
-codegen-model.json -> common/core CodegenModel -> axon/refine generators
+codegen-model.json -> common/core CodegenModel -> axon/refine/deploy generators
 ```
 
 Legacy `config.json` is converted into the same core model only as a fallback.

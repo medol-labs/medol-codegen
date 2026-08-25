@@ -1,0 +1,75 @@
+/*
+ * Copyright (c) 2025 Nebulit GmbH
+ * Licensed under the MIT License.
+ */
+
+const YeomanGenerator = require('yeoman-generator');
+const Generator = YeomanGenerator.default ?? YeomanGenerator;
+const { loadGeneratorModel } = require('../../common/core/config-loader');
+const { buildDeploymentModel } = require('./deployment-model-builder');
+const { loadDeploymentConfig } = require('./deployment-config');
+const { generateDeployFiles, targets } = require('./deploy-generator');
+
+module.exports = class extends Generator {
+    constructor(args, opts) {
+        super(args, opts);
+        this.opts = { ...(opts ?? {}), skipInstall: true };
+        this.options.skipInstall = true;
+        if (this.env?.options) {
+            this.env.options.skipInstall = true;
+        }
+        this.argument('appname', { type: String, required: false });
+
+        const loaded = loadGeneratorModel(this.env.cwd);
+        this.codegenModel = loaded.codegenModel;
+        this.deploymentConfig = loadDeploymentConfig(this.env.cwd);
+    }
+
+    async prompting() {
+        const prompts = [];
+        if (!this.opts.generatorType && !this.opts.target) {
+            prompts.push({
+                type: 'list',
+                name: 'target',
+                message: 'Which deployment target should be generated?',
+                choices: targets,
+                default: 'all'
+            });
+        }
+        if (!this.opts.environment) {
+            prompts.push({
+                type: 'list',
+                name: 'environment',
+                message: 'Which deployment environment?',
+                choices: ['dev', 'test', 'staging', 'prod'],
+                default: 'dev'
+            });
+        }
+
+        this.answers = {
+            target: this.opts.target ?? this.opts.generatorType ?? 'all',
+            environment: this.opts.environment ?? 'dev',
+            force: this.opts.force ?? true,
+            ...(await this.prompt(prompts))
+        };
+    }
+
+    writing() {
+        if (!this.answers.force) {
+            this.log('Skipped deploy generation.');
+            return;
+        }
+        const target = targets.includes(this.answers.target)
+            ? this.answers.target
+            : 'all';
+        const deploymentModel = buildDeploymentModel(this.codegenModel, this.deploymentConfig);
+        const files = generateDeployFiles(deploymentModel, {
+            target,
+            environment: this.answers.environment
+        });
+
+        Object.entries(files).forEach(([file, content]) => {
+            this.fs.write(this.destinationPath(file), content);
+        });
+    }
+};

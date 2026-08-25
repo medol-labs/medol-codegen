@@ -1,13 +1,14 @@
 import { IResourceItem } from "@refinedev/core";
 import { FlaskConical, LayoutDashboard, Package } from "lucide-react";
 import { COMMAND_DATA_PROVIDER_NAME } from "./constants";
+import { getAppConfig } from "./app-config";
 
 export const backendModules = [
   {
     name: "default",
     label: "Backend",
     dataProviderName: COMMAND_DATA_PROVIDER_NAME,
-    apiUrl: import.meta.env.VITE_AXON_API_URL ?? "http://localhost:8080",
+    apiUrl: getAppConfig("VITE_AXON_API_URL", "http://localhost:8080"),
     homeRoute: "/blog-posts",
     resources: ["blog-posts", "categories"],
   },

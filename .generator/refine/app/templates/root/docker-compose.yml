@@ -4,6 +4,13 @@ services:
     container_name: ${CONSOLE_CONTAINER_NAME:-<%= imageName %>}
     ports:
       - "${CONSOLE_PORT:-5173}:80"
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-https://iwdfzvfqbtokqetmbmbp.supabase.co}
+      VITE_SUPABASE_API_KEY: ${VITE_SUPABASE_API_KEY:-}
+      VITE_AXON_API_URL: ${VITE_AXON_API_URL:-}
+<% backendModules.forEach((module) => { -%>
+      <%= module.envName %>: ${<%= module.envName %>:-}
+<% }) -%>
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/health >/dev/null 2>&1 || exit 1"]

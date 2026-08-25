@@ -1,6 +1,7 @@
 // Generated from config.json by the refine generator.
 import { IResourceItem } from "@refinedev/core";
 import { FlaskConical, LayoutDashboard, Package } from "lucide-react";
+import { getAppConfig } from "./app-config";
 
 export const backendModules = [
 <% backendModules.forEach((module) => { -%>
@@ -8,7 +9,7 @@ export const backendModules = [
     name: "<%= module.name %>",
     label: "<%= module.label %>",
     dataProviderName: "<%= module.dataProviderName %>",
-    apiUrl: import.meta.env.<%= module.envName %> ?? "<%= module.defaultApiUrl %>",
+    apiUrl: getAppConfig("<%= module.envName %>", "<%= module.defaultApiUrl %>"),
     homeRoute: "<%= module.homeRoute %>",
     resources: <%- JSON.stringify(module.resourceRoutes) %>,
   },

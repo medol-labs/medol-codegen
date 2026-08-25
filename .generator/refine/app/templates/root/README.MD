@@ -49,14 +49,20 @@ Images default to `linux/amd64`. Override the target CPU architecture when neede
 node scripts/build-images.mjs --platform linux/arm64
 ```
 
-Pass Vite backend URLs at image build time when the defaults are not suitable:
+The production image is a static nginx image. Runtime environment variables are written to `/usr/share/nginx/html/runtime-config.js` when the container starts, so the same image can be reused across environments.
 
+Configure these values in `.env` or the Compose environment:
+
+- `VITE_API_URL` for Supabase URL; default: `https://iwdfzvfqbtokqetmbmbp.supabase.co`
+- `VITE_SUPABASE_API_KEY` for Supabase anon API key
 <% backendModules.forEach((module) => { -%>
 - `<%= module.envName %>` for `<%= module.label %>`; default: `<%= module.defaultApiUrl %>`
 <% }) -%>
 
 ```bash
-node scripts/build-images.mjs --build-arg <%= backendModules[0]?.envName ?? 'VITE_AXON_API_URL' %>=http://localhost:8080
+VITE_API_URL=https://iwdfzvfqbtokqetmbmbp.supabase.co \
+VITE_SUPABASE_API_KEY=<supabase-anon-key> \
+docker compose up -d
 ```
 
 Export and import the image for an offline environment:

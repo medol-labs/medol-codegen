@@ -17,6 +17,7 @@ import {
   appendSpringCriteriaFilters,
   canUseSpringCriteriaFilters,
 } from "../lib/query-filters";
+import { getAppConfig } from "./app-config";
 import { dataProvider as supabaseDataProvider } from "./data";
 
 type AxonMeta = Record<string, unknown> & {
@@ -341,7 +342,7 @@ export const commandDataProvider = (
 ): Required<DataProvider> => {
   void supabaseClient;
 
-  const baseUrl = options.baseUrl ?? import.meta.env.VITE_AXON_API_URL ?? "http://localhost:8080";
+  const baseUrl = options.baseUrl ?? getAppConfig("VITE_AXON_API_URL", "http://localhost:8080");
 
   const getJson = async (path: string, allowNotFound = false) => {
     const res = await fetch(`${baseUrl}${path}`);

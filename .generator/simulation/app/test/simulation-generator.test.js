@@ -38,6 +38,7 @@ const sampleModel = {
         name: 'RegisterOrganization',
         title: 'Register Organization',
         context: 'OrganizationManagement',
+        concepts: ['Organization'],
         commands: [{
             id: 'command-register-org',
             name: 'RegisterOrganization',
@@ -120,6 +121,7 @@ const sampleModel = {
         name: 'VerifyOrganization',
         title: 'Verify Organization',
         context: 'OrganizationManagement',
+        concepts: ['Organization'],
         commands: [{
             id: 'command-verify-org',
             name: 'VerifyOrganization',
@@ -194,6 +196,7 @@ const sampleModel = {
         name: 'CreateTeam',
         title: 'Create Team',
         context: 'TeamManagement',
+        concepts: ['Team'],
         commands: [{
             id: 'command-create-team',
             name: 'CreateTeam',
@@ -231,6 +234,12 @@ test('Case 1: command to event produces a scenario step', () => {
 
     assert(scenario);
     assert.equal(scenario.steps[0].command, 'RegisterOrganization');
+    assert.deepEqual(scenario.steps[0].http, {
+        method: 'POST',
+        path: '/organization/registerorganization',
+        conceptRoute: 'organization',
+        commandRoute: 'registerorganization'
+    });
     assert.deepEqual(scenario.steps[0].expectedEvents.map((event) => event.name), ['OrganizationRegistered']);
 });
 
@@ -310,13 +319,31 @@ test('Case 7: deterministic generator preview is stable for the same seed', () =
     assert.notEqual(previewValue(field, 1001, 'register.organizationId'), previewValue(field, 1002, 'register.organizationId'));
 });
 
-test('generates simulation runtime, model, registry, and scenario files', () => {
+test('generates simulation service, model, runtime, and scenario files', () => {
     const model = buildSimulationModel(sampleModel);
     const files = generateSimulationFiles(model, { target: 'all' });
 
-    assert(files['simulation/generated/model/simulation-model.json']);
-    assert(files['simulation/generated/runtime/SimulationRunner.kt']);
-    assert(files['simulation/generated/data/SimulationDataGenerator.kt']);
-    assert(files['simulation/generated/GeneratedSimulationScenarios.kt']);
-    assert(files[`simulation/generated/scenarios/${model.scenarios[0].className}.kt`]);
+    assert(files['simulation-model.json']);
+    assert(files['package.json']);
+    assert(files['Dockerfile']);
+    assert(files['src/server.js']);
+    assert(files['src/cli.js']);
+    assert(files['src/runtime/runner.js']);
+    assert(files['src/runtime/business-client.js']);
+    assert(files['src/runtime/event-observer.js']);
+    assert(files[`scenarios/${model.scenarios[0].id}.json`]);
+    assert.match(files['src/server.js'], /url\.pathname === '\/simulations'/);
+    assert.match(files['src/runtime/business-client.js'], /BUSINESS_BASE_URL/);
+    assert.match(files['src/runtime/event-observer.js'], /createEventJournal/);
+    assert.match(files['src/runtime/runner.js'], /client\.execute\(step, payload\)/);
+});
+
+test('supports explicit output root when a caller wants a nested directory', () => {
+    const model = buildSimulationModel(sampleModel);
+    const files = generateSimulationFiles(model, {
+        target: 'model',
+        root: 'simulation/generated'
+    });
+
+    assert(files['simulation/generated/simulation-model.json']);
 });

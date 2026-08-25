@@ -208,46 +208,97 @@ Deployment overrides can be supplied with `deploy.config.json` or `deployment.co
 
 The generated files use placeholder environment references only. Real passwords, tokens, certificates, and Kubernetes Secret objects must be supplied by the deployment environment.
 
-## Generate Simulation Artifacts
+## Generate Simulation Service
 
-The `simulation` generator reads the same `codegen-model.json` and derives a renderer-neutral `SimulationModel` before writing Kotlin files. The intermediate model contains a business flow graph, discovered scenarios, step execution type, expected events, deterministic input sources, and unsupported first-phase notes.
+The `simulation` generator reads the same `codegen-model.json` and derives a renderer-neutral `SimulationModel` before writing an executable service. The service calls a running business system through its public command APIs and executes DSL-derived business flows in order.
 
-Create a simulation workspace yourself, put `codegen-model.json` there, then run:
+Create a simulation service directory yourself, put `codegen-model.json` there, then run the generator from that directory. Files are generated directly into the current directory.
 
 ```bash
-mkdir -p simulation-workspace
-cp /path/to/codegen-model.json simulation-workspace/codegen-model.json
-cd simulation-workspace
+mkdir -p generated/simulation-service
+cp /path/to/codegen-model.json generated/simulation-service/codegen-model.json
+cd generated/simulation-service
 gen /opt/codegen/.generator/app/ --generator simulation --generator-type all
 ```
 
 Supported simulation targets are:
 
-- `all`: simulation model, runtime, deterministic data generator, registry, main entrypoint, and scenarios
-- `model`: only `simulation/generated/model/simulation-model.json`
-- `runtime`: ports, runner, context, planner extension point, data generator, registry, and main entrypoint
-- `scenarios`: generated Kotlin scenario classes
+- `all`: service project, simulation model, runtime, deterministic data generator, and scenario JSON files
+- `model`: only `simulation-model.json`
+- `service`: runnable HTTP service and CLI
+- `runtime`: compatibility alias for `service`
+- `scenarios`: one JSON file per discovered scenario
 
-Generated files are written under `simulation/generated`:
+Generated files are written under the current directory:
 
 ```text
-simulation/generated/
-  model/simulation-model.json
+package.json
+Dockerfile
+.env.example
+README.md
+simulation-model.json
+scenarios/<scenario-id>.json
+src/
+  server.js
+  cli.js
   runtime/
-    SimulationScenario.kt
-    SimulationStep.kt
-    SimulationContext.kt
-    SimulationPorts.kt
-    SimulationRunner.kt
-    ScenarioPlanner.kt
-  data/SimulationDataGenerator.kt
-  scenarios/<ScenarioName>.kt
-  GeneratedSimulationScenarios.kt
-  SimulationMain.kt
-  README.md
+    business-client.js
+    context.js
+    data-generator.js
+    event-observer.js
+    model-loader.js
+    runner.js
 ```
 
-The runner is intentionally infrastructure-neutral. It depends on `SimulationCommandExecutor` and `SimulationEventObserver` ports, so project-specific Axon, HTTP, message-bus, or in-memory adapters can live outside generated code. The default generated executor logs commands and the default observer falls back to generated event fields, which makes a flow inspectable before real adapters exist.
+Pass `--output-root <relative-path>` when you explicitly want this structure rendered into a subdirectory.
+
+Start the service and point it at the business system:
+
+```bash
+BUSINESS_BASE_URL=http://localhost:8080 npm start
+```
+
+Run a scenario through HTTP:
+
+```bash
+curl -sS -X POST http://localhost:3199/simulations/<scenario-id>/run \
+  -H 'content-type: application/json' \
+  -d '{"seed":1001}'
+```
+
+Or run it directly as a CLI:
+
+```bash
+npm run simulate -- <scenario-id> --seed 1001
+```
+
+For Axon 5 generated backends, command endpoints are derived from the generated resources:
+
+```text
+/<concept-route>/<command-route>
+```
+
+For example, `Register Organization` on concept `Organization` becomes:
+
+```text
+POST /organization/registerorganization
+```
+
+If contexts are hosted by different backend services, configure per-context base URLs:
+
+```bash
+CONTEXT_BASE_URLS='{"OrganizationManagement":"http://localhost:8081","TrainingOrchestration":"http://localhost:8082"}' npm start
+```
+
+Automatic steps are not called directly. They wait for the events that the business system should produce. The generated service can receive events via webhook:
+
+```bash
+curl -sS -X POST http://localhost:3199/events \
+  -H 'content-type: application/json' \
+  -d '{"eventName":"OrganizationRegistered","payload":{"organizationId":"..."}}'
+```
+
+Set `STRICT_EVENTS=true` when missing expected events should fail the simulation. Set `WAIT_FOR_EVENTS=true` when a non-strict run should still wait for webhook or observer events before moving on. Without either flag, the service executes command steps against the business system and records event observation as skipped immediately when no observer is connected.
 
 Simulation behavior can be tuned with `simulation.config.json` or `simulation/simulation.config.json` in the workspace:
 
@@ -261,9 +312,9 @@ Simulation behavior can be tuned with `simulation.config.json` or `simulation/si
 }
 ```
 
-Scenario discovery starts from lifecycle-starting commands and walks the graph from command to expected event, then event to downstream command through automations, policies, processors, and direct dependencies. `COMMAND` steps execute through `SimulationCommandExecutor`; `AUTOMATIC` steps log the expected system action and wait for or record the target event instead of resending the command.
+Scenario discovery starts from lifecycle-starting commands and walks the graph from command to expected event, then event to downstream command through automations, policies, processors, and direct dependencies. `COMMAND` steps call the business system; `AUTOMATIC` steps do not resend the command and instead wait for the automation/policy/processor-produced target event.
 
-The first phase records specification `given` state as unsupported preparation metadata. It does not insert historical events, seed databases, start external services, or call an LLM. `ScenarioPlanner` is generated as a stable extension point for future AI-assisted planning.
+The first phase records specification `given` state as unsupported preparation metadata. It does not insert historical events, seed databases, run Playwright, or call an LLM.
 
 ## Configuration
 
@@ -375,7 +426,7 @@ example/generated/axon
 example/generated/axon5
 example/generated/refine
 example/generated/deploy/dev
-example/generated/simulation/simulation/generated
+example/generated/simulation-service
 ```
 
 Skeleton generation also writes a runtime-neutral agent kit into the generated

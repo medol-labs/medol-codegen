@@ -11,6 +11,7 @@ const {
 } = require('../../common/util/naming');
 const {
     kebab,
+    httpRoute,
     pascal
 } = require('../../axon5/app/model-helpers');
 const { previewValue } = require('./deterministic-data');
@@ -80,6 +81,8 @@ function buildSimulationGraph(source = {}) {
                 sliceId: sliceNode.id,
                 sliceName: sliceNode.name,
                 sliceTitle: sliceNode.title,
+                conceptRoute: commandRouteConcept(slice, sliceNode),
+                commandRoute: httpRoute(command.title ?? command.name ?? `Command${commandIndex + 1}`),
                 startsLifecycle: sliceNode.startsLifecycle || Boolean(command.startsLifecycle ?? command.createsAggregate),
                 command,
                 slice
@@ -271,6 +274,7 @@ function buildFlowStep(source, commandNode, options) {
         commandTitle: commandNode.title,
         commandClassName: commandNode.className,
         commandFqcn: `${source.rootPackage ?? 'tech.medo'}.${commandNode.contextPackage}.${commandNode.slicePackage}.${commandNode.className}`,
+        http: commandHttpEndpoint(commandNode),
         execution: options.trigger?.execution ?? 'COMMAND',
         triggeredBy: options.trigger
             ? {
@@ -415,6 +419,7 @@ function buildSpecificationScenarios(source, graph, defaultSeed) {
                     commandTitle: commandNode.title,
                     commandClassName: commandNode.className,
                     commandFqcn: `${source.rootPackage ?? 'tech.medo'}.${commandNode.contextPackage}.${commandNode.slicePackage}.${commandNode.className}`,
+                    http: commandHttpEndpoint(commandNode),
                     execution: 'COMMAND',
                     inputs: buildStepInputs(source, commandNode, {
                         stepId,
@@ -568,6 +573,7 @@ function graphCommandSummary(node) {
         title: node.title,
         context: node.context,
         slice: node.sliceTitle,
+        http: commandHttpEndpoint(node),
         startsLifecycle: node.startsLifecycle,
         expectedEvents: (node.expectedEvents ?? []).map((event) => event.name)
     };
@@ -760,6 +766,10 @@ function normalizeRef(value) {
 function pseudoCommand(source, slice, item) {
     const context = slice.context ?? slice.chapter ?? 'EventModel';
     const title = cleanTitle(item.title ?? item.name ?? 'Command');
+    const sliceNode = {
+        name: slice.name ?? pascal(slice.title ?? title),
+        title: cleanTitle(slice.title ?? slice.name ?? title)
+    };
     return {
         id: item.id ?? stableId('command', title),
         name: item.name ?? pascal(title),
@@ -769,10 +779,28 @@ function pseudoCommand(source, slice, item) {
         contextPackage: contextPackage(context),
         slicePackage: _sliceTitle(slice.title ?? slice.name ?? title),
         sliceTitle: cleanTitle(slice.title ?? slice.name ?? title),
+        conceptRoute: commandRouteConcept(slice, sliceNode),
+        commandRoute: httpRoute(title),
         command: {
             ...item,
             fields: item.fields ?? []
         }
+    };
+}
+
+function commandRouteConcept(slice, sliceNode) {
+    const concepts = normalizeArray(slice.concepts)
+        .map((concept) => typeof concept === 'string' ? concept : concept?.name ?? concept?.title)
+        .filter(Boolean);
+    return httpRoute(concepts[0] ?? sliceNode.name ?? sliceNode.title);
+}
+
+function commandHttpEndpoint(commandNode) {
+    return {
+        method: 'POST',
+        path: `/${commandNode.conceptRoute}/${commandNode.commandRoute}`,
+        conceptRoute: commandNode.conceptRoute,
+        commandRoute: commandNode.commandRoute
     };
 }
 

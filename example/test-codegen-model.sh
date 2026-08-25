@@ -18,7 +18,7 @@ axon_workspace="$script_dir/$output_root/axon"
 axon5_workspace="$script_dir/$output_root/axon5"
 refine_workspace="$script_dir/$output_root/refine"
 deploy_workspace="$script_dir/$output_root/deploy"
-simulation_workspace="$script_dir/$output_root/simulation"
+simulation_workspace="$script_dir/$output_root/simulation-service"
 
 if [[ "$current_dir" != "$script_dir" ]]; then
   echo "Run this script from its own directory: $script_dir" >&2

@@ -52,7 +52,7 @@ module.exports = class extends Generator {
         const simulationModel = buildSimulationModel(this.codegenModel, this.simulationConfig);
         const files = generateSimulationFiles(simulationModel, {
             target: this.answers.target,
-            root: this.opts.outputRoot ?? this.opts.root ?? 'simulation/generated'
+            root: this.opts.outputRoot ?? this.opts.root ?? '.'
         });
 
         Object.entries(files).forEach(([file, content]) => {

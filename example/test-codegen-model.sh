@@ -18,6 +18,7 @@ axon_workspace="$script_dir/$output_root/axon"
 axon5_workspace="$script_dir/$output_root/axon5"
 refine_workspace="$script_dir/$output_root/refine"
 deploy_workspace="$script_dir/$output_root/deploy"
+simulation_workspace="$script_dir/$output_root/simulation"
 
 if [[ "$current_dir" != "$script_dir" ]]; then
   echo "Run this script from its own directory: $script_dir" >&2
@@ -25,9 +26,9 @@ if [[ "$current_dir" != "$script_dir" ]]; then
 fi
 
 case "$target" in
-  all|axon|axon5|refine|deploy|shell|update|model) ;;
+  all|axon|axon5|refine|deploy|simulation|shell|update|model) ;;
   *)
-    echo "Usage: ./test-codegen-model.sh [all|axon|axon5|refine|deploy|shell|update [workspace-id]]" >&2
+    echo "Usage: ./test-codegen-model.sh [all|axon|axon5|refine|deploy|simulation|shell|update [workspace-id]]" >&2
     exit 1
     ;;
 esac
@@ -42,7 +43,7 @@ require_image() {
 }
 
 verify_image() {
-  if ! docker run --rm "$image" /bin/sh -lc "command -v update >/dev/null && grep -q 'loadGeneratorModel' /opt/codegen/.generator/axon/app/index.js && grep -q 'allAggregates' /opt/codegen/.generator/axon/aggregates/index.js && grep -q 'loadCodegenModel' /opt/codegen/.generator/axon5/app/index.js && test -f /opt/codegen/.generator/deploy/app/index.js"; then
+  if ! docker run --rm "$image" /bin/sh -lc "command -v update >/dev/null && grep -q 'loadGeneratorModel' /opt/codegen/.generator/axon/app/index.js && grep -q 'allAggregates' /opt/codegen/.generator/axon/aggregates/index.js && grep -q 'loadCodegenModel' /opt/codegen/.generator/axon5/app/index.js && test -f /opt/codegen/.generator/deploy/app/index.js && test -f /opt/codegen/.generator/simulation/app/index.js"; then
     echo "Docker image $image does not include the latest codegen-model generator changes." >&2
     echo "Rebuild it from the code-generator root with:" >&2
     echo "  docker build -f Dockerfile.codegen -t $image ." >&2
@@ -142,12 +143,18 @@ run_deploy() {
   run_gen "$deploy_workspace" --generator deploy --generator-type all --environment dev --skip-install
 }
 
+run_simulation() {
+  rm -rf "$simulation_workspace"
+  run_gen "$simulation_workspace" --generator simulation --generator-type all --skip-install
+}
+
 case "$target" in
   all)
     run_axon
     run_axon5
     run_refine
     run_deploy
+    run_simulation
     ;;
   axon)
     run_axon
@@ -160,6 +167,9 @@ case "$target" in
     ;;
   deploy)
     run_deploy
+    ;;
+  simulation)
+    run_simulation
     ;;
   shell)
     prepare_workspace "$script_dir/$output_root/shell"

@@ -1,6 +1,6 @@
 # ES Code Generator
 
-Custom Yeoman code generator for generating Axon-based Kotlin/Spring Boot and Refine code from Medol's `CodegenModel`.
+Custom Yeoman code generator for generating Axon-based Kotlin/Spring Boot, Refine frontend, deployment, and simulation artifacts from Medol's `CodegenModel`.
 
 The project ships a standalone Docker image built from the official Node slim base image. The image bakes `.generator` into `/opt/codegen/.generator` and exposes a small local `gen` runner that executes the bundled generator directly.
 
@@ -80,12 +80,13 @@ gen /opt/codegen/.generator/app/ --generator axon5 --generator-type slices --con
 gen /opt/codegen/.generator/app/ --generator axon5 --generator-type slices --all-slices
 ```
 
-The top-level generator supports four targets:
+The top-level generator supports five targets:
 
 - `axon` for the Kotlin/Spring Boot backend
 - `axon5` for the Axon Framework 5 backend generated directly from CodegenModel
 - `refine` for the React refine frontend foundation
 - `deploy` for Docker Compose, APISIX, Kubernetes, and K3s deployment artifacts
+- `simulation` for deterministic business-flow simulation artifacts
 
 When `codegen-model.json` contains lifecycle `transitions`, the Axon 5 generator
 uses them to generate command state guards for transitions with an inferred
@@ -207,6 +208,63 @@ Deployment overrides can be supplied with `deploy.config.json` or `deployment.co
 
 The generated files use placeholder environment references only. Real passwords, tokens, certificates, and Kubernetes Secret objects must be supplied by the deployment environment.
 
+## Generate Simulation Artifacts
+
+The `simulation` generator reads the same `codegen-model.json` and derives a renderer-neutral `SimulationModel` before writing Kotlin files. The intermediate model contains a business flow graph, discovered scenarios, step execution type, expected events, deterministic input sources, and unsupported first-phase notes.
+
+Create a simulation workspace yourself, put `codegen-model.json` there, then run:
+
+```bash
+mkdir -p simulation-workspace
+cp /path/to/codegen-model.json simulation-workspace/codegen-model.json
+cd simulation-workspace
+gen /opt/codegen/.generator/app/ --generator simulation --generator-type all
+```
+
+Supported simulation targets are:
+
+- `all`: simulation model, runtime, deterministic data generator, registry, main entrypoint, and scenarios
+- `model`: only `simulation/generated/model/simulation-model.json`
+- `runtime`: ports, runner, context, planner extension point, data generator, registry, and main entrypoint
+- `scenarios`: generated Kotlin scenario classes
+
+Generated files are written under `simulation/generated`:
+
+```text
+simulation/generated/
+  model/simulation-model.json
+  runtime/
+    SimulationScenario.kt
+    SimulationStep.kt
+    SimulationContext.kt
+    SimulationPorts.kt
+    SimulationRunner.kt
+    ScenarioPlanner.kt
+  data/SimulationDataGenerator.kt
+  scenarios/<ScenarioName>.kt
+  GeneratedSimulationScenarios.kt
+  SimulationMain.kt
+  README.md
+```
+
+The runner is intentionally infrastructure-neutral. It depends on `SimulationCommandExecutor` and `SimulationEventObserver` ports, so project-specific Axon, HTTP, message-bus, or in-memory adapters can live outside generated code. The default generated executor logs commands and the default observer falls back to generated event fields, which makes a flow inspectable before real adapters exist.
+
+Simulation behavior can be tuned with `simulation.config.json` or `simulation/simulation.config.json` in the workspace:
+
+```json
+{
+  "simulation": {
+    "seed": 1001,
+    "maxDepth": 8,
+    "maxScenarios": 80
+  }
+}
+```
+
+Scenario discovery starts from lifecycle-starting commands and walks the graph from command to expected event, then event to downstream command through automations, policies, processors, and direct dependencies. `COMMAND` steps execute through `SimulationCommandExecutor`; `AUTOMATIC` steps log the expected system action and wait for or record the target event instead of resending the command.
+
+The first phase records specification `given` state as unsupported preparation metadata. It does not insert historical events, seed databases, start external services, or call an LLM. `ScenarioPlanner` is generated as a stable extension point for future AI-assisted planning.
+
 ## Configuration
 
 The preferred generator input is the `CodegenModel` exported by Event Modeling Toolkit:
@@ -308,7 +366,7 @@ cd example
 ./test-codegen-model.sh
 ```
 
-This generates Axon 4, Axon 5, Refine, and Deploy projects without opening generator prompts.
+This generates Axon 4, Axon 5, Refine, Deploy, and Simulation artifacts without opening generator prompts.
 
 Generated files are separated by target:
 
@@ -317,6 +375,7 @@ example/generated/axon
 example/generated/axon5
 example/generated/refine
 example/generated/deploy/dev
+example/generated/simulation/simulation/generated
 ```
 
 Skeleton generation also writes a runtime-neutral agent kit into the generated
@@ -392,6 +451,7 @@ To jump directly into a target:
 ./test-codegen-model.sh axon5
 ./test-codegen-model.sh refine
 ./test-codegen-model.sh deploy
+./test-codegen-model.sh simulation
 ```
 
 To test Refine generation with a separate translation bundle:
@@ -424,7 +484,7 @@ If only `config.json` exists and these fields are present, the generator uses th
 The generator now uses the Event Modeling Toolkit `CodegenModel` as its core input:
 
 ```text
-codegen-model.json -> common/core CodegenModel -> axon/refine/deploy generators
+codegen-model.json -> common/core CodegenModel -> axon/refine/deploy/simulation generators
 ```
 
 Legacy `config.json` is converted into the same core model only as a fallback.
@@ -450,7 +510,7 @@ The `CodegenModel` keeps the domain model shape stable for code generation:
 - `dependencies`: normalized inbound/outbound element links while preserving the legacy `type` field for compatibility
 - `fields`: normalized field metadata, including id/generated/technical/query flags and source mapping metadata
 
-Axon currently consumes the backward-compatible config emitted by the core layer, so existing templates continue to work. Refine consumes the normalized `CodegenModel` directly for resource generation.
+Axon currently consumes the backward-compatible config emitted by the core layer, so existing templates continue to work. Refine, Deploy, and Simulation consume the normalized `CodegenModel` directly for generation.
 
 ## Updating The Generator
 

@@ -114,8 +114,12 @@ function buildI18nModel(source, chapters, resources) {
         locales
             .filter((locale) => locale !== 'en')
             .forEach((locale) => {
-                messages[locale][key] = translations[locale]?.[key]
-                    ?? translations[locale]?.[defaultValue]
+                const localeTranslations = {
+                    ...builtinTranslations(locale),
+                    ...(translations[locale] ?? {})
+                };
+                messages[locale][key] = localeTranslations[key]
+                    ?? translatedDefaultValue(defaultValue, locale, localeTranslations)
                     ?? defaultValue;
             });
     });
@@ -155,6 +159,68 @@ function normalizeTranslations(translations) {
         }, {});
     }
     return translations;
+}
+
+function translatedDefaultValue(defaultValue, locale, translations) {
+    if (translations[defaultValue]) {
+        return translations[defaultValue];
+    }
+    if (locale !== 'zh-CN') {
+        return undefined;
+    }
+
+    const enterMatch = /^Enter (.+)$/.exec(defaultValue);
+    if (enterMatch && translations[enterMatch[1]]) {
+        return `请输入${translations[enterMatch[1]]}`;
+    }
+
+    const selectMatch = /^Select (.+)$/.exec(defaultValue);
+    if (selectMatch && translations[selectMatch[1]]) {
+        return `请选择${translations[selectMatch[1]]}`;
+    }
+
+    const requiredMatch = /^(.+) is required$/.exec(defaultValue);
+    if (requiredMatch && translations[requiredMatch[1]]) {
+        return `${translations[requiredMatch[1]]}为必填项`;
+    }
+
+    return undefined;
+}
+
+function builtinTranslations(locale) {
+    if (locale !== 'zh-CN') {
+        return {};
+    }
+    return {
+        'Add': '新增',
+        'Cancel': '取消',
+        'Create': '创建',
+        'Edit': '编辑',
+        'Show': '查看',
+        'List': '列表',
+        'Submit': '提交',
+        'Submitting...': '正在提交...',
+        'Previous': '上一页',
+        'Next': '下一页',
+        'More pages': '更多页',
+        'No data to display': '暂无数据',
+        'This table is empty for the time being.': '当前表格暂无数据。',
+        'Equals': '等于',
+        'Not equals': '不等于',
+        'Less than': '小于',
+        'Greater than': '大于',
+        'Less than or equal to': '小于等于',
+        'Greater than or equal to': '大于等于',
+        'Contains': '包含',
+        'Does not contain': '不包含',
+        'Starts with': '开头为',
+        'Ends with': '结尾为',
+        'Is null': '为空',
+        'Is not null': '不为空',
+        'True': '是',
+        'False': '否',
+        'pagination': '分页'
+    };
 }
 
 function uniqueElements(elements) {

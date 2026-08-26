@@ -352,8 +352,27 @@ MEDOL_LOCALE=zh-CN update
 This calls the MEDOL endpoint with `locale=zh-CN` and writes a single
 `codegen-model.json` containing `locales`, `defaultLocale`, and `translations`.
 The Refine generator reads those fields and emits the generated
-`src/i18n/messages.ts`. The generator does not load
-`model-translations.zh-CN.json` directly.
+`src/i18n/messages.ts`. The `update` command prints the number of merged
+translations for the requested locale. If that number is `0`, the generated
+locale will intentionally fall back to English labels.
+
+When a local translation export is available, `update` and the generator also
+merge these files from the workspace as fallback translations. Translations
+already returned by Medol's `codegen-model` endpoint stay authoritative:
+
+```text
+translations.json
+model-translations.json
+model-translations.<locale>.json
+```
+
+You can also provide an explicit bundle:
+
+```bash
+update --language zh-CN --translations ./model-translations.zh-CN.json
+```
+
+An explicit bundle is treated as an intentional override.
 
 The default Medol base URL from the container is `http://host.docker.internal:5172`. Override it when needed:
 

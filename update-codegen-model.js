@@ -15,6 +15,7 @@ Options:
       --version-id <id>      Medol workspace version id.
       --locale <locale>      Include stored Medol translations for the locale.
       --language <locale>    Alias for --locale.
+      --translations <path>  Merge a local translation bundle after fetching.
   -o, --output <path>        Output file. Default: /workspace/codegen-model.json
       --stdout               Print JSON to stdout instead of writing a file.
       --list-workspaces      List workspaces from the Medol service.
@@ -25,6 +26,7 @@ Environment:
   MEDOL_WORKSPACE_ID         Default --workspace-id.
   MEDOL_VERSION_ID           Default --version-id.
   CODEGEN_MODEL_LOCALE       Default --locale.
+  CODEGEN_TRANSLATIONS_PATH  Default --translations.
   CODEGEN_MODEL_OUTPUT       Default --output.
 `);
 }
@@ -45,6 +47,7 @@ function parseArgs(argv) {
     workspaceId: process.env.MEDOL_WORKSPACE_ID || process.env.CODEGEN_WORKSPACE_ID,
     versionId: process.env.MEDOL_VERSION_ID || process.env.CODEGEN_MODEL_VERSION_ID,
     locale: process.env.CODEGEN_MODEL_LOCALE || process.env.MEDOL_LOCALE,
+    translationsPath: process.env.CODEGEN_TRANSLATIONS_PATH || process.env.MEDOL_TRANSLATIONS_PATH,
     output: process.env.CODEGEN_MODEL_OUTPUT || "/workspace/codegen-model.json",
     stdout: false,
     listWorkspaces: false,
@@ -79,6 +82,11 @@ function parseArgs(argv) {
       index += 1;
     } else if (arg.startsWith("--locale=") || arg.startsWith("--language=")) {
       options.locale = arg.slice(arg.indexOf("=") + 1);
+    } else if (arg === "--translations" || arg === "--translation-file") {
+      options.translationsPath = requireValue(args, index, arg);
+      index += 1;
+    } else if (arg.startsWith("--translations=") || arg.startsWith("--translation-file=")) {
+      options.translationsPath = arg.slice(arg.indexOf("=") + 1);
     } else if (arg === "-o" || arg === "--output") {
       options.output = requireValue(args, index, arg);
       index += 1;
@@ -151,11 +159,26 @@ async function main() {
   }
 
   const url = endpointUrl(options);
-  const json = await readJson(url);
+  let json = await readJson(url);
   if (options.listWorkspaces) {
     printWorkspaces(json);
     return;
   }
+
+  const output = path.resolve(process.cwd(), options.output);
+  const localTranslations = loadLocalTranslationBundle({
+    cwd: process.cwd(),
+    output,
+    locale: options.locale,
+    translationsPath: options.translationsPath,
+  });
+  if (localTranslations) {
+    json = withTranslationBundle(json, localTranslations.bundle, {
+      localOverrides: localTranslations.explicit,
+    });
+    console.error(`Merged translations from ${localTranslations.paths.join(", ")}`);
+  }
+  reportLocaleStatus(json, options.locale);
 
   const content = `${JSON.stringify(json, null, 2)}\n`;
   if (options.stdout) {
@@ -163,10 +186,125 @@ async function main() {
     return;
   }
 
-  const output = path.resolve(process.cwd(), options.output);
   fs.mkdirSync(path.dirname(output), { recursive: true });
   fs.writeFileSync(output, content);
   console.error(`Wrote ${output}`);
+}
+
+function loadLocalTranslationBundle(options) {
+  const paths = localTranslationCandidates(options)
+    .filter((candidate) => fs.existsSync(candidate));
+  if (paths.length === 0) return undefined;
+
+  const bundles = paths
+    .map((candidate) => normalizeTranslationBundle(readFileJson(candidate)))
+    .filter(Boolean);
+  if (bundles.length === 0) return undefined;
+
+  return {
+    paths,
+    bundle: mergeTranslationBundles(bundles),
+    explicit: Boolean(options.translationsPath),
+  };
+}
+
+function localTranslationCandidates(options) {
+  if (options.translationsPath) {
+    const explicit = path.resolve(options.cwd, options.translationsPath);
+    if (!fs.existsSync(explicit)) {
+      throw new Error(`Translations file was not found: ${explicit}`);
+    }
+    return [explicit];
+  }
+
+  const roots = Array.from(new Set([
+    path.dirname(options.output),
+    options.cwd,
+  ]));
+  const names = [
+    "translations.json",
+    "model-translations.json",
+    ...(options.locale ? [`model-translations.${options.locale}.json`] : []),
+  ];
+  const candidates = roots.flatMap((root) => [
+    options.output,
+    ...names.map((name) => path.join(root, name)),
+  ]);
+  return Array.from(new Set(candidates));
+}
+
+function readFileJson(file) {
+  return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+function normalizeTranslationBundle(bundle) {
+  if (!bundle || typeof bundle !== "object") return undefined;
+  const source = bundle.codegen && typeof bundle.codegen === "object"
+    ? bundle.codegen
+    : bundle;
+  const translations = source.translations && typeof source.translations === "object"
+    ? source.translations
+    : undefined;
+  if (!translations) return undefined;
+  return {
+    translations,
+    ...(Array.isArray(source.locales) ? { locales: source.locales } : {}),
+    ...(typeof source.defaultLocale === "string" ? { defaultLocale: source.defaultLocale } : {}),
+  };
+}
+
+function withTranslationBundle(model, bundle, options = {}) {
+  const translations = options.localOverrides
+    ? mergeTranslationMaps(model.translations, bundle.translations)
+    : mergeTranslationMaps(bundle.translations, model.translations);
+  const locales = [
+    ...(model.locales ?? []),
+    ...(bundle.locales ?? Object.keys(bundle.translations ?? {})),
+  ].filter(Boolean);
+  return {
+    ...model,
+    translations,
+    ...(locales.length > 0 ? { locales: Array.from(new Set(locales)) } : {}),
+    defaultLocale: model.defaultLocale ?? bundle.defaultLocale,
+  };
+}
+
+function mergeTranslationBundles(bundles) {
+  return bundles.reduce((merged, bundle) => ({
+    translations: mergeTranslationMaps(merged.translations, bundle.translations),
+    locales: Array.from(new Set([
+      ...(merged.locales ?? []),
+      ...(bundle.locales ?? Object.keys(bundle.translations ?? {})),
+    ].filter(Boolean))),
+    defaultLocale: bundle.defaultLocale ?? merged.defaultLocale,
+  }), {
+    translations: {},
+    locales: [],
+    defaultLocale: undefined,
+  });
+}
+
+function mergeTranslationMaps(...translationMaps) {
+  const merged = {};
+  translationMaps.filter(Boolean).forEach((translationMap) => {
+    Object.entries(translationMap).forEach(([locale, translations]) => {
+      merged[locale] = {
+        ...(merged[locale] ?? {}),
+        ...(translations ?? {}),
+      };
+    });
+  });
+  return merged;
+}
+
+function reportLocaleStatus(model, locale) {
+  if (!locale) return;
+  const count = Object.keys(model.translations?.[locale] ?? {}).length;
+  if (count === 0) {
+    console.error(`Warning: requested locale ${locale}, but no translations were returned or merged. Generate/store Medol model translations first, or provide translations.json / model-translations.${locale}.json / --translations <path>.`);
+  } else {
+    console.error(`Included ${count} ${locale} translations.`);
+  }
 }
 
 main().catch((error) => {

@@ -45,16 +45,15 @@ function readJson(path) {
 }
 
 function loadTranslationBundle(cwd) {
-    const candidates = [
-        `${cwd}/translations.json`,
-        `${cwd}/model-translations.json`
-    ];
-    const translationPath = candidates.find((candidate) => fs.existsSync(candidate));
-    if (!translationPath) {
+    const bundles = translationBundleCandidates(cwd)
+        .filter((candidate) => fs.existsSync(candidate))
+        .map((candidate) => normalizeTranslationBundle(readJson(candidate)))
+        .filter(Boolean);
+    if (bundles.length === 0) {
         return undefined;
     }
 
-    return normalizeTranslationBundle(readJson(translationPath));
+    return mergeTranslationBundles(bundles);
 }
 
 function normalizeTranslationBundle(bundle) {
@@ -84,10 +83,7 @@ function withTranslationBundle(codegenModel, translationBundle) {
         return codegenModel;
     }
 
-    const translations = {
-        ...(codegenModel.translations ?? {}),
-        ...(translationBundle.translations ?? {})
-    };
+    const translations = mergeTranslationMaps(translationBundle.translations, codegenModel.translations);
     const locales = [
         ...(codegenModel.locales ?? []),
         ...(translationBundle.locales ?? Object.keys(translationBundle.translations ?? {}))
@@ -99,6 +95,47 @@ function withTranslationBundle(codegenModel, translationBundle) {
         ...(locales.length > 0 ? {locales: Array.from(new Set(locales))} : {}),
         defaultLocale: translationBundle.defaultLocale ?? codegenModel.defaultLocale
     };
+}
+
+function translationBundleCandidates(cwd) {
+    const fixed = [
+        `${cwd}/translations.json`,
+        `${cwd}/model-translations.json`
+    ];
+    const localeBundles = fs.existsSync(cwd)
+        ? fs.readdirSync(cwd)
+            .filter((file) => /^model-translations\..+\.json$/.test(file))
+            .map((file) => `${cwd}/${file}`)
+        : [];
+    return Array.from(new Set([...fixed, ...localeBundles]));
+}
+
+function mergeTranslationBundles(bundles) {
+    return bundles.reduce((merged, bundle) => ({
+        translations: mergeTranslationMaps(merged.translations, bundle.translations),
+        locales: Array.from(new Set([
+            ...(merged.locales ?? []),
+            ...(bundle.locales ?? Object.keys(bundle.translations ?? {}))
+        ].filter(Boolean))),
+        defaultLocale: bundle.defaultLocale ?? merged.defaultLocale
+    }), {
+        translations: {},
+        locales: [],
+        defaultLocale: undefined
+    });
+}
+
+function mergeTranslationMaps(...translationMaps) {
+    const merged = {};
+    translationMaps.filter(Boolean).forEach((translationMap) => {
+        Object.entries(translationMap).forEach(([locale, translations]) => {
+            merged[locale] = {
+                ...(merged[locale] ?? {}),
+                ...(translations ?? {})
+            };
+        });
+    });
+    return merged;
 }
 
 module.exports = {

@@ -27,6 +27,8 @@ public final class GrpcUmaDbClient implements UmaDbClient, AutoCloseable {
             Metadata.Key.of("authorization", Metadata.ASCII_STRING_MARSHALLER);
     private static final String AXON_TIMESTAMP = "axon_timestamp";
     private static final String AXON_PAYLOAD_TYPE = "axon_payload_type";
+    private static final int TRANSIENT_READ_ATTEMPTS = 50;
+    private static final long TRANSIENT_READ_BACKOFF_MILLIS = 500L;
 
     private final ManagedChannel channel;
     private final DCBGrpc.DCBFutureStub stub;
@@ -74,7 +76,7 @@ public final class GrpcUmaDbClient implements UmaDbClient, AutoCloseable {
 
     @Override
     public CompletableFuture<UmaDbClient.ReadResult> read(UmaDbClient.ReadRequest request) {
-        return CompletableFuture.supplyAsync(() -> {
+        return CompletableFuture.supplyAsync(() -> retryTransientRead(() -> {
             var responseIterator = deadlineBlockingStub().read(toReadRequest(request));
             var events = new ArrayList<UmaDbClient.SequencedStoredEvent>();
             while (responseIterator.hasNext()) {
@@ -84,18 +86,24 @@ public final class GrpcUmaDbClient implements UmaDbClient, AutoCloseable {
                 }
             }
             return new UmaDbClient.ReadResult(events);
-        });
+        }));
     }
 
     @Override
     public UmaDbClient.Subscription openSubscription(UmaDbClient.SubscribeRequest request) {
-        return new GrpcSubscription(deadlineBlockingStub().subscribe(toSubscribeRequest(request)));
+        return retryTransientRead(() -> new GrpcSubscription(deadlineBlockingStub().subscribe(toSubscribeRequest(request))));
     }
 
     @Override
     public CompletableFuture<UmaDbClient.HeadResult> head() {
-        return toCompletableFuture(deadlineStub().head(Umadb.HeadRequest.newBuilder().build()))
-                .thenApply(response -> new UmaDbClient.HeadResult(response.hasPosition() ? response.getPosition() : -1L));
+        return CompletableFuture.supplyAsync(() -> retryTransientRead(() -> {
+            try {
+                var response = deadlineBlockingStub().head(Umadb.HeadRequest.newBuilder().build());
+                return new UmaDbClient.HeadResult(response.hasPosition() ? response.getPosition() : -1L);
+            } catch (RuntimeException ex) {
+                throw ex;
+            }
+        }));
     }
 
     @Override
@@ -109,6 +117,51 @@ public final class GrpcUmaDbClient implements UmaDbClient, AutoCloseable {
 
     private DCBGrpc.DCBBlockingStub deadlineBlockingStub() {
         return blockingStub.withDeadlineAfter(properties.requestTimeout().toMillis(), TimeUnit.MILLISECONDS);
+    }
+
+    private static <T> T retryTransientRead(TransientOperation<T> operation) {
+        RuntimeException lastFailure = null;
+        for (int attempt = 1; attempt <= TRANSIENT_READ_ATTEMPTS; attempt++) {
+            try {
+                return operation.execute();
+            } catch (RuntimeException ex) {
+                if (!isTransientGrpcFailure(ex)) {
+                    throw ex;
+                }
+                lastFailure = ex;
+                if (attempt == TRANSIENT_READ_ATTEMPTS) {
+                    break;
+                }
+                sleepBeforeRetry();
+            }
+        }
+        throw lastFailure;
+    }
+
+    private static boolean isTransientGrpcFailure(Throwable ex) {
+        var cause = ex;
+        while (cause != null) {
+            if (cause instanceof StatusRuntimeException statusException) {
+                var code = statusException.getStatus().getCode();
+                return code == Status.Code.UNAVAILABLE || code == Status.Code.DEADLINE_EXCEEDED;
+            }
+            cause = cause.getCause();
+        }
+        return false;
+    }
+
+    private static void sleepBeforeRetry() {
+        try {
+            Thread.sleep(TRANSIENT_READ_BACKOFF_MILLIS);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while retrying transient UmaDB read failure", interrupted);
+        }
+    }
+
+    @FunctionalInterface
+    private interface TransientOperation<T> {
+        T execute();
     }
 
     private UmaDbClient.ReadResult toReadResult(Umadb.SubscribeResponse response) {

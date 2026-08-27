@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:16
+    platform: ${DOCKER_PLATFORM:-}
     ports:
       - "${DB_PORT:-<%= dbPort %>}:5432"
     environment:
@@ -40,6 +41,7 @@ services:
 
   umadb:
     image: umadb/umadb:0.7.8
+    platform: ${DOCKER_PLATFORM:-}
     ports:
       - "${UMADB_PORT:-<%= umadbPort %>}:50051"
     volumes:
@@ -47,6 +49,7 @@ services:
 
   <%= appName %>:
     image: ${APP_IMAGE:-medol/<%= appName %>:0.0.1-SNAPSHOT}
+    platform: ${DOCKER_PLATFORM:-}
     profiles:
       - application
     depends_on:
@@ -63,7 +66,7 @@ services:
       DB_USERNAME: medol
       DB_PASSWORD: medol
       MEDOL_AXON_EVENT_STORAGE: ${MEDOL_AXON_EVENT_STORAGE:-umadb}
-      UMADB_TARGET: ${UMADB_TARGET:-umadb:50051}
+      UMADB_TARGET: ${APP_UMADB_TARGET:-umadb:50051}
       UMADB_PLAINTEXT: ${UMADB_PLAINTEXT:-true}
       UMADB_API_KEY: ${UMADB_API_KEY:-}
       UMADB_BATCH_SIZE: ${UMADB_BATCH_SIZE:-256}

@@ -68,7 +68,16 @@ export const SignInForm = () => {
       <div className={cn("flex", "items-center", "justify-center")}>
         {title.icon && (
           <div
-            className={cn("text-foreground", "[&>svg]:w-12", "[&>svg]:h-12")}
+            className={cn(
+              "text-foreground",
+              "h-14",
+              "w-14",
+              "[&>img]:h-full",
+              "[&>img]:w-full",
+              "[&>img]:object-contain",
+              "[&>svg]:h-full",
+              "[&>svg]:w-full"
+            )}
           >
             {title.icon}
           </div>

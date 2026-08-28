@@ -93,6 +93,13 @@ function lowerCamel(value) {
     return safeIdentifier(name.charAt(0).toLowerCase() + name.slice(1));
 }
 
+function permissionCode(name) {
+    return kebab(name)
+        .replace(/-/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .toLowerCase();
+}
+
 function uploadFileFields(command) {
     return (command.fields ?? []).filter((field) => field.uploadFile);
 }
@@ -262,7 +269,9 @@ ${handlers}
         ].join(',\n    ');
         const methods = slice.commands.map((command) => {
             const commandName = _commandTitle(command.title);
-            const jsonEndpoint = hasUploadFile(command) ? '' : `    @PostMapping("/${httpRoute(command.title)}")
+            const preAuthorize = `    @PreAuthorize("hasAuthority('*:*') or hasAuthority('${permissionCode(command.name ?? command.title)}:execute')")`;
+            const jsonEndpoint = hasUploadFile(command) ? '' : `${preAuthorize}
+    @PostMapping("/${httpRoute(command.title)}")
     fun ${safeIdentifier(command.name)}(
         @Valid @RequestBody command: ${commandName},
         request: HttpServletRequest
@@ -284,6 +293,7 @@ ${commandFieldImports ? `${commandFieldImports}\n` : ''}`
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.Valid
 import org.axonframework.messaging.commandhandling.gateway.CommandGateway
+import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.web.bind.annotation.CrossOrigin
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -377,7 +387,8 @@ data class ${storedName}(
             }
             return `            ${field.name} = ${field.name}`;
         }).join(',\n');
-        return `    @PostMapping("/${httpRoute(command.title)}/file", consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
+        return `    @PreAuthorize("hasAuthority('*:*') or hasAuthority('${permissionCode(command.name ?? command.title)}:execute')")
+    @PostMapping("/${httpRoute(command.title)}/file", consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
     fun ${safeIdentifier(command.name)}File(
 ${parameters}
     ): CompletableFuture<${commandName}> {

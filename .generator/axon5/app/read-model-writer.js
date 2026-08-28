@@ -82,6 +82,13 @@ const {
 const {contextPackage} = require('../../common/util/value-types');
 const {_commandTitle, _eventTitle, _readmodelTitle, _sliceTitle} = require('../../common/util/naming');
 
+function permissionCode(name) {
+    return kebab(name)
+        .replace(/-/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .toLowerCase();
+}
+
 function conventionallyCompatibleReadModelField(readModelField, eventField) {
     if (readModelField.type === eventField.type) {
         return true;
@@ -631,6 +638,7 @@ ${entityToProjectionAssignments}
         const idType = idFields.length > 1 ? `${name}Key` : readModelStorageType(id, false);
         const conceptRoute = httpRoute(slice.concepts[0] ?? slice.name);
         const readmodelRoute = httpRoute(readmodel.title);
+        const readModelPermission = permissionCode(readmodel.name ?? readmodel.title);
         const filterFields = readModelFilterFields(readmodel);
         const imports = readModelStorageImports([...idFields, ...filterFields], this.model.rootPackage);
         const findAllParameters = [
@@ -643,6 +651,7 @@ import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import org.springframework.data.web.PageableDefault
 import org.springframework.http.ResponseEntity
+import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.web.bind.annotation.CrossOrigin
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -654,6 +663,7 @@ ${imports}
 @RestController
 @RequestMapping("/${conceptRoute}/${readmodelRoute}")
 class ${resourceName}(private val repository: ${repositoryName}) {
+    @PreAuthorize("hasAuthority('*:*') or hasAuthority('${readModelPermission}:list') or hasAuthority('${readModelPermission}:read')")
     @GetMapping
     fun findAll(
 ${findAllParameters}
@@ -661,6 +671,7 @@ ${findAllParameters}
         repository.findAllByCriteria(criteria, pageable)
 
 ${idFields.length === 1 ? `
+    @PreAuthorize("hasAuthority('*:*') or hasAuthority('${readModelPermission}:read')")
     @GetMapping("/{id}")
     fun findOne(@PathVariable id: ${idType}): ResponseEntity<${name}> =
         repository.findById(id)?.let { ResponseEntity.ok(it) } ?: ResponseEntity.notFound().build()

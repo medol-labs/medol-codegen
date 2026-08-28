@@ -95,6 +95,30 @@ uses them to generate command state guards for transitions with an inferred
 resource action-control metadata and row command buttons are disabled when a
 matching `canXxx` field is false.
 
+MEDOL provides a built-in Identity Access Management (IAM) model. Business
+models normally only define actors; import the built-in IAM model from MEDOL
+when the generated system should include IAM command/read-model slices. The
+Axon 5 generator consumes the resulting `codegen-model.json` and derives actor
+roles plus command/read-model permissions from the combined model.
+
+Import IAM at the top of the MEDOL source and choose the deployment module:
+
+```medol
+import identity-access-management as Iam deploy FederationLearningSupport
+```
+
+Then export the CodegenModel normally:
+
+```bash
+cd ../medol
+npm --silent run medol:to-codegen-model -- examples/fl/federation-learning.medol > examples/fl/codegen-model.json
+```
+
+Embedded IAM writes its login resource and permission seed migration into the
+selected deployment module while shared JWT/current-user runtime code remains in
+`shared-kernel`. If the IAM import is omitted, the generator does not add the
+IAM domain model.
+
 For the frontend target, run `gen`, choose `refine`, then choose:
 
 - `Skeleton` to copy the React refine/shadcn frontend foundation into the current workspace

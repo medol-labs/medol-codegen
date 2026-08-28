@@ -17,6 +17,7 @@ import {
   appendSpringCriteriaFilters,
   canUseSpringCriteriaFilters,
 } from "../lib/query-filters";
+import { authFetch } from "./api-auth";
 import { getAppConfig } from "./app-config";
 import { dataProvider as supabaseDataProvider } from "./data";
 
@@ -345,7 +346,7 @@ export const commandDataProvider = (
   const baseUrl = options.baseUrl ?? getAppConfig("VITE_AXON_API_URL", "http://localhost:8080");
 
   const getJson = async (path: string, allowNotFound = false) => {
-    const res = await fetch(`${baseUrl}${path}`);
+    const res = await authFetch(`${baseUrl}${path}`);
 
     if (allowNotFound && res.status === 404) {
       return undefined;
@@ -521,7 +522,7 @@ export const commandDataProvider = (
       }
 
       const commandPath = routeSegment(String(command));
-      const res = await fetch(
+      const res = await authFetch(
         `${baseUrl}/${aggregatePath(resource, meta)}/${commandPath}`,
         {
           method: "POST",

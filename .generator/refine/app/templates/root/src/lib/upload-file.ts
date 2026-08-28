@@ -1,4 +1,5 @@
 import { backendModules, fileUploadCapability } from "@/providers/resources";
+import { authFetch } from "@/providers/api-auth";
 
 type FileUploadCapability = {
   dataProviderName: string;
@@ -60,7 +61,7 @@ export async function uploadFile(params: {
     }
   }
 
-  const response = await fetch(`${fileUploadApiUrl()}${capability.path}`, {
+  const response = await authFetch(`${fileUploadApiUrl()}${capability.path}`, {
     method: "POST",
     body: formData,
   });

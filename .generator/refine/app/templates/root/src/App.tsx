@@ -13,7 +13,8 @@ import { Toaster } from "./components/refine-ui/notification/toaster";
 import { useNotificationProvider } from "./components/refine-ui/notification/use-notification-provider";
 import { ThemeProvider } from "./components/refine-ui/theme/theme-provider";
 import { AppRouter } from "./providers/app-router";
-import authProvider from "./providers/mock-auth";
+import { accessControlProvider } from "./providers/permify-access-control-provider";
+import authProvider from "./providers/auth";
 import { commandDataProvider, commandProvider } from "./providers/command-provider";
 import { dataProvider } from "./providers/data";
 import {
@@ -71,6 +72,7 @@ function App() {
               notificationProvider={useNotificationProvider()}
               i18nProvider={i18nProvider}
               resources={resources}
+              accessControlProvider={accessControlProvider}
               options={{
                 syncWithLocation: true,
                 warnWhenUnsavedChanges: true,
@@ -86,7 +88,6 @@ function App() {
                 },
                 projectId: "yKo8Ul-25eSBl-weC1qb",
               }}
-            // accessControlProvider={accessControlProvider}
             >
               <AppRouter />
               <Toaster />

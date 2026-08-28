@@ -111,10 +111,12 @@ run_gen() {
   if [[ -n "$host_port" ]]; then
     port_args=(-p "$host_port:3000")
   fi
+  local env_args=()
   prepare_workspace "$workspace"
   docker run \
     --rm \
     "${port_args[@]}" \
+    "${env_args[@]}" \
     -v "$workspace:/workspace" \
     --name "$container_name" \
     "$image" \

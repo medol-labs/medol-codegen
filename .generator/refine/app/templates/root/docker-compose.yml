@@ -7,6 +7,8 @@ services:
     environment:
       VITE_API_URL: ${VITE_API_URL:-https://iwdfzvfqbtokqetmbmbp.supabase.co}
       VITE_SUPABASE_API_KEY: ${VITE_SUPABASE_API_KEY:-}
+      VITE_AUTH_PROVIDER: ${VITE_AUTH_PROVIDER:-local}
+      VITE_AUTH_API_URL: ${VITE_AUTH_API_URL:-http://localhost:8080}
       VITE_AXON_API_URL: ${VITE_AXON_API_URL:-}
 <% backendModules.forEach((module) => { -%>
       <%= module.envName %>: ${<%= module.envName %>:-}

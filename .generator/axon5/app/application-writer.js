@@ -8,9 +8,12 @@ const {configureValueTypes} = require('../../common/util/generator');
 const {pascal, kebab, safeDatabaseName, safeIdentifier, filterModelByDeployment} = require('./model-helpers');
 const {manualInfrastructurePortPathForCommand} = require('./infrastructure-port-writer');
 const {writeMetadataSupport} = require('./metadata-support');
+const {actorSecurityModel} = require('./security-model');
 
 const SHARED_KERNEL_MODULE = 'shared-kernel';
 const UMA_DB_EVENT_STORAGE_MODULE = 'axon-event-storage-umadb';
+const IAM_PACKAGE_SEGMENT = 'iam';
+const IAM_CONTEXT = 'IdentityAccessManagement';
 
 function lowerCamel(value) {
     const name = pascal(value);
@@ -24,7 +27,11 @@ const applicationWriterMethods = {
 
     _writeMonoSkeleton() {
         const deployments = this.model.deployments ?? [];
-        const modules = [UMA_DB_EVENT_STORAGE_MODULE, SHARED_KERNEL_MODULE, ...deployments.map((deployment) => this._deploymentModuleName(deployment))];
+        const modules = [
+            UMA_DB_EVENT_STORAGE_MODULE,
+            SHARED_KERNEL_MODULE,
+            ...deployments.map((deployment) => this._deploymentModuleName(deployment))
+        ];
         const appName = this._rootAggregatorName();
         this.fs.copyTpl(this.templatePath('mono-pom.xml.tpl'), this.destinationPath('pom.xml'), {
             rootPackage: this.model.rootPackage,
@@ -143,6 +150,12 @@ const applicationWriterMethods = {
         });
         this.fs.copyTpl(this.templatePath('docker-compose.yml'), this._destPath('docker-compose.yml'), runtime);
         this.fs.copy(this.templatePath('V1__baseline.sql'), this._destPath('src/main/resources/db/migration/V1__baseline.sql'));
+        if (this._shouldWriteIamIntoCurrentModule()) {
+            this._writeIamArtifacts({
+                modulePath: this._modulePath(''),
+                migrationFileName: 'V2__identity_access_management.sql'
+            });
+        }
         this.fs.copy(this.templatePath('gitignore'), this._destPath('.gitignore'));
         if (!this.modulePrefix) {
             if (hasInfra) {
@@ -207,6 +220,20 @@ const applicationWriterMethods = {
             rootPackage: this.model.rootPackage,
             hasInfra
         });
+        [
+            'CurrentUser.kt',
+            'CurrentUserProvider.kt',
+            'MedolSecurityProperties.kt',
+            'MedolSecurityConfiguration.kt',
+            'SpringSecurityCurrentUserProvider.kt',
+            'InternalTokenAuthenticationFilter.kt',
+            'MedolFeignSecurityConfiguration.kt',
+            'MeResource.kt'
+        ].forEach((fileName) => {
+            this.fs.copyTpl(this.templatePath(`security/${fileName}.tpl`), this._sharedKernelKotlinPath(`shared/security/${fileName}`), {
+                rootPackage: this.model.rootPackage
+            });
+        });
     },
 
     _writeInfraModule() {
@@ -224,6 +251,46 @@ const applicationWriterMethods = {
             {rootPackage: this.model.rootPackage}
         );
         this.fs.copy(this.templatePath('infra/src/main/proto'), this.destinationPath(`${UMA_DB_EVENT_STORAGE_MODULE}/src/main/proto`));
+    },
+
+    _iamDeploymentName() {
+        return this._iamDeploymentNameFromModel();
+    },
+
+    _iamDeploymentNameFromModel() {
+        const hasIamContext = (this.fullModel?.contexts ?? this.model.contexts ?? [])
+            .some((context) => context.name === IAM_CONTEXT);
+        if (!hasIamContext) return '';
+        const deployments = this.fullModel?.deployments ?? this.model.deployments ?? [];
+        const deployment = deployments.find((candidate) =>
+            (candidate.contexts ?? []).some((context) => context.name === IAM_CONTEXT)
+        );
+        return deployment?.name ?? '';
+    },
+
+    _shouldWriteIamIntoCurrentModule() {
+        const target = this._iamDeploymentName();
+        if (!target) return false;
+        if (!this.currentDeployment) return (this.model.deployments ?? []).length === 0;
+        const normalizedTarget = kebab(target);
+        return target === this.currentDeployment.name ||
+            normalizedTarget === this._deploymentModuleName(this.currentDeployment);
+    },
+
+    _writeIamArtifacts({modulePath, migrationFileName}) {
+        const security = actorSecurityModel(this.fullModel ?? this.model);
+        const modulePrefix = modulePath ? `${modulePath.replace(/\/+$/, '')}/` : '';
+        this.fs.copyTpl(this.templatePath('identity-access-management/src/main/resources/db/migration/V1__identity_access.sql.tpl'), this.destinationPath(`${modulePrefix}src/main/resources/db/migration/${migrationFileName}`), {
+            security
+        });
+        [
+            'IamPermissionService.kt',
+            'IamAuthResource.kt'
+        ].forEach((fileName) => {
+            this.fs.copyTpl(this.templatePath(`identity-access-management/src/main/kotlin/infrastructure/security/${fileName}.tpl`), this.destinationPath(`${modulePrefix}src/main/kotlin/${this.model.rootPackage.split('.').join('/')}/${IAM_PACKAGE_SEGMENT}/infrastructure/security/${fileName}`), {
+                rootPackage: this.model.rootPackage
+            });
+        });
     },
 
     _runtimeConfig(appName) {

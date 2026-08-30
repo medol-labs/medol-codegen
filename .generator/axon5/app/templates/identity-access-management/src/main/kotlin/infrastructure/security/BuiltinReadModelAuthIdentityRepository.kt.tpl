@@ -5,6 +5,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Component
 import tech.jhipster.service.filter.StringFilter
+import <%= rootPackage %>.identityaccessmanagement.identityaccesscatalogs.RoleCatalogReadModelCriteria
 import <%= rootPackage %>.identityaccessmanagement.identityaccesscatalogs.RoleCatalogReadModelRepository
 import <%= rootPackage %>.identityaccessmanagement.identityaccesscatalogs.UserAccountCatalogReadModel
 import <%= rootPackage %>.identityaccessmanagement.identityaccesscatalogs.UserAccountCatalogReadModelCriteria
@@ -57,15 +58,22 @@ class BuiltinReadModelAuthIdentityRepository(
             username = loginName,
             providerSubject = providerSubject,
             passwordHash = passwordHash,
-            organizationId = organizationId,
+            organizationId = null,
             active = active ?: false,
             roles = grantedRoles,
             permissions = grantedRoles
-                .flatMap { roleCode -> roles.findById(roleCode)?.permissionCodes ?: emptyList() }
+                .flatMap { roleCode -> permissionsForRoleCode(roleCode) }
                 .filter { it.isNotBlank() }
                 .toSet(),
         )
     }
+
+    private fun permissionsForRoleCode(roleCode: String): List<String> =
+        roles.findAllByCriteria(RoleCatalogReadModelCriteria().apply {
+            this.roleCode = exact(roleCode)
+        }, PageRequest.of(0, 1000))
+            .content
+            .flatMap { it.permissionCodes }
 
     private fun exact(value: String): StringFilter =
         StringFilter().apply {

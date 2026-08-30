@@ -54,7 +54,6 @@ class IamAdminSetupResource(
             username = username,
             providerSubject = userId.toString(),
             passwordHash = passwordEncoder.encode(password),
-            organizationId = request.organizationId,
             servletRequest = servletRequest,
         )
     }
@@ -82,7 +81,6 @@ class IamAdminSetupResource(
             username = username,
             providerSubject = subject,
             passwordHash = null,
-            organizationId = request.organizationId,
             servletRequest = servletRequest,
         )
     }
@@ -92,7 +90,6 @@ class IamAdminSetupResource(
         username: String,
         providerSubject: String,
         passwordHash: String?,
-        organizationId: UUID?,
         servletRequest: HttpServletRequest,
     ): CompletableFuture<AdminSetupResponse> {
         val metadata = MetadataFactory.from(servletRequest)
@@ -102,11 +99,10 @@ class IamAdminSetupResource(
                 username = username,
                 providerSubject = providerSubject,
                 passwordHash = passwordHash,
-                organizationId = organizationId,
             ),
             AssignRoleToUserCommand(
                 userAccountId = userAccountId,
-                roleCode = ADMIN_ROLE,
+                roleCodes = listOf(ADMIN_ROLE),
             ),
         )
 
@@ -173,12 +169,10 @@ data class LocalAdminSetupRequest(
     val setupToken: String = "",
     val username: String = "",
     val password: String = "",
-    val organizationId: UUID? = null,
 )
 
 data class SupabaseAdminSetupRequest(
     val setupToken: String = "",
-    val organizationId: UUID? = null,
 )
 
 data class AdminSetupResponse(

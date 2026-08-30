@@ -78,10 +78,9 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
             const aggregate = aggregateName(readModel, { title: readModel.slice }, aggregates, contexts);
             const deployment = backendModuleForContext(slice.context ?? slice.chapter, backendModules);
             const optionLabel = optionLabelField(readModel);
-            const selectModel = {
+            const baseSelectModel = {
                 resource: snake(cleanTitle(readModel.title)),
                 dataProviderName: deployment.dataProviderName,
-                optionValue: id,
                 optionLabel,
                 meta: {
                     idField: id,
@@ -91,10 +90,25 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
                     queryFields: queryFieldsForReadModel(readModel)
                 }
             };
+            const selectModel = {
+                ...baseSelectModel,
+                optionValue: id
+            };
             selectableReadModels.set(id, selectModel);
             readModelFieldSourceKeys(readModel, id).forEach((key) => {
                 selectableReadModelsByFieldSource.set(key, selectModel);
             });
+            normalizeFields(readModel.fields)
+                .filter((field) => !isJsonField(field))
+                .forEach((field) => {
+                    const fieldSelectModel = {
+                        ...baseSelectModel,
+                        optionValue: field.name
+                    };
+                    readModelFieldSourceKeys(readModel, field.name).forEach((key) => {
+                        selectableReadModelsByFieldSource.set(key, fieldSelectModel);
+                    });
+                });
             const dictionaryProvider = dictionaryProviderFor(readModel);
             if (dictionaryProvider) {
                 dictionaryProviderSelect = {
@@ -219,7 +233,8 @@ function readModelFieldSourceKeys(readModel, idField) {
         cleanTitle(readModel.title)
     ].filter(Boolean)).flatMap((readModelKey) => [
         `${readModelKey}.${idField}`,
-        `${cleanTitle(readModelKey)}.${idField}`
+        `${cleanTitle(readModelKey)}.${idField}`,
+        `${pascal(cleanTitle(readModelKey))}.${idField}`
     ]);
 }
 
@@ -334,7 +349,7 @@ function commandWorkflowFields(command, readModel, allEvents, workflow) {
             }
 
             const select = workflow.selectForField(field) ?? workflow.selectableReadModels.get(field.name);
-            if (select && !field.idAttribute && isReferenceSelectField(field)) {
+            if (select && !field.idAttribute && (hasExplicitReadModelSource(field) || isReferenceSelectField(field))) {
                 selects.set(field.name, select);
             }
 
@@ -345,6 +360,10 @@ function commandWorkflowFields(command, readModel, allEvents, workflow) {
         });
 
     return { prefill, selects };
+}
+
+function hasExplicitReadModelSource(field) {
+    return normalizeArray(field?.source?.from).length > 0;
 }
 
 function stateControlForTransition(transition, readModel) {

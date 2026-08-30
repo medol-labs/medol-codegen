@@ -1,5 +1,7 @@
 package <%= rootPackage %>.iam.infrastructure.security
 
+import java.nio.charset.StandardCharsets
+import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import org.axonframework.messaging.core.Metadata
 import org.axonframework.messaging.commandhandling.gateway.CommandGateway
@@ -17,6 +19,7 @@ class IamAuthorizationBootstrap(
             permissions.forEach { permission ->
                 add(
                     RegisterPermissionCommand(
+                        permissionId = permissionIdFor(permission.code),
                         permissionCode = permission.code,
                         permissionName = permission.name,
                         description = permission.description,
@@ -26,6 +29,7 @@ class IamAuthorizationBootstrap(
             roles.forEach { role ->
                 add(
                     RegisterRoleCommand(
+                        roleId = roleIdFor(role.code),
                         roleCode = role.code,
                         roleName = role.name,
                     ),
@@ -34,8 +38,9 @@ class IamAuthorizationBootstrap(
             grants.forEach { grant ->
                 add(
                     GrantPermissionToRoleCommand(
+                        roleId = roleIdFor(grant.roleCode),
                         roleCode = grant.roleCode,
-                        permissionCode = grant.permissionCode,
+                        permissionCodes = listOf(grant.permissionCode),
                     ),
                 )
             }
@@ -63,6 +68,12 @@ class IamAuthorizationBootstrap(
         val roleCode: String,
         val permissionCode: String,
     )
+
+    private fun roleIdFor(roleCode: String): UUID =
+        UUID.nameUUIDFromBytes("iam-role:${roleCode.lowercase()}".toByteArray(StandardCharsets.UTF_8))
+
+    private fun permissionIdFor(permissionCode: String): UUID =
+        UUID.nameUUIDFromBytes("iam-permission:${permissionCode.lowercase()}".toByteArray(StandardCharsets.UTF_8))
 
     companion object {
         private val permissions = listOf(

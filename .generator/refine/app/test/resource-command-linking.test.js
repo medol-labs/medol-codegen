@@ -6,72 +6,78 @@ const {buildFrontendModel} = require('../model-builder');
 test('links producer create commands to catalog read models across aggregate routes', () => {
     const model = {
         domain: 'Demo',
-        contexts: [{name: 'IdentityAccessManagement', title: 'Identity Access Management'}],
+        contexts: [{name: 'CatalogManagement', title: 'Catalog Management'}],
         aggregates: [],
         transitions: [],
         deployments: [{
-            name: 'Support',
-            title: 'Support',
-            contexts: ['IdentityAccessManagement']
+            name: 'BackOffice',
+            title: 'Back Office',
+            contexts: ['CatalogManagement']
         }],
         slices: [{
-            id: 'slice-register-role',
-            context: 'IdentityAccessManagement',
-            chapter: 'Identity Access Management',
-            title: 'Register Role',
+            id: 'slice-register-product',
+            context: 'CatalogManagement',
+            chapter: 'Catalog Management',
+            title: 'Register Product',
             commands: [{
-                id: 'command-register-role',
-                title: 'Register Role',
+                id: 'command-register-product',
+                title: 'Register Product',
                 startsLifecycle: true,
-                concept: 'Role',
+                concept: 'Product',
                 fields: [
-                    {name: 'roleCode', type: 'String', idAttribute: true},
-                    {name: 'roleName', type: 'String'}
+                    {name: 'productId', type: 'UUID', idAttribute: true, technicalAttribute: true},
+                    {name: 'productCode', type: 'String'},
+                    {name: 'productName', type: 'String'}
                 ],
                 dependencies: [{
-                    id: 'event-role-registered',
+                    id: 'event-product-registered',
                     direction: 'OUTBOUND',
-                    title: 'Role Registered',
+                    title: 'Product Registered',
                     elementType: 'EVENT'
                 }]
             }],
             events: [{
-                id: 'event-role-registered',
-                title: 'Role Registered',
-                fields: [{name: 'roleCode', type: 'String', idAttribute: true}],
+                id: 'event-product-registered',
+                title: 'Product Registered',
+                fields: [
+                    {name: 'productId', type: 'UUID', idAttribute: true, technicalAttribute: true},
+                    {name: 'productCode', type: 'String'},
+                    {name: 'productName', type: 'String'}
+                ],
                 dependencies: [{
-                    id: 'command-register-role',
+                    id: 'command-register-product',
                     direction: 'INBOUND',
-                    title: 'Register Role',
+                    title: 'Register Product',
                     elementType: 'COMMAND'
                 }, {
-                    id: 'readmodel-role-catalog',
+                    id: 'readmodel-product-catalog',
                     direction: 'OUTBOUND',
-                    title: 'Role Catalog',
+                    title: 'Product Catalog',
                     elementType: 'READMODEL'
                 }]
             }],
             readmodels: []
         }, {
             id: 'slice-catalogs',
-            context: 'IdentityAccessManagement',
-            chapter: 'Identity Access Management',
-            title: 'Identity Access Catalogs',
+            context: 'CatalogManagement',
+            chapter: 'Catalog Management',
+            title: 'Catalogs',
             commands: [],
             events: [],
             readmodels: [{
-                id: 'readmodel-role-catalog',
-                title: 'Role Catalog',
-                slice: 'Identity Access Catalogs',
+                id: 'readmodel-product-catalog',
+                title: 'Product Catalog',
+                slice: 'Catalogs',
                 listElement: true,
                 fields: [
-                    {name: 'roleCode', type: 'String', idAttribute: true},
-                    {name: 'roleName', type: 'String'}
+                    {name: 'productId', type: 'UUID', idAttribute: true},
+                    {name: 'productCode', type: 'String'},
+                    {name: 'productName', type: 'String', display: true}
                 ],
                 dependencies: [{
-                    id: 'event-role-registered',
+                    id: 'event-product-registered',
                     direction: 'INBOUND',
-                    title: 'Role Registered',
+                    title: 'Product Registered',
                     elementType: 'EVENT'
                 }]
             }]
@@ -79,79 +85,79 @@ test('links producer create commands to catalog read models across aggregate rou
     };
 
     const frontend = buildFrontendModel(model);
-    const roleCatalog = frontend.resources.find((resource) => resource.name === 'role_catalog');
+    const productCatalog = frontend.resources.find((resource) => resource.name === 'product_catalog');
 
-    assert.equal(roleCatalog?.createCommand?.title, 'Register Role');
-    assert.deepEqual(roleCatalog?.commands.map((command) => command.title), ['Register Role']);
+    assert.equal(productCatalog?.createCommand?.title, 'Register Product');
+    assert.deepEqual(productCatalog?.commands.map((command) => command.title), ['Register Product']);
 });
 
 test('keeps command result fields out of form fields', () => {
     const model = {
         domain: 'Demo',
-        contexts: [{name: 'IdentityAccessManagement', title: 'Identity Access Management'}],
+        contexts: [{name: 'InventoryManagement', title: 'Inventory Management'}],
         aggregates: [],
         transitions: [],
         deployments: [{
-            name: 'Support',
-            title: 'Support',
-            contexts: ['IdentityAccessManagement']
+            name: 'BackOffice',
+            title: 'Back Office',
+            contexts: ['InventoryManagement']
         }],
         slices: [{
-            id: 'slice-generate-password',
-            context: 'IdentityAccessManagement',
-            chapter: 'Identity Access Management',
-            title: 'Generate User Account Login Password',
+            id: 'slice-issue-access-code',
+            context: 'InventoryManagement',
+            chapter: 'Inventory Management',
+            title: 'Issue Access Code',
             commands: [{
-                id: 'command-generate-password',
-                title: 'Generate User Account Login Password',
-                concept: 'UserAccount',
+                id: 'command-issue-access-code',
+                title: 'Issue Access Code',
+                concept: 'InventoryItem',
                 startsLifecycle: true,
                 fields: [
-                    {name: 'userAccountId', type: 'UUID', idAttribute: true, technicalAttribute: true},
-                    {name: 'passwordResetRequired', type: 'Boolean'}
+                    {name: 'inventoryItemId', type: 'UUID', idAttribute: true, technicalAttribute: true},
+                    {name: 'expiresAfterDays', type: 'Int'}
                 ],
                 resultFields: [
-                    {name: 'temporaryPassword', type: 'String', technicalAttribute: true}
+                    {name: 'accessCode', type: 'String', technicalAttribute: true}
                 ],
                 dependencies: [{
-                    id: 'event-password-generated',
+                    id: 'event-access-code-issued',
                     direction: 'OUTBOUND',
-                    title: 'User Account Login Password Generated',
+                    title: 'Access Code Issued',
                     elementType: 'EVENT'
                 }]
             }],
             events: [{
-                id: 'event-password-generated',
-                title: 'User Account Login Password Generated',
+                id: 'event-access-code-issued',
+                title: 'Access Code Issued',
                 fields: [
-                    {name: 'userAccountId', type: 'UUID', idAttribute: true, technicalAttribute: true},
-                    {name: 'passwordHash', type: 'String', technicalAttribute: true, portOutput: true}
+                    {name: 'inventoryItemId', type: 'UUID', idAttribute: true, technicalAttribute: true},
+                    {name: 'accessCodeHash', type: 'String', technicalAttribute: true, portOutput: true}
                 ],
                 dependencies: [{
-                    id: 'command-generate-password',
+                    id: 'command-issue-access-code',
                     direction: 'INBOUND',
-                    title: 'Generate User Account Login Password',
+                    title: 'Issue Access Code',
                     elementType: 'COMMAND'
                 }, {
-                    id: 'readmodel-user-account-catalog',
+                    id: 'readmodel-inventory-item-catalog',
                     direction: 'OUTBOUND',
-                    title: 'User Account Catalog',
+                    title: 'Inventory Item Catalog',
                     elementType: 'READMODEL'
                 }]
             }],
             readmodels: [{
-                id: 'readmodel-user-account-catalog',
-                title: 'User Account Catalog',
-                slice: 'Generate User Account Login Password',
+                id: 'readmodel-inventory-item-catalog',
+                title: 'Inventory Item Catalog',
+                slice: 'Issue Access Code',
                 listElement: true,
                 fields: [
-                    {name: 'userAccountId', type: 'UUID', idAttribute: true},
-                    {name: 'username', type: 'String', display: true}
+                    {name: 'inventoryItemId', type: 'UUID', idAttribute: true},
+                    {name: 'itemName', type: 'String', display: true}
                 ],
                 dependencies: [{
-                    id: 'event-password-generated',
+                    id: 'event-access-code-issued',
                     direction: 'INBOUND',
-                    title: 'User Account Login Password Generated',
+                    title: 'Access Code Issued',
                     elementType: 'EVENT'
                 }]
             }]
@@ -164,14 +170,159 @@ test('keeps command result fields out of form fields', () => {
         item.editCommand,
         item.deleteCommand,
         ...(item.commands ?? [])
-    ].some((command) => command?.title === 'Generate User Account Login Password'));
+    ].some((command) => command?.title === 'Issue Access Code'));
     const command = [
         resource?.createCommand,
         resource?.editCommand,
         resource?.deleteCommand,
         ...(resource?.commands ?? [])
-    ].find((item) => item?.title === 'Generate User Account Login Password');
+    ].find((item) => item?.title === 'Issue Access Code');
 
-    assert.deepEqual(command?.fields.map((field) => field.name), ['passwordResetRequired']);
-    assert.deepEqual(command?.resultFields.map((field) => field.name), ['temporaryPassword']);
+    assert.deepEqual(command?.fields.map((field) => field.name), ['expiresAfterDays']);
+    assert.deepEqual(command?.resultFields.map((field) => field.name), ['accessCode']);
+});
+
+test('links non-lifecycle producer commands as row actions and supports explicit catalog field selects', () => {
+    const model = {
+        domain: 'Demo',
+        contexts: [{name: 'OrderManagement', title: 'Order Management'}],
+        aggregates: [],
+        transitions: [],
+        deployments: [{
+            name: 'BackOffice',
+            title: 'Back Office',
+            contexts: ['OrderManagement']
+        }],
+        slices: [{
+            id: 'slice-open-order',
+            context: 'OrderManagement',
+            chapter: 'Order Management',
+            title: 'Open Order',
+            commands: [{
+                id: 'command-open-order',
+                title: 'Open Order',
+                startsLifecycle: true,
+                concept: 'Order',
+                fields: [
+                    {name: 'orderId', type: 'UUID', idAttribute: true, technicalAttribute: true},
+                    {name: 'customerName', type: 'String'}
+                ],
+                dependencies: [{
+                    id: 'event-order-opened',
+                    direction: 'OUTBOUND',
+                    title: 'Order Opened',
+                    elementType: 'EVENT'
+                }]
+            }],
+            events: [{
+                id: 'event-order-opened',
+                title: 'Order Opened',
+                fields: [
+                    {name: 'orderId', type: 'UUID', idAttribute: true, technicalAttribute: true},
+                    {name: 'customerName', type: 'String'}
+                ],
+                dependencies: [{
+                    id: 'command-open-order',
+                    direction: 'INBOUND',
+                    title: 'Open Order',
+                    elementType: 'COMMAND'
+                }, {
+                    id: 'readmodel-order-catalog',
+                    direction: 'OUTBOUND',
+                    title: 'Order Catalog',
+                    elementType: 'READMODEL'
+                }]
+            }],
+            readmodels: []
+        }, {
+            id: 'slice-add-product-to-order',
+            context: 'OrderManagement',
+            chapter: 'Order Management',
+            title: 'Add Product To Order',
+            commands: [{
+                id: 'command-add-product-to-order',
+                title: 'Add Product To Order',
+                concept: 'Order',
+                fields: [
+                    {name: 'orderId', type: 'UUID', idAttribute: true, technicalAttribute: true},
+                    {name: 'productCode', type: 'String', source: {kind: 'direct', from: ['ProductCatalog.productCode']}}
+                ],
+                dependencies: [{
+                    id: 'event-product-added-to-order',
+                    direction: 'OUTBOUND',
+                    title: 'Product Added To Order',
+                    elementType: 'EVENT'
+                }]
+            }],
+            events: [{
+                id: 'event-product-added-to-order',
+                title: 'Product Added To Order',
+                fields: [
+                    {name: 'orderId', type: 'UUID', idAttribute: true, technicalAttribute: true},
+                    {name: 'productCode', type: 'String'}
+                ],
+                dependencies: [{
+                    id: 'command-add-product-to-order',
+                    direction: 'INBOUND',
+                    title: 'Add Product To Order',
+                    elementType: 'COMMAND'
+                }, {
+                    id: 'readmodel-order-catalog',
+                    direction: 'OUTBOUND',
+                    title: 'Order Catalog',
+                    elementType: 'READMODEL'
+                }]
+            }],
+            readmodels: []
+        }, {
+            id: 'slice-order-catalogs',
+            context: 'OrderManagement',
+            chapter: 'Order Management',
+            title: 'Order Catalogs',
+            commands: [],
+            events: [],
+            readmodels: [{
+                id: 'readmodel-order-catalog',
+                title: 'Order Catalog',
+                slice: 'Order Catalogs',
+                listElement: true,
+                fields: [
+                    {name: 'orderId', type: 'UUID', idAttribute: true},
+                    {name: 'customerName', type: 'String', display: true}
+                ],
+                dependencies: [{
+                    id: 'event-order-opened',
+                    direction: 'INBOUND',
+                    title: 'Order Opened',
+                    elementType: 'EVENT'
+                }, {
+                    id: 'event-product-added-to-order',
+                    direction: 'INBOUND',
+                    title: 'Product Added To Order',
+                    elementType: 'EVENT'
+                }]
+            }, {
+                id: 'readmodel-product-catalog',
+                title: 'Product Catalog',
+                slice: 'Order Catalogs',
+                listElement: true,
+                fields: [
+                    {name: 'productId', type: 'UUID', idAttribute: true},
+                    {name: 'productCode', type: 'String'},
+                    {name: 'productName', type: 'String', display: true}
+                ],
+                dependencies: []
+            }]
+        }]
+    };
+
+    const frontend = buildFrontendModel(model);
+    const orderCatalog = frontend.resources.find((resource) => resource.name === 'order_catalog');
+    const command = orderCatalog?.commands.find((item) => item.name === 'addProductToOrder');
+
+    assert.equal(command?.title, 'Add Product To Order');
+    assert.deepEqual(command?.fields.map((field) => field.name), ['productCode']);
+    assert.equal(command?.fields[0]?.select?.resource, 'product_catalog');
+    assert.equal(command?.fields[0]?.select?.optionValue, 'productCode');
+    assert.equal(command?.fields[0]?.select?.optionLabel, 'productName');
 });

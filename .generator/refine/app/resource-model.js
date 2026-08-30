@@ -62,8 +62,14 @@ function toReadModelResource(group, readModel, allEvents, workflow) {
         ?? producerCommands.find((command) => command.startsLifecycle);
     const resourceAggregateRoute = axonRoute(aggregateTitle);
     const primaryIdField = idField?.name ?? 'id';
+    const rowCommandKeys = new Set([
+        ...itemCommandKeys,
+        ...producerCommands
+            .filter((command) => command !== createCommand)
+            .map((command) => command.id)
+    ]);
     const rowCommands = normalizedCommands
-        .filter((command) => itemCommandKeys.has(command.id))
+        .filter((command) => rowCommandKeys.has(command.id))
         .filter((command) => canAddressCommandFromReadModel(command, queryFields, primaryIdField));
     const primaryRowCommands = rowCommands.filter((command) =>
         command.matchingFields.some((field) => field.name === primaryIdField)

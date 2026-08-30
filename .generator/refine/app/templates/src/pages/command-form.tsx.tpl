@@ -52,7 +52,7 @@ import { useCommandForm } from "@/hooks/command/useCommandForm";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { <%= command.schemaName %>, type <%= command.inputTypeName %> } from "@/domain/schemas";
 <% if (command.hasSelectFields) { -%>
-import { ResourceSelect } from "@/components/refine-ui/form/resource-select";
+import { ResourceMultiSelect, ResourceSelect } from "@/components/refine-ui/form/resource-select";
 <% } -%>
 <% if (command.hasFileFields) { -%>
 import { uploadFile, type PendingFileUpload } from "@/lib/upload-file";
@@ -498,6 +498,47 @@ export const <%= command.pageComponent %> = () => {
 <% }) -%>
             </div>
           </div>
+<% } else if (field.select && field.scalarList) { -%>
+          <FormField
+            control={form.control}
+            name="<%= field.name %>"
+            rules={<%- field.rules %>}
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t("<%= field.i18nKey %>", "<%= field.label %>")}</FormLabel>
+                <ResourceMultiSelect
+                  withFormControl
+                  resource="<%= field.select.resource %>"
+                  dataProviderName="<%= field.select.dataProviderName %>"
+                  optionLabel="<%= field.select.optionLabel %>"
+                  optionValue="<%= field.select.optionValue %>"
+                  value={Array.isArray(field.value) ? field.value : []}
+                  onValueChange={field.onChange}
+                  placeholder={t("<%= field.placeholderKey %>", "Select <%= field.label %>")}
+                  searchPlaceholder={t("<%= field.placeholderKey %>.search", "Search <%= field.label %>")}
+<% if (field.select.filters?.length) { -%>
+                  filters={<%- JSON.stringify(field.select.filters) %>}
+<% } -%>
+<% if (field.select.sorters?.length) { -%>
+                  sorters={<%- JSON.stringify(field.select.sorters) %>}
+<% } -%>
+<% if (field.select.pagination) { -%>
+                  pagination={<%- JSON.stringify(field.select.pagination) %>}
+<% } -%>
+                  meta={{
+                    idField: "<%= field.select.meta.idField %>",
+                    label: t("<%= field.i18nKey %>", "<%= field.select.meta.label %>"),
+                    aggregateRoute: "<%= field.select.meta.aggregateRoute %>",
+                    queryRoute: "<%= field.select.meta.queryRoute %>",
+<% if (field.select.meta.queryFields?.length) { -%>
+                    queryFields: <%- JSON.stringify(field.select.meta.queryFields) %>,
+<% } -%>
+                  }}
+                />
+                <FormMessage />
+              </FormItem>
+            )}
+          />
 <% } else if (field.scalarList) { -%>
           <ScalarArrayField
             control={form.control}

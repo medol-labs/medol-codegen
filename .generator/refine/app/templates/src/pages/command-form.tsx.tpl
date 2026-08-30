@@ -1,11 +1,12 @@
 // Generated from config.json by the refine generator.
-import { useParsed } from "@refinedev/core";
+import { useParsed<% if (command.hasHistoryPrefillFields) { -%>, useList<% } -%> } from "@refinedev/core";
 import { useTranslate } from "@refinedev/core";
 <% if (command.hasFileFields) { -%>
 import { useNotification } from "@refinedev/core";
 <% } -%>
-<% if (command.hasFileFields || command.hasResultFields) { -%>
-import { useState } from "react";
+<% const reactImports = []; if (command.hasFileFields || command.hasResultFields) reactImports.push('useState'); if (command.hasHistoryPrefillFields) reactImports.push('useEffect'); -%>
+<% if (reactImports.length) { -%>
+import { <%= reactImports.join(', ') %> } from "react";
 <% } -%>
 import { useNavigate, useSearchParams } from "react-router";
 <% if (command.hasArrayFields) { -%>
@@ -175,7 +176,7 @@ export const <%= command.pageComponent %> = () => {
 <% command.defaultValueFields.forEach((field) => { -%>
     <%= field.name %>: <%- field.defaultValue %>,
 <% }) -%>
-  } as Partial<<%= command.inputTypeName %>>;
+  } as unknown as Partial<<%= command.inputTypeName %>>;
 
   const { refineCore: { onFinish }, ...form } = useCommandForm<<%= command.inputTypeName %>, <%= command.inputTypeName %>>({
     resource: "<%= resource.name %>",
@@ -213,6 +214,37 @@ export const <%= command.pageComponent %> = () => {
 <% } -%>
     },
   });
+<% command.historyPrefillFields.forEach((field) => { -%>
+  const <%= field.fieldName %>History = useList<Record<string, unknown>>({
+    resource: "<%= field.resource %>",
+    dataProviderName: "<%= field.dataProviderName %>",
+    pagination: { currentPage: 1, pageSize: 1000, mode: "server" },
+    filters: defaultValues.<%= field.contextField %>
+      ? [{ field: "<%= field.contextField %>", operator: "eq", value: defaultValues.<%= field.contextField %> }]
+      : [],
+    meta: {
+      tableName: "<%= field.meta.tableName %>",
+      idField: "<%= field.meta.idField %>",
+      label: "<%= field.meta.label %>",
+      aggregateRoute: "<%= field.meta.aggregateRoute %>",
+      queryRoute: "<%= field.meta.queryRoute %>",
+      queryFields: <%- JSON.stringify(field.meta.queryFields ?? []) %>,
+    },
+    queryOptions: {
+      enabled: Boolean(defaultValues.<%= field.contextField %>),
+    },
+  });
+
+  useEffect(() => {
+    const values = (<%= field.fieldName %>History.result.data ?? [])
+      .map((item: Record<string, unknown>) => item.<%= field.valueField %>)
+      .filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0);
+    const current = form.getValues("<%= field.fieldName %>" as never) as unknown;
+    if (values.length > 0 && (!Array.isArray(current) || current.length === 0)) {
+      form.setValue("<%= field.fieldName %>" as never, Array.from(new Set(values)) as never, { shouldDirty: false });
+    }
+  }, [<%= field.fieldName %>History.result.data, form]);
+<% }) -%>
 <% command.fields.filter((field) => field.object && field.list).forEach((field) => { -%>
   const <%= field.fieldArrayName %> = useFieldArray({
     control: form.control,

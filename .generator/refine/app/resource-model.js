@@ -177,6 +177,22 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
         ?? command.aggregate
         ?? title
     );
+    const commandFields = formFields.map((field) => ({
+        ...field,
+        select: field.fileInput ? null : workflowFields.selects.get(field.name) ?? null
+    }));
+    const historyPrefillFields = commandFields
+        .filter((field) => field.select && field.scalarList)
+        .map((field) => ({
+            fieldName: field.name,
+            prefill: workflow.historyPrefillForField(command, readModel, field, formFields)
+        }))
+        .filter((item) => item.prefill)
+        .map((item) => ({
+            fieldName: item.fieldName,
+            ...item.prefill
+        }));
+
     return {
         id: commandKey(command),
         title,
@@ -194,10 +210,9 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
         allowedStates: stateControl.allowedStates,
         targetState: stateControl.targetState,
         stateField: stateControl.stateField,
-        fields: formFields.map((field) => ({
-            ...field,
-            select: field.fileInput ? null : workflowFields.selects.get(field.name) ?? null
-        })),
+        fields: commandFields,
+        historyPrefillFields,
+        hasHistoryPrefillFields: historyPrefillFields.length > 0,
         resultFields,
         hasResultFields: resultFields.length > 0,
         matchingFields: normalizedFields,
@@ -211,7 +226,7 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
             .filter((field) => field.object || field.list)
             .map((field) => ({
                 name: field.name,
-                defaultValue: defaultValueExpression(field)
+                defaultValue: field.list && workflowFields.selects.has(field.name) ? '[]' : defaultValueExpression(field)
             })),
         hasSelectFields: formFields.some((field) => workflowFields.selects.has(field.name)),
         hasObjectFields: formFields.some((field) => field.object),

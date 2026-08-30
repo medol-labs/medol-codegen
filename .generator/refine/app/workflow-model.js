@@ -8,6 +8,7 @@ const {
     uniqueElements,
     unique,
     idFieldName,
+    tableName,
     optionLabelField,
     dictionaryProviderFor,
     dictionaryProviderField,
@@ -31,6 +32,7 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
     let dictionaryProviderSelect = null;
     const commandsById = new Map();
     const eventsById = new Map();
+    const commandContextsById = new Map();
     const producerCommandsByReadModelId = new Map();
     const nextCommandsByReadModelId = new Map();
     const transitionsByCommandId = new Map();
@@ -47,14 +49,16 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
             keys.forEach((key) => transitionsByCommandId.set(String(key), transition));
         });
 
-    slices.flatMap((slice) => slice.commands ?? [])
-        .filter((command) => command?.title)
-        .filter((command) => !isAutomationCommand(command, automationCommandKeys))
-        .filter((command) => !selectedCommands || selectedCommands.has(commandKey(command)))
-        .forEach((command) => {
+    slices.flatMap((slice) => (slice.commands ?? []).map((command) => ({command, slice})))
+        .filter(({command}) => command?.title)
+        .filter(({command}) => !isAutomationCommand(command, automationCommandKeys))
+        .filter(({command}) => !selectedCommands || selectedCommands.has(commandKey(command)))
+        .forEach(({command, slice}) => {
             commandsById.set(commandKey(command), command);
+            commandContextsById.set(commandKey(command), slice.context ?? slice.chapter);
             if (command.id) {
                 commandsById.set(command.id, command);
+                commandContextsById.set(command.id, slice.context ?? slice.chapter);
             }
         });
 
@@ -67,15 +71,24 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
             }
         });
 
-    slices.flatMap((slice) => (slice.readmodels ?? []).map((readModel) => ({readModel, slice})))
+    const readModelInfos = slices
+        .flatMap((slice) => (slice.readmodels ?? []).map((readModel) => ({readModel, slice})))
         .filter(({readModel}) => readModel?.title && readModel.listElement)
-        .forEach(({readModel, slice}) => {
+        .map(({readModel, slice}) => ({
+            readModel,
+            slice,
+            context: slice.context ?? slice.chapter,
+            aggregate: aggregateName(readModel, { ...slice, title: readModel.slice ?? slice.title }, aggregates, contexts),
+            deployment: backendModuleForContext(slice.context ?? slice.chapter, backendModules)
+        }));
+
+    readModelInfos
+        .forEach(({readModel, slice, aggregate}) => {
             const id = idFieldName(readModel);
             if (!id || selectableReadModels.has(id)) {
                 return;
             }
 
-            const aggregate = aggregateName(readModel, { title: readModel.slice }, aggregates, contexts);
             const deployment = backendModuleForContext(slice.context ?? slice.chapter, backendModules);
             const optionLabel = optionLabelField(readModel);
             const baseSelectModel = {
@@ -123,9 +136,11 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
             }
         });
 
-    slices.flatMap((slice) => slice.readmodels ?? [])
-        .filter((readModel) => readModel?.title)
-        .forEach((readModel) => {
+    const preferredReadModelIdForCommand = (command) =>
+        preferredReadModelForCommand(command, transitionsByCommandId, commandContextsById, readModelInfos)?.readModel?.id;
+
+    readModelInfos
+        .forEach(({readModel}) => {
             const inboundEventIds = (readModel.dependencies ?? [])
                 .filter((dependency) => dependencyDirection(dependency) === 'INBOUND' && dependency.elementType === 'EVENT')
                 .map((dependency) => dependency.id ?? String(dependency.title ?? ''));
@@ -137,7 +152,11 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
                 .flatMap((event) => (event.dependencies ?? [])
                     .filter((dependency) => dependencyDirection(dependency) === 'INBOUND' && dependency.elementType === 'COMMAND')
                     .map((dependency) => commandsById.get(dependency.id) ?? commandsById.get(String(dependency.title ?? '')))
-                    .filter(Boolean)));
+                    .filter(Boolean)))
+                .filter((command) => {
+                    const preferredReadModelId = preferredReadModelIdForCommand(command);
+                    return !preferredReadModelId || preferredReadModelId === readModel.id;
+                });
             const nextCommands = uniqueElements(inboundEvents
                 .flatMap((event) => (event.dependencies ?? [])
                     .filter((dependency) => dependencyDirection(dependency) === 'OUTBOUND' && dependency.elementType === 'COMMAND')
@@ -154,6 +173,17 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
                 nextCommandsByReadModelId.set(readModel.id, itemCommands);
             }
         });
+
+    uniqueElements(Array.from(commandsById.values())).forEach((command) => {
+        const preferredReadModelId = preferredReadModelIdForCommand(command);
+        if (!preferredReadModelId) {
+            return;
+        }
+        producerCommandsByReadModelId.set(preferredReadModelId, uniqueElements([
+            ...(producerCommandsByReadModelId.get(preferredReadModelId) ?? []),
+            command
+        ]));
+    });
 
     return {
         selectableReadModels,
@@ -177,6 +207,9 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
         },
         selectForField(field) {
             return readModelSelectForFieldSource(field, selectableReadModelsByFieldSource);
+        },
+        historyPrefillForField(command, ownerReadModel, field, ownerFields) {
+            return historyPrefillForField(readModelInfos, command, ownerReadModel, field, ownerFields);
         },
         dictionaryValueSelect(dictionaryCode) {
             if (!dictionaryProviderSelect || !dictionaryProviderSelect.dictionaryCodeField || !dictionaryCode) {
@@ -225,6 +258,39 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
     };
 }
 
+function preferredReadModelForCommand(command, transitionsByCommandId, commandContextsById, readModelInfos) {
+    const transition = transitionForCommand(command, transitionsByCommandId);
+    const ownerTitle = cleanTitle(
+        transition?.owner?.title
+        ?? transition?.owner?.name
+        ?? command.concept
+        ?? command.concepts?.[0]
+        ?? command.aggregateName
+        ?? command.aggregate
+    );
+    if (!ownerTitle) {
+        return null;
+    }
+
+    const commandContext = transition?.context ?? commandContextsById.get(commandKey(command)) ?? (command.id ? commandContextsById.get(command.id) : undefined);
+    const ownerKey = normalizeOwnerKey(ownerTitle);
+    return readModelInfos.find((info) => {
+        const sameContext = !commandContext || !info.context || info.context === commandContext;
+        return sameContext && normalizeOwnerKey(info.aggregate.title) === ownerKey;
+    }) ?? null;
+}
+
+function transitionForCommand(command, transitionsByCommandId) {
+    return transitionsByCommandId.get(commandKey(command))
+        ?? (command.id ? transitionsByCommandId.get(command.id) : undefined)
+        ?? transitionsByCommandId.get(String(command.name ?? ''))
+        ?? transitionsByCommandId.get(String(command.title ?? ''));
+}
+
+function normalizeOwnerKey(value) {
+    return cleanTitle(value).replace(/\s+/g, '').toLowerCase();
+}
+
 function readModelFieldSourceKeys(readModel, idField) {
     return unique([
         readModel.id,
@@ -247,6 +313,97 @@ function readModelSelectForFieldSource(field, selectableReadModelsByFieldSource)
         }
     }
     return null;
+}
+
+function historyPrefillForField(readModelInfos, command, ownerReadModel, field, ownerFields) {
+    if (!field?.list) {
+        return null;
+    }
+
+    const selectSource = normalizeArray(field?.source?.from)[0];
+    const valueField = singularFieldName(field.name);
+    if (!selectSource || !valueField || valueField === field.name) {
+        return null;
+    }
+
+    const ownerFieldNames = new Set((ownerReadModel?.fields ?? []).map((ownerField) => ownerField.name));
+    const contextFields = ownerFields
+        .filter((ownerField) => !ownerField.list)
+        .filter((ownerField) => ownerFieldNames.has(ownerField.name))
+        .filter((ownerField) => ownerField.name !== valueField)
+        .filter((ownerField) => isLikelyContextField(ownerField));
+    if (contextFields.length === 0) {
+        return null;
+    }
+
+    const candidates = readModelInfos
+        .filter(({readModel}) => readModel?.id !== ownerReadModel?.id)
+        .map(({readModel, aggregate, deployment}) => {
+            const fields = normalizeFields(readModel.fields);
+            const fieldNames = new Set(fields.map((candidateField) => candidateField.name));
+            const contextField = contextFields.find((candidateField) => fieldNames.has(candidateField.name));
+            if (!contextField || !fieldNames.has(valueField)) {
+                return null;
+            }
+
+            return {
+                resource: snake(cleanTitle(readModel.title)),
+                dataProviderName: deployment.dataProviderName,
+                contextField: contextField.name,
+                valueField,
+                meta: {
+                    tableName: tableName(readModel, cleanTitle(readModel.title)),
+                    idField: idFieldName(readModel),
+                    label: cleanTitle(readModel.title),
+                    aggregateRoute: axonRoute(aggregate.title),
+                    queryRoute: axonRoute(readModel.title),
+                    queryFields: unique([
+                        ...queryFieldsForReadModel(readModel),
+                        contextField.name,
+                        valueField
+                    ])
+                },
+                score: historyPrefillScore(command, readModel, valueField, contextField.name, selectSource)
+            };
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.score - a.score);
+
+    const best = candidates[0];
+    if (!best || best.score <= 0) {
+        return null;
+    }
+
+    return best;
+}
+
+function singularFieldName(name) {
+    const value = String(name ?? '');
+    if (value.endsWith('ies')) return `${value.slice(0, -3)}y`;
+    if (value.endsWith('ses')) return value.slice(0, -2);
+    if (value.endsWith('s')) return value.slice(0, -1);
+    return value;
+}
+
+function isLikelyContextField(field) {
+    return field.idAttribute || /id$/i.test(field.name) || /code$/i.test(field.name);
+}
+
+function historyPrefillScore(command, readModel, valueField, contextField, selectSource) {
+    const haystack = [
+        command?.title,
+        command?.name,
+        readModel?.title,
+        readModel?.name,
+        valueField,
+        contextField,
+        selectSource
+    ].filter(Boolean).join(' ').toLowerCase();
+    let score = 1;
+    if (haystack.includes(valueField.toLowerCase())) score += 2;
+    if (haystack.includes(contextField.toLowerCase())) score += 2;
+    if ((readModel?.dependencies ?? []).some((dependency) => dependencyDirection(dependency) === 'INBOUND' && dependency.elementType === 'EVENT')) score += 1;
+    return score;
 }
 
 function queryFieldsForReadModel(readModel) {

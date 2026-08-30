@@ -1,5 +1,5 @@
 import type { RedirectAction, BaseRecord } from "@refinedev/core";
-import { useOne } from "@refinedev/core";
+import { useInvalidate, useOne } from "@refinedev/core";
 import { useForm, type UseFormProps } from "@refinedev/react-hook-form";
 import React from "react";
 import { FieldValues } from "react-hook-form";
@@ -43,6 +43,7 @@ export const useCommandForm = <
     queryMeta,
     formProps,
   } = props;
+  const invalidate = useInvalidate();
 
   const form = useForm<TData, any, TVariables>({
     ...formProps,
@@ -72,6 +73,27 @@ export const useCommandForm = <
     },
   });
   const { getValues, setValue } = form;
+  const onFinish = React.useCallback(
+    async (values: TVariables) => {
+      const result = await form.refineCore.onFinish(values);
+      await invalidate({
+        resource,
+        id: aggregateId,
+        dataProviderName: queryDataProviderName ?? dataProviderName,
+        invalidates: ["list", "many", "detail"],
+      });
+      window.setTimeout(() => {
+        void invalidate({
+          resource,
+          id: aggregateId,
+          dataProviderName: queryDataProviderName ?? dataProviderName,
+          invalidates: ["list", "many", "detail"],
+        });
+      }, 500);
+      return result;
+    },
+    [aggregateId, dataProviderName, form.refineCore, invalidate, queryDataProviderName, resource],
+  );
 
   React.useEffect(() => {
     const data = query.result;
@@ -88,6 +110,10 @@ export const useCommandForm = <
 
   return {
     ...form,
+    refineCore: {
+      ...form.refineCore,
+      onFinish,
+    },
     query,
   };
 };

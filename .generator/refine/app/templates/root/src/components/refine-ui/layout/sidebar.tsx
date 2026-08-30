@@ -23,6 +23,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   useLink,
+  useCanWithoutCache,
   useMenu,
   useRefineOptions,
   useTranslate,
@@ -36,10 +37,42 @@ import { backendModules } from "@/providers/resources";
 
 export function Sidebar() {
   const { open } = useShadcnSidebar();
+  const { can } = useCanWithoutCache();
   const { menuItems, selectedKey } = useMenu();
   const location = useLocation();
   const activeModule = getActiveBackendModule(location.pathname);
-  const visibleMenuItems = filterMenuItemsForModule(menuItems, activeModule);
+  const moduleMenuItems = React.useMemo(
+    () => filterMenuItemsForModule(menuItems, activeModule),
+    [menuItems, activeModule],
+  );
+  const moduleMenuItemsKey = menuItemsSignature(moduleMenuItems);
+  const [visibleMenuItems, setVisibleMenuItems] =
+    React.useState<TreeMenuItem[]>([]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    if (!can) {
+      setVisibleMenuItems(moduleMenuItems);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    filterMenuItemsForAccess(moduleMenuItems, can).then((items) => {
+      if (!cancelled) {
+        setVisibleMenuItems(items);
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        setVisibleMenuItems([]);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [moduleMenuItemsKey, can]);
 
   return (
     <ShadcnSidebar collapsible="icon" className={cn("border-none")}>
@@ -115,6 +148,62 @@ function filterMenuItemForModule(item: TreeMenuItem, activeRoutes: Set<string>):
   }
 
   return null;
+}
+
+type CanAccessMenuItem = (args: {
+  action: string;
+  resource?: string;
+  params?: Record<string, unknown>;
+}) => Promise<{ can?: boolean }>;
+
+async function filterMenuItemsForAccess(
+  items: TreeMenuItem[],
+  can: CanAccessMenuItem,
+): Promise<TreeMenuItem[]> {
+  const filtered = await Promise.all(
+    items.map((item) => filterMenuItemForAccess(item, can)),
+  );
+
+  return filtered.filter(Boolean) as TreeMenuItem[];
+}
+
+async function filterMenuItemForAccess(
+  item: TreeMenuItem,
+  can: CanAccessMenuItem,
+): Promise<TreeMenuItem | null> {
+  const children = item.children?.length
+    ? await filterMenuItemsForAccess(item.children, can)
+    : [];
+
+  if (children.length > 0) {
+    return { ...item, children };
+  }
+
+  if (item.children?.length) {
+    return null;
+  }
+
+  if (!item.route || item.name === "dashboard" || item.route === "/dashboard") {
+    return item;
+  }
+
+  const result = await can({
+    action: "list",
+    resource: item.name,
+  });
+
+  return result.can ? item : null;
+}
+
+function menuItemsSignature(items: TreeMenuItem[]): string {
+  return items
+    .map((item) => [
+      item.key,
+      item.name,
+      item.route,
+      item.children?.length ? menuItemsSignature(item.children) : "",
+    ].join(":"))
+    .join("|");
 }
 
 type MenuItemProps = {

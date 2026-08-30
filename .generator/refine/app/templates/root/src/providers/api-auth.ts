@@ -11,6 +11,7 @@ export type CurrentUser = {
 
 const TOKEN_KEY = "medol-auth-token";
 const USER_KEY = "medol-current-user";
+let currentUserRequest: Promise<CurrentUser> | null = null;
 
 export const authProviderMode = (): string =>
   getAppConfig("VITE_AUTH_PROVIDER", "local");
@@ -75,12 +76,23 @@ export const authFetch = async (
 };
 
 export const fetchCurrentUser = async (): Promise<CurrentUser> => {
-  const response = await authFetch(`${authBackendBaseUrl()}/api/me`);
-  if (!response.ok) {
-    throw new Error("Current user could not be loaded.");
+  if (currentUserRequest) {
+    return currentUserRequest;
   }
 
-  const user = (await response.json()) as CurrentUser;
-  localStorage.setItem(USER_KEY, JSON.stringify(user));
-  return user;
+  currentUserRequest = authFetch(`${authBackendBaseUrl()}/api/me`)
+    .then(async (response) => {
+      if (!response.ok) {
+        throw new Error("Current user could not be loaded.");
+      }
+
+      const user = (await response.json()) as CurrentUser;
+      localStorage.setItem(USER_KEY, JSON.stringify(user));
+      return user;
+    })
+    .finally(() => {
+      currentUserRequest = null;
+    });
+
+  return currentUserRequest;
 };

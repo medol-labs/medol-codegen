@@ -326,3 +326,127 @@ test('links non-lifecycle producer commands as row actions and supports explicit
     assert.equal(command?.fields[0]?.select?.optionValue, 'productCode');
     assert.equal(command?.fields[0]?.select?.optionLabel, 'productName');
 });
+
+test('prefers command owner catalog over relation projection catalog for row actions', () => {
+    const model = {
+        domain: 'Demo',
+        contexts: [{name: 'AccessManagement', title: 'Access Management'}],
+        aggregates: [],
+        transitions: [{
+            id: 'transition-link-role-to-account',
+            context: 'AccessManagement',
+            owner: {name: 'Account', title: 'Account'},
+            command: {id: 'command-link-role-to-account', name: 'LinkRoleToAccount', title: 'Link Role To Account'},
+            event: {id: 'event-role-linked-to-account', name: 'RoleLinkedToAccount', title: 'Role Linked To Account'},
+            to: 'Active',
+            startsLifecycle: false
+        }],
+        deployments: [{
+            name: 'BackOffice',
+            title: 'Back Office',
+            contexts: ['AccessManagement']
+        }],
+        slices: [{
+            id: 'slice-link-role-to-account',
+            context: 'AccessManagement',
+            chapter: 'Access Management',
+            title: 'Link Role To Account',
+            commands: [{
+                id: 'command-link-role-to-account',
+                title: 'Link Role To Account',
+                fields: [
+                    {name: 'accountId', type: 'UUID', idAttribute: true, source: {kind: 'direct', from: ['AccountCatalog.accountId']}},
+                    {name: 'roleCodes', type: 'String[]', source: {kind: 'direct', from: ['RoleCatalog.roleCode']}}
+                ],
+                dependencies: [{
+                    id: 'event-role-linked-to-account',
+                    direction: 'OUTBOUND',
+                    title: 'Role Linked To Account',
+                    elementType: 'EVENT'
+                }]
+            }],
+            events: [{
+                id: 'event-role-linked-to-account',
+                title: 'Role Linked To Account',
+                fields: [
+                    {name: 'accountId', type: 'UUID', idAttribute: true},
+                    {name: 'roleCodes', type: 'String[]'}
+                ],
+                dependencies: [{
+                    id: 'command-link-role-to-account',
+                    direction: 'INBOUND',
+                    title: 'Link Role To Account',
+                    elementType: 'COMMAND'
+                }, {
+                    id: 'readmodel-account-role-catalog',
+                    direction: 'OUTBOUND',
+                    title: 'Account Role Catalog',
+                    elementType: 'READMODEL'
+                }]
+            }],
+            readmodels: []
+        }, {
+            id: 'slice-account-catalogs',
+            context: 'AccessManagement',
+            chapter: 'Access Management',
+            title: 'Account Catalogs',
+            concepts: ['Account'],
+            commands: [],
+            events: [],
+            readmodels: [{
+                id: 'readmodel-account-catalog',
+                title: 'Account Catalog',
+                slice: 'Account Catalogs',
+                listElement: true,
+                fields: [
+                    {name: 'accountId', type: 'UUID', idAttribute: true},
+                    {name: 'accountName', type: 'String', display: true}
+                ],
+                dependencies: []
+            }]
+        }, {
+            id: 'slice-account-role-catalog',
+            context: 'AccessManagement',
+            chapter: 'Access Management',
+            title: 'Account Role Catalog',
+            commands: [],
+            events: [],
+            readmodels: [{
+                id: 'readmodel-account-role-catalog',
+                title: 'Account Role Catalog',
+                slice: 'Account Role Catalog',
+                listElement: true,
+                fields: [
+                    {name: 'accountId', type: 'UUID', idAttribute: true},
+                    {name: 'roleCodes', type: 'String[]'}
+                ],
+                dependencies: [{
+                    id: 'event-role-linked-to-account',
+                    direction: 'INBOUND',
+                    title: 'Role Linked To Account',
+                    elementType: 'EVENT'
+                }]
+            }, {
+                id: 'readmodel-role-catalog',
+                title: 'Role Catalog',
+                slice: 'Account Role Catalog',
+                listElement: true,
+                fields: [
+                    {name: 'roleId', type: 'UUID', idAttribute: true},
+                    {name: 'roleCode', type: 'String'},
+                    {name: 'roleName', type: 'String', display: true}
+                ],
+                dependencies: []
+            }]
+        }]
+    };
+
+    const frontend = buildFrontendModel(model);
+    const accountCatalog = frontend.resources.find((resource) => resource.name === 'account_catalog');
+    const accountRoleCatalog = frontend.resources.find((resource) => resource.name === 'account_role_catalog');
+    const command = accountCatalog?.itemCommands.find((item) => item.name === 'linkRoleToAccount');
+
+    assert.equal(command?.title, 'Link Role To Account');
+    assert.deepEqual(accountRoleCatalog?.itemCommands.map((item) => item.name), []);
+    assert.equal(command?.fields.find((field) => field.name === 'roleCodes')?.select?.resource, 'role_catalog');
+});

@@ -2,7 +2,7 @@ import type {
   AccessControlProvider,
   CanParams,
 } from "@refinedev/core";
-import { cachedCurrentUser, fetchCurrentUser } from "./api-auth";
+import { accessControlMode, cachedCurrentUser, fetchCurrentUser } from "./api-auth";
 
 const actionPermissions = (
   resource: string,
@@ -63,7 +63,15 @@ export const accessControlProvider: AccessControlProvider = {
     }
 
     const user = cachedCurrentUser() ?? (await fetchCurrentUser().catch(() => null));
-    if (!user || user.permissions.length === 0) {
+    if (!user) {
+      return { can: accessControlMode() !== "strict" };
+    }
+
+    if (user.permissions.length === 0) {
+      return { can: accessControlMode() !== "strict" };
+    }
+
+    if (user.permissions.includes("*:*")) {
       return { can: true };
     }
 

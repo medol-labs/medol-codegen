@@ -4,7 +4,7 @@ import { useTranslate } from "@refinedev/core";
 <% if (command.hasFileFields) { -%>
 import { useNotification } from "@refinedev/core";
 <% } -%>
-<% if (command.hasFileFields) { -%>
+<% if (command.hasFileFields || command.hasResultFields) { -%>
 import { useState } from "react";
 <% } -%>
 import { useNavigate, useSearchParams } from "react-router";
@@ -21,6 +21,16 @@ import {
   CreateViewHeader,
 } from "@/components/refine-ui/views/create-view";
 import { Button } from "@/components/ui/button";
+<% if (command.hasResultFields) { -%>
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+<% } -%>
 import {
   Form,
   FormControl,
@@ -155,6 +165,9 @@ export const <%= command.pageComponent %> = () => {
 <% if (command.hasFileFields) { -%>
   const [pendingFileUploads, setPendingFileUploads] = useState<Record<string, PendingFileUpload | undefined>>({});
 <% } -%>
+<% if (command.hasResultFields) { -%>
+  const [commandResult, setCommandResult] = useState<Record<string, unknown> | null>(null);
+<% } -%>
   const defaultValues = {
 <% command.prefillFields.forEach((field) => { -%>
     <%= field.name %>: <%- field.searchParamDefault %>,
@@ -168,7 +181,7 @@ export const <%= command.pageComponent %> = () => {
     resource: "<%= resource.name %>",
     command: "<%= command.name %>",
     aggregateId: id?.toString(),
-    redirect: "list",
+    redirect: <%- command.hasResultFields ? 'false' : '"list"' %>,
     dataProviderName: "<%= command.dataProviderName %>",
     queryDataProviderName: "<%= resource.dataProviderName %>",
     meta: {
@@ -269,13 +282,31 @@ export const <%= command.pageComponent %> = () => {
     navigate(-1);
     return;
 <% } else { -%>
-    return onFinish(nextValues);
+    const result = await onFinish(nextValues);
+    navigate("/<%= resource.route %>");
+    return result;
 <% } -%>
 <% } else { -%>
-    return onFinish({
+<% if (command.hasResultFields) { -%>
+    const result = await onFinish({
+      ...defaultValues,
+      ...values,
+    }) as { data?: Record<string, unknown> } | Record<string, unknown> | void;
+    const data = result && typeof result === "object" && "data" in result
+      ? result.data
+      : result;
+    if (data && typeof data === "object") {
+      setCommandResult(data as Record<string, unknown>);
+    }
+    return result;
+<% } else { -%>
+    const result = await onFinish({
       ...defaultValues,
       ...values,
     });
+    navigate("/<%= resource.route %>");
+    return result;
+<% } -%>
 <% } -%>
   }
 
@@ -584,9 +615,6 @@ export const <%= command.pageComponent %> = () => {
           <div className="flex gap-2">
             <Button
               type="submit"
-<% if (!command.hasFileFields) { -%>
-              {...form.saveButtonProps}
-<% } -%>
               disabled={form.formState.isSubmitting}
             >
               {form.formState.isSubmitting ? t("buttons.submitting", "Submitting...") : t("buttons.submit", "Submit")}
@@ -601,6 +629,41 @@ export const <%= command.pageComponent %> = () => {
           </div>
         </form>
       </Form>
+<% if (command.hasResultFields) { -%>
+      <Dialog open={commandResult !== null} onOpenChange={(open) => {
+        if (!open) {
+          setCommandResult(null);
+          navigate(-1);
+        }
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("<%= command.i18nKey %>.result.title", "<%= command.label %> Result")}</DialogTitle>
+            <DialogDescription>
+              {t("<%= command.i18nKey %>.result.description", "Copy the returned values now. Sensitive values may not be shown again.")}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+<% command.resultFields.forEach((field) => { -%>
+            <div className="space-y-1">
+              <div className="text-sm font-medium">{t("<%= field.i18nKey %>", "<%= field.label %>")}</div>
+              <div className="rounded-md border bg-muted/40 px-3 py-2 font-mono text-sm break-all">
+                {commandResult?.<%= field.name %> == null ? "-" : String(commandResult.<%= field.name %>)}
+              </div>
+            </div>
+<% }) -%>
+          </div>
+          <DialogFooter>
+            <Button type="button" onClick={() => {
+              setCommandResult(null);
+              navigate(-1);
+            }}>
+              {t("buttons.done", "Done")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+<% } -%>
     </CreateView>
   );
 };

@@ -366,6 +366,7 @@ function normalizeElements(elements = [], type, slice, sliceAggregate, valueType
             aggregateRef: aggregate,
             aggregateDependencies: element.aggregateDependencies ?? (aggregate?.title ? [aggregate.title] : []),
             fields: normalizeFields(element.fields ?? [], valueTypes),
+            resultFields: normalizeFields(element.resultFields ?? [], valueTypes),
             dependencies: normalizeDependencies(element.dependencies ?? []),
             startsLifecycle: element.startsLifecycle ?? element.createsAggregate ?? false
         };

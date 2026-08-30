@@ -55,6 +55,9 @@ Configure these values in `.env` or the Compose environment:
 
 - `VITE_API_URL` for Supabase URL; default: `https://iwdfzvfqbtokqetmbmbp.supabase.co`
 - `VITE_SUPABASE_API_KEY` for Supabase anon API key
+- `VITE_AUTH_PROVIDER` for authentication mode: `local` or `supabase`; default: `local`
+- `VITE_ACCESS_CONTROL_MODE` for frontend permission checks: `permissive` or `strict`; default: `permissive`
+- `VITE_AUTH_API_URL` for login and current-user API; default: `http://localhost:8080`
 <% backendModules.forEach((module) => { -%>
 - `<%= module.envName %>` for `<%= module.label %>`; default: `<%= module.defaultApiUrl %>`
 <% }) -%>

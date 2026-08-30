@@ -3,12 +3,19 @@ package <%= rootPackage %>.shared.security
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 import javax.crypto.spec.SecretKeySpec
+import jakarta.servlet.http.HttpServletResponse
 import org.springframework.boot.context.properties.EnableConfigurationProperties
+import org.springframework.boot.web.servlet.FilterRegistrationBean
+import org.springframework.beans.factory.ObjectProvider
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.core.convert.converter.Converter
+import org.springframework.core.Ordered
 import org.springframework.http.HttpMethod
+import org.springframework.http.MediaType
 import org.springframework.security.authentication.AbstractAuthenticationToken
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.config.Customizer
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
@@ -21,11 +28,11 @@ import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.security.oauth2.jwt.JwtDecoder
 import org.springframework.security.oauth2.jwt.JwtDecoders
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder
-import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter
 import org.springframework.security.web.SecurityFilterChain
 import org.springframework.web.cors.CorsConfiguration
 import org.springframework.web.cors.CorsConfigurationSource
+import org.springframework.web.filter.CorsFilter
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource
 
 @Configuration
@@ -63,16 +70,20 @@ class MedolSecurityConfiguration {
 
     @Bean
     fun medolJwtAuthenticationConverter(
+        currentUserJwtResolver: ObjectProvider<CurrentUserJwtResolver>,
     ): Converter<Jwt, AbstractAuthenticationToken> =
         Converter { jwt ->
-            val currentUser = jwt.toCurrentUser()
+            val fallbackUser = jwt.toCurrentUser()
+            val currentUser = currentUserJwtResolver.ifAvailable
+                ?.resolve(jwt, fallbackUser)
+                ?: fallbackUser
             val authorities = currentUser.permissions
                 .map { SimpleGrantedAuthority(it) }
                 .toMutableList()
 
             authorities += currentUser.roles.map { SimpleGrantedAuthority("ROLE_$it") }
 
-            JwtAuthenticationToken(jwt, authorities, currentUser.username)
+            UsernamePasswordAuthenticationToken(currentUser, jwt.tokenValue, authorities)
         }
 
     @Bean
@@ -86,12 +97,22 @@ class MedolSecurityConfiguration {
         http.csrf { it.disable() }
         http.cors(Customizer.withDefaults())
         http.sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
+        http.exceptionHandling { exceptions ->
+            exceptions.authenticationEntryPoint { _, response, _ ->
+                response.writeProblem(HttpServletResponse.SC_UNAUTHORIZED, "Unauthorized", "Authentication is required.")
+            }
+            exceptions.accessDeniedHandler { _, response, _ ->
+                response.writeProblem(HttpServletResponse.SC_FORBIDDEN, "Forbidden", "Access is denied.")
+            }
+        }
 
         http.authorizeHttpRequests { requests ->
             requests
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 .requestMatchers(
                     "/api/auth/login",
+                    "/api/auth/setup-admin",
+                    "/api/auth/setup-supabase-admin",
                     "/actuator/health",
                     "/actuator/info",
                     "/swagger-ui.html",
@@ -130,11 +151,20 @@ class MedolSecurityConfiguration {
         configuration.allowedHeaders = listOf("*")
         configuration.exposedHeaders = listOf("Authorization", "Location")
         configuration.allowCredentials = true
+        configuration.maxAge = 3600
 
         return UrlBasedCorsConfigurationSource().also {
             it.registerCorsConfiguration("/**", configuration)
         }
     }
+
+    @Bean
+    fun medolCorsFilter(
+        @Qualifier("medolCorsConfigurationSource") corsConfigurationSource: CorsConfigurationSource,
+    ): FilterRegistrationBean<CorsFilter> =
+        FilterRegistrationBean(CorsFilter(corsConfigurationSource)).also {
+            it.order = Ordered.HIGHEST_PRECEDENCE
+        }
 
     private fun secretKey(properties: MedolSecurityProperties): SecretKeySpec =
         SecretKeySpec(
@@ -164,5 +194,12 @@ class MedolSecurityConfiguration {
             is Collection<*> -> claim.mapNotNull { it?.toString()?.trim() }.filter { it.isNotBlank() }.toSet()
             else -> emptySet()
         }
+    }
+
+    private fun HttpServletResponse.writeProblem(statusCode: Int, title: String, detail: String) {
+        status = statusCode
+        contentType = MediaType.APPLICATION_PROBLEM_JSON_VALUE
+        characterEncoding = StandardCharsets.UTF_8.name()
+        writer.write("""{"type":"about:blank","title":"$title","status":$statusCode,"detail":"$detail"}""")
     }
 }

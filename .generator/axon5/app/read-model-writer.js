@@ -192,6 +192,18 @@ function lowerCamel(value) {
     return text.charAt(0).toLowerCase() + text.slice(1);
 }
 
+function singularFieldCandidates(value) {
+    const name = String(value ?? '');
+    const candidates = [];
+    if (name.endsWith('ies')) {
+        candidates.push(`${name.slice(0, -3)}y`);
+    }
+    if (name.endsWith('s')) {
+        candidates.push(name.slice(0, -1));
+    }
+    return uniqueBy(candidates.filter(Boolean), (candidate) => candidate);
+}
+
 function readModelPersistencePackage(rootPackage, context, readmodelName) {
     return `${rootPackage}.${context}.infrastructure.secondary.persistence.${_sliceTitle(readmodelName)}`;
 }
@@ -892,6 +904,51 @@ ${includeEventTime ? `
             assignments.push({fieldName: field.name, code, usesEventTime});
             assignedFieldNames.add(field.name);
         };
+
+        for (const field of readmodel.fields ?? []) {
+            if (field.cardinality !== 'Multiple' || assignedFieldNames.has(field.name)) {
+                continue;
+            }
+            const eventField = singularFieldCandidates(field.name)
+                .map((name) => eventFields.find((candidate) => candidate.name === name))
+                .find((candidate) => candidate && conventionallyCompatibleReadModelField(field, candidate));
+            if (!eventField) {
+                continue;
+            }
+            if (eventField.optional) {
+                addAssignment(
+                    field,
+                    `event.${eventField.name}?.let { entity.${field.name} = (entity.${field.name} + ${readModelStorageExpression({...field, cardinality: undefined}, 'it')}).distinct() }`
+                );
+            } else {
+                addAssignment(
+                    field,
+                    `entity.${field.name} = (entity.${field.name} + ${readModelStorageExpression({...field, cardinality: undefined}, `event.${eventField.name}`)}).distinct()`
+                );
+            }
+        }
+
+        if (stateChange?.to && stateTransition?.from !== stateTransition?.to) {
+            for (const field of readmodel.fields ?? []) {
+                if (assignedFieldNames.has(field.name) || field.type !== 'Boolean' || field.cardinality === 'Multiple') {
+                    continue;
+                }
+                const stateName = lowerCamel(stateChange.to);
+                if (field.name.toLowerCase() === stateName.toLowerCase()) {
+                    addAssignment(field, `entity.${field.name} = true`);
+                    continue;
+                }
+                if (field.name.toLowerCase() !== 'active') {
+                    continue;
+                }
+                const stateWords = semanticWords(stateChange.to);
+                if (stateWords.some((word) => ['active', 'registered', 'enabled', 'created'].includes(word))) {
+                    addAssignment(field, `entity.${field.name} = true`);
+                } else if (stateWords.some((word) => ['deactivated', 'inactive', 'disabled', 'archived', 'suspended', 'retired', 'deleted'].includes(word))) {
+                    addAssignment(field, `entity.${field.name} = false`);
+                }
+            }
+        }
 
         for (const eventField of eventFields) {
             if (eventField.name === 'failureReason') {

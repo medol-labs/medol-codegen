@@ -10,6 +10,20 @@ import {
 } from "./api-auth";
 import { supabaseClient } from "./supabase-client";
 
+const readErrorMessage = async (response: Response, fallback: string) => {
+  const text = await response.text();
+  if (!text) {
+    return fallback;
+  }
+
+  try {
+    const payload = JSON.parse(text);
+    return payload.detail || payload.title || payload.message || text;
+  } catch {
+    return text;
+  }
+};
+
 const authProvider: AuthProvider = {
   login: async (params) => {
     const { email, username, password, providerName } = params as {
@@ -33,11 +47,12 @@ const authProvider: AuthProvider = {
         });
 
         if (!response.ok) {
+          const message = await readErrorMessage(response, "Invalid username or password");
           return {
             success: false,
             error: {
               message: "Login failed",
-              name: "Invalid username or password",
+              name: message,
             },
           };
         }
@@ -116,26 +131,94 @@ const authProvider: AuthProvider = {
       },
     };
   },
-  register: async ({ email, password }) => {
-    try {
-      const { data, error } = await supabaseClient.auth.signUp({
-        email,
-        password,
-      });
+  register: async ({ email, password, setupToken }) => {
+    if (authProviderMode() === "local") {
+      try {
+        const response = await fetch(`${authBackendBaseUrl()}/api/auth/setup-admin`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            setupToken,
+            username: email,
+            password,
+          }),
+        });
 
-      if (error) {
+        if (!response.ok) {
+          const message = await readErrorMessage(response, "Admin setup is disabled or already completed");
+          return {
+            success: false,
+            error: {
+              message: "Admin setup failed",
+              name: message || "Admin setup is disabled or already completed",
+            },
+          };
+        }
+
+        return {
+          success: true,
+          redirectTo: "/login",
+          successNotification: {
+            message: "Admin account initialized",
+            description: "You can now sign in with the administrator account.",
+          },
+        };
+      } catch (error: any) {
         return {
           success: false,
           error,
         };
       }
+    }
 
-      if (data) {
+    try {
+      const { data } = await supabaseClient.auth.getSession();
+      const token = data.session?.access_token;
+
+      if (!token) {
         return {
-          success: true,
-          redirectTo: "/",
+          success: false,
+          error: {
+            message: "Admin setup failed",
+            name: "Sign in with the Supabase administrator account first",
+          },
         };
       }
+
+      const response = await fetch(`${authBackendBaseUrl()}/api/auth/setup-supabase-admin`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          setupToken,
+        }),
+      });
+
+      if (!response.ok) {
+        const message = await readErrorMessage(response, "Admin setup is disabled or already completed");
+        return {
+          success: false,
+          error: {
+            message: "Admin setup failed",
+            name: message || "Admin setup is disabled or already completed",
+          },
+        };
+      }
+
+      await fetchCurrentUser();
+
+      return {
+        success: true,
+        redirectTo: "/",
+        successNotification: {
+          message: "Admin account initialized",
+          description: "The current Supabase user is now the administrator.",
+        },
+      };
     } catch (error: any) {
       return {
         success: false,
@@ -146,12 +229,22 @@ const authProvider: AuthProvider = {
     return {
       success: false,
       error: {
-        message: "Register failed",
-        name: "Invalid email or password",
+        message: "Admin setup failed",
+        name: "Admin setup is disabled or already completed",
       },
     };
   },
   forgotPassword: async ({ email }) => {
+    if (authProviderMode() === "local") {
+      return {
+        success: false,
+        error: {
+          message: "Forgot password failed",
+          name: "Local password reset is not enabled",
+        },
+      };
+    }
+
     try {
       const { data, error } = await supabaseClient.auth.resetPasswordForEmail(
         email,
@@ -188,6 +281,16 @@ const authProvider: AuthProvider = {
     };
   },
   updatePassword: async ({ password }) => {
+    if (authProviderMode() === "local") {
+      return {
+        success: false,
+        error: {
+          message: "Update password failed",
+          name: "Local password update is not enabled",
+        },
+      };
+    }
+
     try {
       const { data, error } = await supabaseClient.auth.updateUser({
         password,

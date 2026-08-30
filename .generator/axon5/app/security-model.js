@@ -109,6 +109,26 @@ function actorSecurityModel(model) {
     };
 }
 
+function findContext(model, contextName) {
+    return (model.contexts ?? []).find((context) => context.name === contextName);
+}
+
+function iamSecurityContract(model) {
+    const context = findContext(model, 'IdentityAccessManagement');
+    if (!context) {
+        throw new Error('Embedded IAM security artifacts require IdentityAccessManagement context.');
+    }
+
+    return {
+        mode: 'builtin',
+        repository: {
+            interfaceName: 'AuthIdentityRepository',
+            defaultImplementationName: 'BuiltinReadModelAuthIdentityRepository'
+        }
+    };
+}
+
 module.exports = {
-    actorSecurityModel
+    actorSecurityModel,
+    iamSecurityContract
 };

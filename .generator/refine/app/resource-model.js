@@ -58,11 +58,9 @@ function toReadModelResource(group, readModel, allEvents, workflow) {
     const producerCommandKeys = group.producerCommandKeys ?? new Set();
     const itemCommandKeys = group.itemCommandKeys ?? new Set();
     const producerCommands = normalizedCommands.filter((command) => producerCommandKeys.has(command.id));
+    const createCommand = producerCommands.find((command) => command.startsLifecycle && isCreateCommand(command))
+        ?? producerCommands.find((command) => command.startsLifecycle);
     const resourceAggregateRoute = axonRoute(aggregateTitle);
-    const aggregateProducerCommands = producerCommands
-        .filter((command) => command.aggregateRoute === resourceAggregateRoute);
-    const createCommand = aggregateProducerCommands.find((command) => command.startsLifecycle && isCreateCommand(command))
-        ?? aggregateProducerCommands.find((command) => command.startsLifecycle);
     const primaryIdField = idField?.name ?? 'id';
     const rowCommands = normalizedCommands
         .filter((command) => itemCommandKeys.has(command.id))
@@ -163,6 +161,7 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
     const rawFields = command.fields ?? [];
     const normalizedFields = normalizeFields(command.fields).filter((field) => !field.generated);
     const formFields = normalizedFields.filter(isCommandFormField);
+    const resultFields = normalizeFields(command.resultFields ?? []);
     const workflowFields = commandWorkflowFields(command, readModel, allEvents, workflow);
     const stateControl = workflow.stateControlForCommand(command, readModel);
     const commandAggregateTitle = cleanTitle(
@@ -193,6 +192,8 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
             ...field,
             select: field.fileInput ? null : workflowFields.selects.get(field.name) ?? null
         })),
+        resultFields,
+        hasResultFields: resultFields.length > 0,
         matchingFields: normalizedFields,
         prefillCandidateFields: [
             ...formFields,
@@ -220,7 +221,7 @@ function isFileUploadProducerCommand(command, rawFields) {
 }
 
 function isCommandFormField(field) {
-    if (field.excludeFromForm || field.hidden || field.readOnly || field.technicalAttribute) {
+    if (field.excludeFromForm || field.hidden || field.readOnly || field.technicalAttribute || field.portOutput) {
         return false;
     }
     return true;

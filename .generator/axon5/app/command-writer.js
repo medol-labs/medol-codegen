@@ -85,6 +85,7 @@ const {contextPackage} = require('../../common/util/value-types');
 const {_commandTitle, _eventTitle, _readmodelTitle, _sliceTitle} = require('../../common/util/naming');
 const {
     constructorArgsFromCommand,
+    commandResultFields,
     infrastructurePortForCommand
 } = require('./infrastructure-port-writer');
 
@@ -131,7 +132,7 @@ function storedUploadName(command) {
 const commandWriterMethods = {
     _writeCommand(packageName, context, slicePackage, command, selection, selectionPackageName = packageName, reservations = []) {
         const commandName = _commandTitle(command.title);
-        const commandFields = commandFieldsWithSelection(command, selection);
+        const commandFields = commandFieldsWithSelection(command, selection).filter((field) => !field.portOutput);
         const commandReservations = commandStartsLifecycle(command) ? reservations : [];
         const imports = uniqueBy([
             kotlinFieldImports(commandFields, this.model.rootPackage),
@@ -174,6 +175,7 @@ ${reservationSelections ? `\n${reservationSelections}` : ''}
             const usePort = Boolean(port);
             const capability = port?.capability;
             const inputFields = port?.inputFields ?? [];
+            const returnsPortResult = commandResultFields(command).length > 0 && usePort;
             const commandReservations = commandStartsLifecycle(command) ? reservations : [];
             const includeState = !commandStartsLifecycle(command);
             const methodParameters = [
@@ -204,12 +206,18 @@ ${reservationSelections ? `\n${reservationSelections}` : ''}
 ${port?.failureEvent ? '        val now = java.time.LocalDateTime.now()\n' : ''}
 `
                 : '';
+            const returnType = returnsPortResult ? `: ${capability.resultName}` : '';
+            const appendEvents = `eventAppender.append(decision.decide(${decisionArgs}))`;
+            const bodyEnd = returnsPortResult
+                ? `        ${appendEvents}
+        return portResult`
+                : `        ${appendEvents}`;
             return `    @CommandHandler
     fun handle(
 ${methodParameters}
-    ) {
+    )${returnType} {
 ${portStatements}\
-        eventAppender.append(decision.decide(${decisionArgs}))
+${bodyEnd}
     }`;
         }).join('\n\n');
         const commandImports = slice.commands.map((command) => `import ${packageName}.${_commandTitle(command.title)}`).join('\n');
@@ -269,18 +277,33 @@ ${handlers}
         ].join(',\n    ');
         const methods = slice.commands.map((command) => {
             const commandName = _commandTitle(command.title);
+            const port = infrastructurePortForCommand(command, relatedEventsForSlice(this.model, slice), slice, this.model);
+            const returnsPortResult = commandResultFields(command).length > 0 && port;
+            const returnType = returnsPortResult ? port.capability.resultName : commandName;
+            const sendExpression = returnsPortResult
+                ? `commandGateway.send(command, MetadataFactory.from(request)).resultAs(${port.capability.resultName}::class.java)`
+                : `commandGateway.send(command, MetadataFactory.from(request)).resultMessage.thenApply { command }`;
             const preAuthorize = `    @PreAuthorize("hasAuthority('*:*') or hasAuthority('${permissionCode(command.name ?? command.title)}:execute')")`;
             const jsonEndpoint = hasUploadFile(command) ? '' : `${preAuthorize}
     @PostMapping("/${httpRoute(command.title)}")
     fun ${safeIdentifier(command.name)}(
         @Valid @RequestBody command: ${commandName},
         request: HttpServletRequest
-    ): CompletableFuture<${commandName}> =
-        commandGateway.send(command, MetadataFactory.from(request)).resultMessage.thenApply { command }`;
+    ): CompletableFuture<${returnType}> =
+        ${sendExpression}`;
             const multipartEndpoint = this._renderUploadFileCommandEndpoint(command);
             return [jsonEndpoint, multipartEndpoint].filter(Boolean).join('\n\n');
         }).join('\n\n');
         const commandFieldImports = kotlinFieldImports(uniqueFields(slice.commands.flatMap((command) => command.fields ?? [])), this.model.rootPackage);
+        const commandResultImports = uniqueBy(slice.commands
+            .map((command) => {
+                const port = infrastructurePortForCommand(command, relatedEventsForSlice(this.model, slice), slice, this.model);
+                return commandResultFields(command).length > 0 && port
+                    ? `import ${port.packageName}.${port.capability.resultName}`
+                    : undefined;
+            })
+            .filter(Boolean), (value) => value)
+            .join('\n');
         const uploadImports = uploadCommands.length > 0
             ? `import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.RequestParam
@@ -301,6 +324,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 import ${this.model.rootPackage}.shared.application.metadata.MetadataFactory
 ${uploadImports}
+${commandResultImports}
 import java.util.concurrent.CompletableFuture
 
 @CrossOrigin

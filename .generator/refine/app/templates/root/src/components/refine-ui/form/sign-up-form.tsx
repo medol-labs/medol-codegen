@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { authProviderMode } from "@/providers/api-auth";
 import {
   useLink,
   useNotification,
@@ -27,6 +28,7 @@ export const SignUpForm = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [setupToken, setSetupToken] = useState("");
 
   const { open } = useNotification();
 
@@ -35,6 +37,7 @@ export const SignUpForm = () => {
   const { title } = useRefineOptions();
 
   const { mutate: register } = useRegister();
+  const isLocalAuth = authProviderMode() === "local";
 
   const handleSignUp = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -53,6 +56,7 @@ export const SignUpForm = () => {
     register({
       email,
       password,
+      setupToken,
     });
   };
 
@@ -80,10 +84,19 @@ export const SignUpForm = () => {
         "min-h-svh"
       )}
     >
-      <div className={cn("flex", "items-center", "justify-center", "gap-2")}>
+      <div className={cn("flex", "items-center", "justify-center")}>
         {title.icon && (
           <div
-            className={cn("text-foreground", "[&>svg]:w-12", "[&>svg]:h-12")}
+            className={cn(
+              "text-foreground",
+              "h-14",
+              "w-14",
+              "[&>img]:h-full",
+              "[&>img]:w-full",
+              "[&>img]:object-contain",
+              "[&>svg]:h-full",
+              "[&>svg]:w-full"
+            )}
           >
             {title.icon}
           </div>
@@ -100,12 +113,14 @@ export const SignUpForm = () => {
               "font-semibold"
             )}
           >
-            Sign up
+            Setup admin
           </CardTitle>
           <CardDescription
             className={cn("text-muted-foreground", "font-medium")}
           >
-            Welcome to lorem ipsum dolor.
+            {isLocalAuth
+              ? "Initialize the local administrator account"
+              : "Bind the current Supabase user as administrator"}
           </CardDescription>
         </CardHeader>
 
@@ -113,64 +128,91 @@ export const SignUpForm = () => {
 
         <CardContent className={cn("px-0")}>
           <form onSubmit={handleSignUp}>
-            <div className={cn("flex", "flex-col", "gap-2")}>
-              <Label htmlFor="email">Email</Label>
+            {isLocalAuth && (
+              <div className={cn("flex", "flex-col", "gap-2")}>
+                <Label htmlFor="email">Username</Label>
+                <Input
+                  id="email"
+                  type="text"
+                  placeholder=""
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </div>
+            )}
+
+            <div
+              className={cn(
+                "relative",
+                "flex",
+                "flex-col",
+                "gap-2",
+                isLocalAuth && "mt-6"
+              )}
+            >
+              <Label htmlFor="setupToken">Setup token</Label>
               <Input
-                id="email"
-                type="email"
-                placeholder=""
+                id="setupToken"
+                type="password"
                 required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                value={setupToken}
+                onChange={(e) => setSetupToken(e.target.value)}
               />
             </div>
 
-            <div
-              className={cn("relative", "flex", "flex-col", "gap-2", "mt-6")}
-            >
-              <Label htmlFor="password">Password</Label>
-              <InputPassword
-                id="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-            </div>
+            {isLocalAuth && (
+              <>
+                <div
+                  className={cn("relative", "flex", "flex-col", "gap-2", "mt-6")}
+                >
+                  <Label htmlFor="password">Password</Label>
+                  <InputPassword
+                    id="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                  />
+                </div>
 
-            <div
-              className={cn("relative", "flex", "flex-col", "gap-2", "mt-6")}
-            >
-              <Label htmlFor="confirmPassword">Confirm password</Label>
-              <InputPassword
-                id="confirmPassword"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                required
-              />
-            </div>
+              <div
+                className={cn("relative", "flex", "flex-col", "gap-2", "mt-6")}
+              >
+                <Label htmlFor="confirmPassword">Confirm password</Label>
+                <InputPassword
+                  id="confirmPassword"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  required
+                />
+              </div>
+              </>
+            )}
 
             <Button
               type="submit"
               size="lg"
               className={cn("w-full", "mt-6")}
             >
-              Sign up
+              Initialize admin
             </Button>
 
-            <div className={cn("flex", "items-center", "gap-4", "mt-6")}>
-              <Separator className={cn("flex-1")} />
-              <span className={cn("text-sm", "text-muted-foreground")}>or</span>
-              <Separator className={cn("flex-1")} />
-            </div>
+            {false && !isLocalAuth && (
+              <>
+                <div className={cn("flex", "items-center", "gap-4", "mt-6")}>
+                  <Separator className={cn("flex-1")} />
+                  <span className={cn("text-sm", "text-muted-foreground")}>or</span>
+                  <Separator className={cn("flex-1")} />
+                </div>
 
-            <div className={cn("flex", "flex-col", "gap-4", "mt-6")}>
-              <div className={cn("grid grid-cols-2", "gap-6")}>
-                <Button
-                  variant="outline"
-                  className={cn("flex", "items-center", "gap-2")}
-                  onClick={handleSignUpWithGoogle}
-                  type="button"
-                >
+                <div className={cn("flex", "flex-col", "gap-4", "mt-6")}>
+                  <div className={cn("grid grid-cols-2", "gap-6")}>
+                    <Button
+                      variant="outline"
+                      className={cn("flex", "items-center", "gap-2")}
+                      onClick={handleSignUpWithGoogle}
+                      type="button"
+                    >
                   <svg
                     width="21"
                     height="20"
@@ -183,14 +225,14 @@ export const SignUpForm = () => {
                       fill="currentColor"
                     />
                   </svg>
-                  <div>Google</div>
-                </Button>
-                <Button
-                  variant="outline"
-                  className={cn("flex", "items-center", "gap-2")}
-                  onClick={handleSignUpWithGitHub}
-                  type="button"
-                >
+                      <div>Google</div>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className={cn("flex", "items-center", "gap-2")}
+                      onClick={handleSignUpWithGitHub}
+                      type="button"
+                    >
                   <svg
                     width="21"
                     height="20"
@@ -205,10 +247,12 @@ export const SignUpForm = () => {
                       fill="currentColor"
                     />
                   </svg>
-                  <div>GitHub</div>
-                </Button>
-              </div>
-            </div>
+                      <div>GitHub</div>
+                    </Button>
+                  </div>
+                </div>
+              </>
+            )}
           </form>
         </CardContent>
 

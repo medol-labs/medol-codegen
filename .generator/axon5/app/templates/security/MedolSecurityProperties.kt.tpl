@@ -8,14 +8,20 @@ data class MedolSecurityProperties(
     var provider: String = "local",
     var jwtSecret: String = "change-me-change-me-change-me-change-me",
     var localTokenTtlSeconds: Long = 28_800,
-    var allowedOrigins: List<String> = listOf("http://localhost:5173", "http://127.0.0.1:5173"),
+    var allowedOrigins: List<String> = listOf("http://localhost:*", "http://127.0.0.1:*"),
     var internalToken: String = "local-dev-internal-token",
     var internalSubject: String = "00000000-0000-0000-0000-000000000001",
     var internalUsername: String = "internal-service",
     var internalRoles: List<String> = listOf("SERVICE"),
     var internalPermissions: List<String> = listOf("*:*"),
+    var adminBootstrap: AdminBootstrap = AdminBootstrap(),
     var supabase: Supabase = Supabase(),
 ) {
+    data class AdminBootstrap(
+        var enabled: Boolean = false,
+        var setupToken: String = "",
+    )
+
     data class Supabase(
         var issuerUri: String = "",
         var jwkSetUri: String = "",

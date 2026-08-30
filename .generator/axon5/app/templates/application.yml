@@ -7,6 +7,7 @@ spring:
       - optional:classpath:application-infrastructure.yml
       - optional:file:./config/application-infrastructure.yml
       - optional:file:<%= envFile %>[.properties]
+      - optional:file:<%= moduleEnvFile %>[.properties]
   application:
     name: <%= appName %>
   docker:
@@ -49,12 +50,15 @@ medol:
     provider: ${MEDOL_SECURITY_PROVIDER:local}
     jwt-secret: ${MEDOL_SECURITY_JWT_SECRET:change-me-change-me-change-me-change-me}
     local-token-ttl-seconds: ${MEDOL_SECURITY_LOCAL_TOKEN_TTL_SECONDS:28800}
-    allowed-origins: ${MEDOL_SECURITY_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
+    allowed-origins: ${MEDOL_SECURITY_ALLOWED_ORIGINS:http://localhost:*,http://127.0.0.1:*}
     internal-token: ${MEDOL_SECURITY_INTERNAL_TOKEN:local-dev-internal-token}
     internal-subject: ${MEDOL_SECURITY_INTERNAL_SUBJECT:00000000-0000-0000-0000-000000000001}
     internal-username: ${MEDOL_SECURITY_INTERNAL_USERNAME:internal-service}
     internal-roles: ${MEDOL_SECURITY_INTERNAL_ROLES:SERVICE}
     internal-permissions: ${MEDOL_SECURITY_INTERNAL_PERMISSIONS:*:*}
+    admin-bootstrap:
+      enabled: ${MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED:false}
+      setup-token: ${MEDOL_SECURITY_ADMIN_BOOTSTRAP_SETUP_TOKEN:}
     supabase:
       issuer-uri: ${SUPABASE_JWT_ISSUER_URI:}
       jwk-set-uri: ${SUPABASE_JWT_JWK_SET_URI:}

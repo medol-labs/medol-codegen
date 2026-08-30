@@ -52,16 +52,16 @@ class IamAuthResource(
         }
         val issuedAt = Instant.now()
         val expiresAt = issuedAt.plus(properties.localTokenTtlSeconds, ChronoUnit.SECONDS)
-        val claims = JwtClaimsSet.builder()
+        val claimsBuilder = JwtClaimsSet.builder()
             .subject(user.id.toString())
             .issuedAt(issuedAt)
             .expiresAt(expiresAt)
             .claim("username", user.username)
-            .claim("organizationId", user.organizationId?.toString())
             .claim("roles", user.roles)
             .claim("permissions", user.permissions)
             .claim("provider", "local")
-            .build()
+        user.organizationId?.let { claimsBuilder.claim("organizationId", it.toString()) }
+        val claims = claimsBuilder.build()
         val header = JwsHeader.with(MacAlgorithm.HS256).build()
         val token = jwtEncoder.encode(JwtEncoderParameters.from(header, claims)).tokenValue
 

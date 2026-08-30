@@ -178,6 +178,7 @@ class Axon5Generator extends Generator {
             } else {
                 const selected = this.answers.sliceNames ?? this.model.slices.map((slice) => slice.title);
                 const selectedSlices = this.model.slices.filter((slice) => selected.includes(slice.title));
+                this._writeConceptStates();
                 selectedSlices.forEach((slice) => this._writeSlice(slice));
                 this._writeConceptEntityStates(selectedSlices);
             }

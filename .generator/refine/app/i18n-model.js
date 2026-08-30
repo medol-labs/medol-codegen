@@ -37,6 +37,7 @@ function withCommandI18n(command, resourceKey) {
         ...command,
         i18nKey: `${commandKey}.label`,
         fields: command.fields.map((field) => withFieldI18n(field, `${commandKey}.fields.${field.name}`)),
+        resultFields: (command.resultFields ?? []).map((field) => withFieldI18n(field, `${commandKey}.result.fields.${field.name}`)),
         prefillFields: command.prefillFields.map((field) => withFieldI18n(field, `${commandKey}.fields.${field.name}`)),
         rowPrefillFields: (command.rowPrefillFields ?? []).map((field) => withFieldI18n(field, `${commandKey}.fields.${field.name}`)),
         workflowPrefillFields: command.workflowPrefillFields.map((field) => withFieldI18n(field, `${commandKey}.fields.${field.name}`))

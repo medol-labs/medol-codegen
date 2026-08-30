@@ -8,7 +8,7 @@ const {configureValueTypes} = require('../../common/util/generator');
 const {pascal, kebab, safeDatabaseName, safeIdentifier, filterModelByDeployment} = require('./model-helpers');
 const {manualInfrastructurePortPathForCommand} = require('./infrastructure-port-writer');
 const {writeMetadataSupport} = require('./metadata-support');
-const {actorSecurityModel} = require('./security-model');
+const {actorSecurityModel, iamSecurityContract} = require('./security-model');
 
 const SHARED_KERNEL_MODULE = 'shared-kernel';
 const UMA_DB_EVENT_STORAGE_MODULE = 'axon-event-storage-umadb';
@@ -64,6 +64,7 @@ const applicationWriterMethods = {
             this._withDeployment(deployment, () => {
                 const selected = this.answers.sliceNames ?? this.model.slices.map((slice) => slice.title);
                 const selectedSlices = this.model.slices.filter((slice) => selected.includes(slice.title));
+                this._writeConceptStates();
                 selectedSlices.forEach((slice) => this._writeSlice(slice));
                 this._writeConceptEntityStates(selectedSlices);
             });
@@ -142,6 +143,7 @@ const applicationWriterMethods = {
         }
         this.fs.copyTpl(this.templatePath('application.yml'), this._destPath('src/main/resources/application.yml'), {
             ...runtime,
+            moduleEnvFile: this.modulePrefix ? `${this.modulePrefix}/.env` : '.env',
             rootPackage: this.model.rootPackage,
             hasInfra
         });
@@ -223,6 +225,7 @@ const applicationWriterMethods = {
         [
             'CurrentUser.kt',
             'CurrentUserProvider.kt',
+            'CurrentUserJwtResolver.kt',
             'MedolSecurityProperties.kt',
             'MedolSecurityConfiguration.kt',
             'SpringSecurityCurrentUserProvider.kt',
@@ -278,17 +281,26 @@ const applicationWriterMethods = {
     },
 
     _writeIamArtifacts({modulePath, migrationFileName}) {
-        const security = actorSecurityModel(this.fullModel ?? this.model);
+        const model = this.fullModel ?? this.model;
+        const security = actorSecurityModel(model);
+        const iam = iamSecurityContract(model);
         const modulePrefix = modulePath ? `${modulePath.replace(/\/+$/, '')}/` : '';
         this.fs.copyTpl(this.templatePath('identity-access-management/src/main/resources/db/migration/V1__identity_access.sql.tpl'), this.destinationPath(`${modulePrefix}src/main/resources/db/migration/${migrationFileName}`), {
-            security
+            security,
+            iam
         });
         [
+            'AuthIdentityRepository.kt',
+            'BuiltinReadModelAuthIdentityRepository.kt',
+            'IamAuthorizationBootstrap.kt',
+            'IamAdminSetupResource.kt',
             'IamPermissionService.kt',
             'IamAuthResource.kt'
         ].forEach((fileName) => {
             this.fs.copyTpl(this.templatePath(`identity-access-management/src/main/kotlin/infrastructure/security/${fileName}.tpl`), this.destinationPath(`${modulePrefix}src/main/kotlin/${this.model.rootPackage.split('.').join('/')}/${IAM_PACKAGE_SEGMENT}/infrastructure/security/${fileName}`), {
-                rootPackage: this.model.rootPackage
+                rootPackage: this.model.rootPackage,
+                security,
+                iam
             });
         });
     },

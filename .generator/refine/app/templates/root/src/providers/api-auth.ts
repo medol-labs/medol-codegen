@@ -15,6 +15,9 @@ const USER_KEY = "medol-current-user";
 export const authProviderMode = (): string =>
   getAppConfig("VITE_AUTH_PROVIDER", "local");
 
+export const accessControlMode = (): string =>
+  getAppConfig("VITE_ACCESS_CONTROL_MODE", "permissive");
+
 export const authBackendBaseUrl = (): string =>
   getAppConfig("VITE_AUTH_API_URL", getAppConfig("VITE_AXON_API_URL", "http://localhost:8080"));
 

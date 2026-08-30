@@ -5,10 +5,18 @@ import org.springframework.http.ProblemDetail
 import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.server.ResponseStatusException
 import java.util.concurrent.CompletionException
 
 @RestControllerAdvice
 class ApiExceptionHandler {
+    @ExceptionHandler(ResponseStatusException::class)
+    fun responseStatus(exception: ResponseStatusException): ProblemDetail =
+        ProblemDetail.forStatusAndDetail(
+            exception.statusCode,
+            exception.reason ?: exception.message ?: "Request failed."
+        ).apply { title = exception.statusCode.toString() }
+
     @ExceptionHandler(MethodArgumentNotValidException::class)
     fun validationError(exception: MethodArgumentNotValidException): ProblemDetail =
         ProblemDetail.forStatusAndDetail(

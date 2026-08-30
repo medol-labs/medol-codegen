@@ -114,10 +114,37 @@ cd ../medol
 npm --silent run medol:to-codegen-model -- examples/fl/federation-learning.medol > examples/fl/codegen-model.json
 ```
 
-Embedded IAM writes its login resource and permission seed migration into the
+Embedded IAM writes its login resource and authorization bootstrap into the
 selected deployment module while shared JWT/current-user runtime code remains in
 `shared-kernel`. If the IAM import is omitted, the generator does not add the
 IAM domain model.
+
+Generated services can switch authentication with `MEDOL_SECURITY_PROVIDER`.
+`local` validates tokens issued by the generated `/api/auth/login` resource.
+`supabase` validates Supabase JWTs through the configured issuer or JWK set.
+When embedded IAM is present, the generated login and current-user resolver use
+the `AuthIdentityRepository` port. The default
+`BuiltinReadModelAuthIdentityRepository` maps that port to the IAM read model
+repositories generated from the embedded IAM model, and is guarded with
+`@ConditionalOnMissingBean` so projects can provide their own repository
+implementation for an existing account store, read model, or external identity
+service without renaming MEDOL fields or adopting the default storage tables.
+
+Admin bootstrap is explicit and disabled by default:
+
+```bash
+MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED=true
+MEDOL_SECURITY_ADMIN_BOOTSTRAP_SETUP_TOKEN=change-me
+```
+
+For `local`, initialize the first administrator with
+`POST /api/auth/setup-admin` using `setupToken`, `username`, and `password`.
+For `supabase`, create or invite the user in Supabase first, then call
+`POST /api/auth/setup-supabase-admin` with the Supabase bearer token and the
+same `setupToken`. Both endpoints first initialize the permissions, roles, and
+role grants derived from the combined model, then emit IAM commands to register
+and bind the administrator. They do not write storage tables directly, and both
+reject the request after an `ADMIN` user exists.
 
 For the frontend target, run `gen`, choose `refine`, then choose:
 

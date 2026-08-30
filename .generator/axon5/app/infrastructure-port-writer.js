@@ -137,6 +137,10 @@ function resultFieldsForEvent(event, command = null, stateFields = []) {
     );
 }
 
+function commandResultFields(command) {
+    return command?.resultFields ?? [];
+}
+
 function constructorArgsFromCommand(fields) {
     return fields.map((field) => `${field.name} = command.${field.name}`).join(', ');
 }
@@ -208,7 +212,10 @@ const infrastructurePortWriterMethods = {
         const capability = port.capability;
         const stateFields = commandStartsLifecycle(command) ? [] : stateFieldsBeforeCommand(command, events, slice, this.model);
         const inputImports = kotlinFieldImports(port.inputFields, this.model.rootPackage);
-        const successResultFields = resultFieldsForEvent(port.successEvent, command, stateFields);
+        const successResultFields = uniqueFields([
+            ...resultFieldsForEvent(port.successEvent, command, stateFields),
+            ...commandResultFields(command)
+        ]);
         const failureResultFields = resultFieldsForEvent(port.failureEvent, command, stateFields);
         const resultImports = kotlinFieldImports(uniqueFields([
             ...successResultFields,
@@ -298,6 +305,7 @@ class ${routerClass}(private val adapters: ObjectProvider<${capability.portName}
 
 module.exports = {
     constructorArgsFromCommand,
+    commandResultFields,
     infrastructurePortForCommand,
     manualInfrastructurePortPath,
     manualInfrastructurePortPathForCommand,

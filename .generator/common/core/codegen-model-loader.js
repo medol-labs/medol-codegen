@@ -67,7 +67,13 @@ function selectDomain(raw) {
     if (!Array.isArray(raw.domains) || raw.domains.length <= 1) {
         return undefined;
     }
-    return process.env.CODEGEN_DOMAIN || raw.domain || raw.domains[0]?.name;
+    if (process.env.CODEGEN_DOMAIN) {
+        return process.env.CODEGEN_DOMAIN;
+    }
+    if (Array.isArray(raw.deployments) && raw.deployments.length > 0) {
+        return undefined;
+    }
+    return raw.domain || raw.domains[0]?.name;
 }
 
 function selectDeployment(raw) {

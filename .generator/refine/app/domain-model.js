@@ -31,10 +31,12 @@ function buildDomainModel(source) {
                 name: component,
                 schemaName: `${component}CommandSchema`,
                 inputTypeName: `${component}CommandInput`,
-                fields: normalizeFields(command.fields).map((field) => ({
-                    ...field,
-                    schema: zodFieldExpression(field)
-                }))
+                fields: normalizeFields(command.fields)
+                    .filter((field) => !field.portOutput)
+                    .map((field) => ({
+                        ...field,
+                        schema: zodFieldExpression(field)
+                    }))
             };
         });
     return {valueTypes, commands};

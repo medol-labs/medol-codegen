@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { authProviderMode } from "@/providers/api-auth";
 import { useLink, useLogin, useRefineOptions } from "@refinedev/core";
 
 export const SignInForm = () => {
@@ -31,6 +32,7 @@ export const SignInForm = () => {
   const { title } = useRefineOptions();
 
   const { mutate: login } = useLogin();
+  const isLocalAuth = authProviderMode() === "local";
 
   const handleSignIn = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -108,10 +110,10 @@ export const SignInForm = () => {
         <CardContent className={cn("px-0")}>
           <form onSubmit={handleSignIn}>
             <div className={cn("flex", "flex-col", "gap-2")}>
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">{isLocalAuth ? "Username" : "Email"}</Label>
               <Input
                 id="email"
-                type="email"
+                type={isLocalAuth ? "text" : "email"}
                 placeholder=""
                 required
                 value={email}
@@ -147,42 +149,46 @@ export const SignInForm = () => {
                 />
                 <Label htmlFor="remember">Remember me</Label>
               </div>
-              <Link
-                to="/forgot-password"
-                className={cn(
-                  "text-sm",
-                  "flex",
-                  "items-center",
-                  "gap-2",
-                  "text-primary hover:underline",
-                  "text-blue-600",
-                  "dark:text-blue-400"
-                )}
-              >
-                <span>Forgot password</span>
-                <CircleHelp className={cn("w-4", "h-4")} />
-              </Link>
+              {!isLocalAuth && (
+                <Link
+                  to="/forgot-password"
+                  className={cn(
+                    "text-sm",
+                    "flex",
+                    "items-center",
+                    "gap-2",
+                    "text-primary hover:underline",
+                    "text-blue-600",
+                    "dark:text-blue-400"
+                  )}
+                >
+                  <span>Forgot password</span>
+                  <CircleHelp className={cn("w-4", "h-4")} />
+                </Link>
+              )}
             </div>
 
             <Button type="submit" size="lg" className={cn("w-full", "mt-6")}>
               Sign in
             </Button>
 
-            <div className={cn("flex", "items-center", "gap-4", "mt-6")}>
-              <Separator className={cn("flex-1")} />
-              <span className={cn("text-sm", "text-muted-foreground")}>or</span>
-              <Separator className={cn("flex-1")} />
-            </div>
+            {!isLocalAuth && (
+              <>
+                <div className={cn("flex", "items-center", "gap-4", "mt-6")}>
+                  <Separator className={cn("flex-1")} />
+                  <span className={cn("text-sm", "text-muted-foreground")}>or</span>
+                  <Separator className={cn("flex-1")} />
+                </div>
 
-            <div className={cn("flex", "flex-col", "gap-4", "mt-6")}>
-              <p className={cn("text-sm", "font-medium")}>Sign in using</p>
-              <div className={cn("grid grid-cols-2", "gap-6")}>
-                <Button
-                  variant="outline"
-                  className={cn("flex", "items-center", "gap-2")}
-                  onClick={handleSignInWithGoogle}
-                  type="button"
-                >
+                <div className={cn("flex", "flex-col", "gap-4", "mt-6")}>
+                  <p className={cn("text-sm", "font-medium")}>Sign in using</p>
+                  <div className={cn("grid grid-cols-2", "gap-6")}>
+                    <Button
+                      variant="outline"
+                      className={cn("flex", "items-center", "gap-2")}
+                      onClick={handleSignInWithGoogle}
+                      type="button"
+                    >
                   <svg
                     width="21"
                     height="20"
@@ -196,14 +202,14 @@ export const SignInForm = () => {
                     />
                   </svg>
 
-                  <div>Google</div>
-                </Button>
-                <Button
-                  variant="outline"
-                  className={cn("flex", "items-center", "gap-2")}
-                  onClick={handleSignInWithGitHub}
-                  type="button"
-                >
+                      <div>Google</div>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className={cn("flex", "items-center", "gap-2")}
+                      onClick={handleSignInWithGitHub}
+                      type="button"
+                    >
                   <svg
                     width="21"
                     height="20"
@@ -218,10 +224,12 @@ export const SignInForm = () => {
                       fill="currentColor"
                     />
                   </svg>
-                  <div>GitHub</div>
-                </Button>
-              </div>
-            </div>
+                      <div>GitHub</div>
+                    </Button>
+                  </div>
+                </div>
+              </>
+            )}
           </form>
         </CardContent>
 
@@ -230,7 +238,7 @@ export const SignInForm = () => {
         <CardFooter>
           <div className={cn("w-full", "text-center text-sm")}>
             <span className={cn("text-sm", "text-muted-foreground")}>
-              No account?{" "}
+              {isLocalAuth ? "Need initialization? " : "No account? "}
             </span>
             <Link
               to="/register"
@@ -241,7 +249,7 @@ export const SignInForm = () => {
                 "underline"
               )}
             >
-              Sign up
+              {isLocalAuth ? "Setup admin" : "Sign up"}
             </Link>
           </div>
         </CardFooter>

@@ -100,6 +100,12 @@ function actorSecurityModel(model) {
 
     addPermission('*:*', 'All permissions');
 
+    actorNames.push({
+        name: 'ServiceAccount',
+        title: 'Service Account',
+        roleCode: 'SERVICE_ACCOUNT'
+    });
+
     return {
         actors: actorNames.sort((left, right) => left.roleCode.localeCompare(right.roleCode)),
         permissions: Array.from(permissions.values()).sort((left, right) => left.code.localeCompare(right.code)),

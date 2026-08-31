@@ -231,6 +231,7 @@ const applicationWriterMethods = {
             'SpringSecurityCurrentUserProvider.kt',
             'InternalTokenAuthenticationFilter.kt',
             'MedolFeignSecurityConfiguration.kt',
+            'MedolRestClientSecurityConfiguration.kt',
             'MeResource.kt'
         ].forEach((fileName) => {
             this.fs.copyTpl(this.templatePath(`security/${fileName}.tpl`), this._sharedKernelKotlinPath(`shared/security/${fileName}`), {
@@ -386,8 +387,13 @@ data class ${external.className}Properties(
 import org.springframework.cloud.openfeign.FeignClient
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
+import ${this.model.rootPackage}.shared.security.MedolFeignSecurityConfiguration
 
-@FeignClient(name = "${external.configKey}", url = "\\${'${'}external.${external.configKey}.endpoint:}")
+@FeignClient(
+    name = "${external.configKey}",
+    url = "\\${'${'}external.${external.configKey}.endpoint:}",
+    configuration = [MedolFeignSecurityConfiguration::class]
+)
 interface ${external.className}Client {
 ${commandMethods}
 }

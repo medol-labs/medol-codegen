@@ -125,7 +125,7 @@ class AxonFlowLoggingConfiguration {
 
     private fun describe(message: Message): String {
         val payload = runCatching { message.payload() }.getOrNull()
-        val payloadText = payload?.toString()?.replace(Regex("\\s+"), " ")?.take(600)
+        val payloadText = payload?.toString()?.replace(Regex("\\s+"), " ")?.take(2000)
         return "messageId=${message.identifier()} type=${message.type()} payloadType=${message.payloadType().name} payload=$payloadText metadata=${message.metadata()}"
     }
 

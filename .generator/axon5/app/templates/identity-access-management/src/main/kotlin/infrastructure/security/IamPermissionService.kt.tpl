@@ -13,9 +13,13 @@ class IamPermissionService(
     private val authIdentityRepository: AuthIdentityRepository,
 ) : CurrentUserJwtResolver {
     override fun resolve(jwt: Jwt, fallback: CurrentUser): CurrentUser =
+        if (jwt.getClaimAsString("provider") == "service-account") {
+            fallback
+        } else {
         loadBySubject(jwt.subject).copy(
             username = fallback.username,
         )
+        }
 
     fun loadBySubject(subject: String): CurrentUser {
         val id = runCatching { UUID.fromString(subject) }.getOrNull()

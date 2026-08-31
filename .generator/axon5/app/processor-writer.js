@@ -401,10 +401,15 @@ ${fieldImports ? `${fieldImports}\n` : ''}
 import org.springframework.cloud.openfeign.FeignClient
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
+import ${this.model.rootPackage}.shared.security.MedolFeignSecurityConfiguration
 
 ${requestTypes}
 
-@FeignClient(name = "${configKey}", url = "\\${'${'}integration.${configKey}.endpoint:}")
+@FeignClient(
+    name = "${configKey}",
+    url = "\\${'${'}integration.${configKey}.endpoint:}",
+    configuration = [MedolFeignSecurityConfiguration::class]
+)
 interface ${clientClass} {
 ${methods}
 }

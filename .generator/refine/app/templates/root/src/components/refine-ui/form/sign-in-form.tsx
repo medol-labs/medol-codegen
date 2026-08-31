@@ -58,41 +58,59 @@ export const SignInForm = () => {
   return (
     <div
       className={cn(
+        "bg-background",
         "flex",
         "flex-col",
         "items-center",
         "justify-center",
         "px-6",
-        "py-8",
+        "py-10",
         "min-h-svh"
       )}
     >
-      <div className={cn("flex", "items-center", "justify-center")}>
-        {title.icon && (
+      <div className={cn("w-full", "max-w-[420px]")}>
+        <div className={cn("flex", "flex-col", "items-center", "gap-3")}>
           <div
             className={cn(
-              "text-foreground",
+              "flex",
               "h-14",
               "w-14",
-              "[&>img]:h-full",
-              "[&>img]:w-full",
+              "shrink-0",
+              "items-center",
+              "justify-center",
+              "overflow-hidden",
+              "rounded-md",
+              "[&>img]:block",
+              "[&>img]:max-h-full",
+              "[&>img]:max-w-full",
               "[&>img]:object-contain",
-              "[&>svg]:h-full",
-              "[&>svg]:w-full"
+              "[&>svg]:h-10",
+              "[&>svg]:w-10"
             )}
           >
             {title.icon}
           </div>
-        )}
+          {title.text && (
+            <div
+              className={cn(
+                "max-w-full",
+                "truncate",
+                "text-center",
+                "text-xl",
+                "font-semibold"
+              )}
+            >
+              {title.text}
+            </div>
+          )}
+        </div>
       </div>
 
-      <Card className={cn("sm:w-[456px]", "p-12", "mt-6")}>
+      <Card className={cn("w-full", "max-w-[420px]", "p-8", "mt-6")}>
         <CardHeader className={cn("px-0")}>
           <CardTitle
             className={cn(
-              "text-blue-600",
-              "dark:text-blue-400",
-              "text-3xl",
+              "text-2xl",
               "font-semibold"
             )}
           >
@@ -157,9 +175,7 @@ export const SignInForm = () => {
                     "flex",
                     "items-center",
                     "gap-2",
-                    "text-primary hover:underline",
-                    "text-blue-600",
-                    "dark:text-blue-400"
+                    "text-primary hover:underline"
                   )}
                 >
                   <span>Forgot password</span>
@@ -243,8 +259,7 @@ export const SignInForm = () => {
             <Link
               to="/register"
               className={cn(
-                "text-green-600",
-                "dark:text-green-400",
+                "text-primary",
                 "font-semibold",
                 "underline"
               )}

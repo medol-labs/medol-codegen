@@ -40,6 +40,7 @@ const {
     conceptHasState,
     transitionUsesConceptState,
     renderStateGuard,
+    eventFanOut,
     eventArguments,
     fallbackValue,
     nullableType,
@@ -355,10 +356,40 @@ ${sourcingHandlers}
             );
             const transition = transitionForCommand(this.model, command);
             const guard = commandStartsLifecycle(command) ? '' : `${renderStateGuard(this.model, transition)}\n`;
-            const eventLines = [
-                ...reservationEvents,
-                ...outputs.map((event) => `            ${_eventTitle(event.title)}(${eventArguments(event, command, selection, readableStateFields)})`)
+            const eventExpressions = [
+                ...reservationEvents.map((expression) => ({kind: 'single', expression})),
+                ...outputs.map((event) => {
+                    const fanOut = eventFanOut(event, command, selection, slice);
+                    if (!fanOut) {
+                        return {
+                            kind: 'single',
+                            expression: `${_eventTitle(event.title)}(${eventArguments(event, command, selection, readableStateFields, {}, slice)})`
+                        };
+                    }
+                    return {
+                        kind: 'many',
+                        expression: `command.${fanOut.source.name}.map { ${fanOut.field.name} ->
+                ${_eventTitle(event.title)}(${eventArguments(event, command, selection, readableStateFields, {[fanOut.field.name]: fanOut.field.name}, slice)})
+            }`
+                    };
+                })
             ];
+            const renderEventReturn = () => {
+                if (eventExpressions.length === 0) {
+                    return 'return emptyList() // TODO: return the event produced by this command.';
+                }
+                if (eventExpressions.length === 1 && eventExpressions[0].kind === 'many') {
+                    return `return ${eventExpressions[0].expression}`;
+                }
+                if (eventExpressions.every((expression) => expression.kind === 'single')) {
+                    return `return listOf(\n${eventExpressions.map((item) => `            ${item.expression}`).join(',\n')}\n        )`;
+                }
+                return `return buildList<Any> {
+${eventExpressions.map((item) => item.kind === 'single'
+                    ? `            add(${item.expression})`
+                    : `            addAll(${item.expression})`).join('\n')}
+        }`;
+            };
             const returnStatement = usePort
                 ? (() => {
                     const success = port.successEvent;
@@ -383,9 +414,7 @@ ${sourcingHandlers}
                         '        }'
                     ].join('\n        ');
                 })()
-                : outputs.length > 0
-                    ? `return listOf(\n${eventLines.join(',\n')}\n        )`
-                    : 'return emptyList() // TODO: return the event produced by this command.';
+                : renderEventReturn();
             const signature = `fun decide(command: ${commandName}${stateParam}${reservationParams}${portParams}): List<Any>`;
             const implementation = `    ${signature} {\n${guard}${reservationGuard ? `${reservationGuard}\n` : ''}        ${returnStatement}\n    }`;
             return {signature, implementation};

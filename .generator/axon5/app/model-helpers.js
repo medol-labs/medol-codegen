@@ -228,7 +228,7 @@ function eventFieldsWithTags(fields, tagFields) {
     const eventShape = {fields: result};
     (tagFields ?? [])
         .filter((tagField) => !tagField.derived)
-        .filter((tagField) => !existing.has(tagField.alias))
+        .filter((tagField) => !existing.has(tagField.alias) && !existing.has(tagField.source))
         .forEach((tagField) => {
             result.push({
                 name: tagField.alias,
@@ -485,8 +485,45 @@ function fieldsCompatible(target, source) {
     return mappedType(target, false).replace(/\?$/, '') === mappedType(source, false).replace(/\?$/, '');
 }
 
-function eventArguments(event, command, selection, stateFields = []) {
-    const eventFields = eventFieldsWithTags(event.fields ?? [], eventTagFieldsFor({tags: [], concepts: []}, event, selection ?? {fields: []}, true));
+function elementFieldsCompatible(target, source) {
+    return String(target.type ?? '').toLowerCase() === String(source.type ?? '').toLowerCase()
+        && String(target.valueType?.name ?? '') === String(source.valueType?.name ?? '');
+}
+
+function pluralFieldCandidates(name) {
+    const value = String(name ?? '');
+    return [
+        `${value}s`,
+        value.endsWith('y') ? `${value.slice(0, -1)}ies` : undefined
+    ].filter(Boolean);
+}
+
+function fanOutSourceForEventField(field, commandFields) {
+    const candidates = pluralFieldCandidates(field.name);
+    return commandFields.find((candidate) =>
+        candidates.includes(candidate.name)
+        && candidate.cardinality === 'Multiple'
+        && elementFieldsCompatible(field, candidate)
+    );
+}
+
+function eventFanOut(event, command, selection, slice = {tags: [], concepts: []}) {
+    const eventFields = eventFieldsWithTags(event.fields ?? [], eventTagFieldsFor(slice, event, selection ?? {fields: []}, true));
+    const commandFields = commandFieldsWithSelection(command, selection ?? {fields: []});
+    const field = eventFields.find((candidate) =>
+        !commandFields.some((commandField) => commandField.name === candidate.name)
+        && fanOutSourceForEventField(candidate, commandFields)
+    );
+    if (!field) return undefined;
+    return {
+        field,
+        source: fanOutSourceForEventField(field, commandFields)
+    };
+}
+
+function eventArguments(event, command, selection, stateFields = [], variableOverrides = {}, slice = {tags: [], concepts: []}) {
+    const eventFields = eventFieldsWithTags(event.fields ?? [], eventTagFieldsFor(slice, event, selection ?? {fields: []}, true))
+        .filter((field) => field.defaultValue === undefined);
     const commandFields = commandFieldsWithSelection(command, selection ?? {fields: []});
     const stateFieldMap = new Map((stateFields ?? []).map((field) => [field.name, field]));
     const renderCommandField = (field, source) => {
@@ -501,8 +538,11 @@ function eventArguments(event, command, selection, stateFields = []) {
         return `requireNotNull(state.${source.name}) { "${field.name} is required from state." }`;
     };
     return eventFields.map((field) => {
+        if (variableOverrides[field.name]) return `${field.name} = ${variableOverrides[field.name]}`;
         const sameName = commandFields.find((candidate) => candidate.name === field.name);
         if (sameName) return `${field.name} = ${renderCommandField(field, sameName)}`;
+        const fanOutSource = fanOutSourceForEventField(field, commandFields);
+        if (fanOutSource) return `${field.name} = ${field.name}`;
         const stateSameName = stateFieldMap.get(field.name);
         if (stateSameName) return `${field.name} = ${renderStateField(field, stateSameName)}`;
         const source = field.source?.from?.find((name) => {
@@ -854,6 +894,7 @@ module.exports = {
     conceptHasState,
     transitionUsesConceptState,
     renderStateGuard,
+    eventFanOut,
     eventArguments,
     fallbackValue,
     nullableType,

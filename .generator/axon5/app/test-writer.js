@@ -217,7 +217,10 @@ function renderPortResult(port, expectedEvent, command, stateFields = []) {
     if (!port) return undefined;
     const outcome = expectedEvent.id === port.failureEvent?.id ? 'Rejected' : 'Succeeded';
     const sourceEvent = outcome === 'Rejected' ? port.failureEvent : port.successEvent;
-    const args = resultFieldsForEvent(sourceEvent, command, stateFields)
+    const args = uniqueBy([
+        ...resultFieldsForEvent(sourceEvent, command, stateFields),
+        ...(command?.resultFields ?? [])
+    ], (field) => field.name)
         .map((field) => {
             const expected = expectedFieldValue(field, expectedEvent, command) ?? testValue(field);
             return `                ${field.name} = ${expected}`;

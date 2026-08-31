@@ -12,7 +12,7 @@ class MedolFeignSecurityConfiguration {
     fun medolInternalTokenRequestInterceptor(properties: MedolSecurityProperties): RequestInterceptor =
         RequestInterceptor { template ->
             val token = properties.internalToken.trim()
-            if (properties.enabled && token.isNotBlank()) {
+            if (token.isNotBlank()) {
                 template.header(InternalTokenAuthenticationFilter.INTERNAL_TOKEN_HEADER, token)
             }
         }

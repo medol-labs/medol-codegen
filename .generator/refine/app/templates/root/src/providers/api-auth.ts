@@ -33,6 +33,46 @@ export const storeLocalAuth = (token: string, user?: CurrentUser) => {
   }
 };
 
+export type PortalSsoExchangeResponse = {
+  accessToken: string;
+  tokenType: string;
+  expiresAt: number;
+  user: CurrentUser;
+  redirectPath: string;
+  registrationRequired: boolean;
+  permissionAssignmentRequired: boolean;
+  notice?: string | null;
+};
+
+export const exchangePortalJwtForSystemSession = async (params: {
+  portalJwt: string;
+  requestedPath?: string | null;
+  systemSource?: string | null;
+}): Promise<PortalSsoExchangeResponse> => {
+  const response = await fetch(`${authBackendBaseUrl()}/api/auth/exchange-portal-jwt`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(params),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    try {
+      const payload = JSON.parse(text);
+      throw new Error(payload.detail || payload.title || "Portal sign-in failed");
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        throw new Error(text || "Portal sign-in failed");
+      }
+      throw error;
+    }
+  }
+
+  return response.json();
+};
+
 export const clearLocalAuth = () => {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
@@ -52,12 +92,17 @@ export const cachedCurrentUser = (): CurrentUser | null => {
 };
 
 export const getAccessToken = async (): Promise<string | undefined> => {
+  const localToken = localStorage.getItem(TOKEN_KEY) ?? undefined;
+  if (localToken) {
+    return localToken;
+  }
+
   if (authProviderMode() === "supabase") {
     const { data } = await supabaseClient.auth.getSession();
     return data.session?.access_token;
   }
 
-  return localStorage.getItem(TOKEN_KEY) ?? undefined;
+  return undefined;
 };
 
 export const authHeaders = async (): Promise<Record<string, string>> => {

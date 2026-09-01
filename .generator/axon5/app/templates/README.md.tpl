@@ -49,6 +49,62 @@ Default ports:
 - Axon Server UI: `http://localhost:8024`; override with `AXON_SERVER_HTTP_PORT`
 - Axon Server gRPC: `localhost:8124`; override with `AXON_SERVER_SERVERS`
 
+## Auth
+
+Generated services support two regular authentication providers:
+
+- `MEDOL_SECURITY_PROVIDER=local` uses generated local login and system JWTs.
+- `MEDOL_SECURITY_PROVIDER=supabase` validates Supabase JWTs.
+
+When the generated model includes `IdentityAccessManagement`, auth identity and permission checks are resolved through the generated IAM read models by the built-in `AuthIdentityRepository` adapter. The security layer does not read IAM tables directly; it depends on the repository boundary so generated projects can replace or extend the adapter when their IAM model changes.
+
+### User Source
+
+`RegisterUserAccount.userSource` is an optional technical field used to record where an account came from. It is written to the user registration event and projected to `UserAccountCatalog.userSource` for audit, filtering, and operations visibility.
+
+Normal generated user-maintenance forms leave `userSource` empty and do not require an operator to fill it. Fixed auth flows set it explicitly:
+
+- Local admin setup writes `LOCAL`.
+- Supabase admin setup writes `SUPABASE`.
+- Portal SSO writes `MEDOL_SECURITY_PORTAL_SSO_USER_SOURCE`, defaulting to `PORTAL_SSO`.
+
+Authorization decisions should still be based on roles and permissions, not on `userSource` alone.
+
+### Portal SSO Exchange
+
+Portal SSO is implemented as a fixed auth endpoint, not as a Medol-modeled command page:
+
+```http
+POST /api/auth/exchange-portal-jwt
+```
+
+Request body:
+
+```json
+{
+  "portalJwt": "<portal-issued-jwt>",
+  "requestedPath": "/target-page",
+  "systemSource": "PORTAL"
+}
+```
+
+Enable and configure it with:
+
+```bash
+MEDOL_SECURITY_PORTAL_SSO_ENABLED=true
+MEDOL_SECURITY_PORTAL_SSO_JWT_SECRET=<portal-hs256-secret>
+MEDOL_SECURITY_PORTAL_SSO_ISSUER=<optional-issuer>
+MEDOL_SECURITY_PORTAL_SSO_AUDIENCE=<optional-audience>
+MEDOL_SECURITY_PORTAL_SSO_DEFAULT_REDIRECT_PATH=/
+MEDOL_SECURITY_PORTAL_SSO_USER_SOURCE=PORTAL_SSO
+```
+
+The endpoint validates the portal JWT signature, expiration, and optional issuer/audience. It maps the portal subject to `providerSubject=portal|<sub>`.
+
+If the user already exists, the service returns a normal system JWT and does not change the existing account source. If the user does not exist, the service registers the account through the generated `RegisterUserAccount` command with `passwordHash=null` and `userSource` from request `systemSource`; when `systemSource` is omitted, it falls back to `MEDOL_SECURITY_PORTAL_SSO_USER_SOURCE`. The response then returns a system JWT with no permissions so the frontend can show an "awaiting permission assignment" state. An administrator must assign roles before the user can access protected menus and commands.
+
+When `MEDOL_SECURITY_PROVIDER=supabase` and Portal SSO is enabled, the backend accepts both Supabase JWTs and generated system JWTs for subsequent API calls. This allows a portal login handoff to coexist with Supabase mode.
+
 ## Event Storage Mode
 
 The default event storage is Axon Server, which supports multiple Axon event tags per event.

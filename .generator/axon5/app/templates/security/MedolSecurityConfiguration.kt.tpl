@@ -45,16 +45,14 @@ class MedolSecurityConfiguration {
     @Bean
     fun medolJwtDecoder(properties: MedolSecurityProperties): JwtDecoder {
         if (!properties.enabled || properties.provider.equals("local", ignoreCase = true)) {
-            return NimbusJwtDecoder
-                .withSecretKey(secretKey(properties))
-                .macAlgorithm(MacAlgorithm.HS256)
-                .build()
+            return localJwtDecoder(properties)
         }
 
         if (properties.provider.equals("supabase", ignoreCase = true)) {
             val jwkSetUri = properties.supabase.jwkSetUri.trim()
             if (jwkSetUri.isNotBlank()) {
-                return NimbusJwtDecoder.withJwkSetUri(jwkSetUri).build()
+                val supabaseDecoder: JwtDecoder = NimbusJwtDecoder.withJwkSetUri(jwkSetUri).build()
+                return if (properties.portalSso.enabled) compositeJwtDecoder(supabaseDecoder, localJwtDecoder(properties)) else supabaseDecoder
             }
 
             val issuerUri = properties.supabase.issuerUri.trim()
@@ -62,11 +60,28 @@ class MedolSecurityConfiguration {
                 "medol.security.supabase.issuer-uri or jwk-set-uri is required when Supabase auth is enabled."
             }
 
-            return JwtDecoders.fromIssuerLocation(issuerUri)
+            val supabaseDecoder: JwtDecoder = JwtDecoders.fromIssuerLocation(issuerUri)
+            return if (properties.portalSso.enabled) compositeJwtDecoder(supabaseDecoder, localJwtDecoder(properties)) else supabaseDecoder
         }
 
         throw IllegalArgumentException("Unsupported medol.security.provider: ${properties.provider}")
     }
+
+    private fun localJwtDecoder(properties: MedolSecurityProperties): JwtDecoder =
+        NimbusJwtDecoder
+            .withSecretKey(secretKey(properties))
+            .macAlgorithm(MacAlgorithm.HS256)
+            .build()
+
+    private fun compositeJwtDecoder(primary: JwtDecoder, fallback: JwtDecoder): JwtDecoder =
+        object : JwtDecoder {
+            override fun decode(token: String): Jwt =
+                runCatching { primary.decode(token) }
+                    .getOrElse { primaryFailure ->
+                        runCatching { fallback.decode(token) }
+                            .getOrElse { throw primaryFailure }
+                    }
+        }
 
     @Bean
     fun medolJwtAuthenticationConverter(
@@ -111,6 +126,7 @@ class MedolSecurityConfiguration {
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 .requestMatchers(
                     "/api/auth/login",
+                    "/api/auth/exchange-portal-jwt",
                     "/api/auth/setup-admin",
                     "/api/auth/setup-supabase-admin",
                     "/actuator/health",

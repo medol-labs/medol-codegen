@@ -53,6 +53,7 @@ class IamAdminSetupResource(
             userAccountId = userId,
             username = username,
             providerSubject = userId.toString(),
+            userSource = "LOCAL",
             passwordHash = passwordEncoder.encode(password),
             servletRequest = servletRequest,
         )
@@ -80,6 +81,7 @@ class IamAdminSetupResource(
             userAccountId = subject.toStableUserId(),
             username = username,
             providerSubject = subject,
+            userSource = "SUPABASE",
             passwordHash = null,
             servletRequest = servletRequest,
         )
@@ -89,6 +91,7 @@ class IamAdminSetupResource(
         userAccountId: UUID,
         username: String,
         providerSubject: String,
+        userSource: String,
         passwordHash: String?,
         servletRequest: HttpServletRequest,
     ): CompletableFuture<AdminSetupResponse> {
@@ -98,6 +101,7 @@ class IamAdminSetupResource(
                 userAccountId = userAccountId,
                 username = username,
                 providerSubject = providerSubject,
+                userSource = userSource,
                 passwordHash = passwordHash,
             ),
             AssignRoleToUserCommand(

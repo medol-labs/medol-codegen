@@ -26,10 +26,12 @@ import { Dashboard } from "../pages/dashboard";
 import { ForgotPassword } from "../pages/forgot-password";
 import { Login } from "../pages/login";
 import { Register } from "../pages/register";
+import { PortalSso } from "../pages/sso/portal";
 
 export const AppRouter = () => {
   return (
     <Routes>
+      <Route path="/sso/portal" element={<PortalSso />} />
       <Route
         element={
           <Authenticated

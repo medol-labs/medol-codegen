@@ -62,6 +62,13 @@ medol:
     supabase:
       issuer-uri: ${SUPABASE_JWT_ISSUER_URI:}
       jwk-set-uri: ${SUPABASE_JWT_JWK_SET_URI:}
+    portal-sso:
+      enabled: ${MEDOL_SECURITY_PORTAL_SSO_ENABLED:false}
+      jwt-secret: ${MEDOL_SECURITY_PORTAL_SSO_JWT_SECRET:}
+      issuer: ${MEDOL_SECURITY_PORTAL_SSO_ISSUER:}
+      audience: ${MEDOL_SECURITY_PORTAL_SSO_AUDIENCE:}
+      default-redirect-path: ${MEDOL_SECURITY_PORTAL_SSO_DEFAULT_REDIRECT_PATH:/}
+      user-source: ${MEDOL_SECURITY_PORTAL_SSO_USER_SOURCE:PORTAL_SSO}
   axon:
     flow-logging:
       enabled: ${MEDOL_AXON_FLOW_LOGGING_ENABLED:true}

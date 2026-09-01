@@ -85,6 +85,36 @@ docker compose up -d
 
 The compose file maps `${CONSOLE_PORT:-5173}` on the host to nginx port `80` in the container. Override `CONSOLE_IMAGE` when using a custom image name.
 
+## Auth
+
+The generated frontend supports local auth and Supabase auth through `VITE_AUTH_PROVIDER`. It also supports a fixed Portal SSO callback page when the backend has Portal SSO enabled.
+
+### Portal SSO Page
+
+The callback route is:
+
+```text
+/sso/portal?token=<portal-jwt>&redirect=/target-page&systemSource=PORTAL
+```
+
+The page also accepts `jwt` or `portalJwt` instead of `token`, `requestedPath` instead of `redirect`, and `userSource` instead of `systemSource`.
+
+The page calls:
+
+```http
+POST /api/auth/exchange-portal-jwt
+```
+
+using `VITE_AUTH_API_URL` as the auth backend base URL. The backend validates the portal JWT, registers a missing user if needed, and returns a system JWT. When `systemSource` is present in the callback URL, the frontend passes it to the backend so the new user's source can be recorded. The frontend stores the returned JWT in local auth storage and then navigates to the returned redirect path.
+
+If the backend reports that permissions are not assigned yet, the page keeps the user signed in but shows an awaiting-permission state. The user must contact an administrator so roles can be assigned.
+
+### Token Selection
+
+When a local system JWT is present, the frontend uses it for API calls. If no local JWT exists and `VITE_AUTH_PROVIDER=supabase`, the frontend falls back to the current Supabase session token.
+
+This lets Portal SSO coexist with Supabase mode: portal users receive a generated system JWT, while normal Supabase users continue to use Supabase JWTs.
+
 ## Learn More
 
 To learn more about **Refine**, please check out the [Documentation](https://refine.dev/docs)

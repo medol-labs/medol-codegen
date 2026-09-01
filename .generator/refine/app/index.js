@@ -311,7 +311,8 @@ module.exports = class extends Generator {
             appTitle: toDisplayName(appName),
             imageName: `${toKebab(appName)}-console`,
             imageTarName: `${toKebab(appName)}-console-images.tar`,
-            backendModules: model.backendModules
+            backendModules: model.backendModules,
+            authBackendModule: model.authBackendModule
         };
 
         this.fs.copyTpl(

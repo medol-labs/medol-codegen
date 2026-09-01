@@ -6,6 +6,7 @@ import {
   cachedCurrentUser,
   clearLocalAuth,
   fetchCurrentUser,
+  getAccessToken,
   storeLocalAuth,
 } from "./api-auth";
 import { supabaseClient } from "./supabase-client";
@@ -353,6 +354,14 @@ const authProvider: AuthProvider = {
   },
   check: async () => {
     try {
+      if (await getAccessToken() && cachedCurrentUser()) {
+        await fetchCurrentUser();
+
+        return {
+          authenticated: true,
+        };
+      }
+
       if (authProviderMode() === "local") {
         await fetchCurrentUser();
 

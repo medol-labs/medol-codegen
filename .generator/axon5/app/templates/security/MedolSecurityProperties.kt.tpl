@@ -16,6 +16,7 @@ data class MedolSecurityProperties(
     var internalPermissions: List<String> = listOf("*:*"),
     var adminBootstrap: AdminBootstrap = AdminBootstrap(),
     var supabase: Supabase = Supabase(),
+    var portalSso: PortalSso = PortalSso(),
 ) {
     data class AdminBootstrap(
         var enabled: Boolean = false,
@@ -25,5 +26,14 @@ data class MedolSecurityProperties(
     data class Supabase(
         var issuerUri: String = "",
         var jwkSetUri: String = "",
+    )
+
+    data class PortalSso(
+        var enabled: Boolean = false,
+        var jwtSecret: String = "",
+        var issuer: String = "",
+        var audience: String = "",
+        var defaultRedirectPath: String = "/",
+        var userSource: String = "PORTAL_SSO",
     )
 }

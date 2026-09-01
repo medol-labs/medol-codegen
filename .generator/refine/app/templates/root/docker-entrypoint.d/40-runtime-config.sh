@@ -7,7 +7,12 @@ js_escape() {
 
 auth_api_url="${VITE_AUTH_API_URL:-}"
 if [ -z "$auth_api_url" ]; then
-  auth_api_url="${<%= authBackendModule.envName %>:-${VITE_AXON_API_URL:-}}"
+<% const authEnvName = (typeof authBackendModule !== 'undefined' && authBackendModule && authBackendModule.envName) ? authBackendModule.envName : 'VITE_AXON_API_URL'; -%>
+<% if (authEnvName === 'VITE_AXON_API_URL') { -%>
+  auth_api_url="${VITE_AXON_API_URL:-}"
+<% } else { -%>
+  auth_api_url="${<%= authEnvName %>:-${VITE_AXON_API_URL:-}}"
+<% } -%>
 fi
 
 cat >/usr/share/nginx/html/runtime-config.js <<EOF

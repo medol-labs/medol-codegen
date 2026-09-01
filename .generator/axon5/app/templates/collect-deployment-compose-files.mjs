@@ -66,8 +66,8 @@ function collectFiles(files) {
 function envExamplesFor(composeFile) {
     const directory = dirname(composeFile);
     return [
-        join(directory, '.env.example'),
-        join(directory, 'env.example')
+        join(directory, '.env-example'),
+        join(directory, 'env-example')
     ].filter((file) => existsSync(file) && statSync(file).isFile());
 }
 

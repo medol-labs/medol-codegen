@@ -161,12 +161,12 @@ const applicationWriterMethods = {
         this.fs.copy(this.templatePath('gitignore'), this._destPath('.gitignore'));
         if (!this.modulePrefix) {
             if (hasInfra) {
-                this.fs.copyTpl(this.templatePath('env.example'), this._destPath('.env.example'), runtime);
+                this.fs.copyTpl(this.templatePath('env-example'), this._destPath('.env-example'), runtime);
             }
             this._copyMavenWrapper();
             this._writeDevSeedScript();
         } else if (hasInfra) {
-            this.fs.copyTpl(this.templatePath('env.example'), this._destPath('.env.example'), runtime);
+            this.fs.copyTpl(this.templatePath('env-example'), this._destPath('.env-example'), runtime);
         }
         this._writeValueTypes();
         if (!this._usesSharedKernelModule()) {

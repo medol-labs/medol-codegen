@@ -213,7 +213,7 @@ deployment/
   dev/
     deployment-model.json
     README.md
-    .env.example
+    .env-example
     docker-compose/docker-compose.yml
     infrastructure/apisix/config.yaml
     infrastructure/apisix/apisix.yaml
@@ -285,7 +285,7 @@ Generated files are written under the current directory:
 ```text
 package.json
 Dockerfile
-.env.example
+.env-example
 README.md
 simulation-model.json
 scenarios/<scenario-id>.json

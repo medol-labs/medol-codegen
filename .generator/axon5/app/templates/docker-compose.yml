@@ -2,6 +2,7 @@ services:
   postgres:
     image: postgres:16
     platform: ${DOCKER_PLATFORM:-}
+    restart: unless-stopped
     ports:
       - "${DB_PORT:-<%= dbPort %>}:5432"
     environment:
@@ -19,6 +20,7 @@ services:
   # axon-server:
   #   image: axoniq/axonserver:2026.0.3-jdk-21
   #   hostname: axon-server
+  #   restart: unless-stopped
   #   profiles:
   #     - axon-server
   #   ports:
@@ -42,6 +44,7 @@ services:
   umadb:
     image: umadb/umadb:0.7.8
     platform: ${DOCKER_PLATFORM:-}
+    restart: unless-stopped
     ports:
       - "${UMADB_PORT:-<%= umadbPort %>}:50051"
     volumes:
@@ -50,6 +53,7 @@ services:
   <%= appName %>:
     image: ${APP_IMAGE:-medol/<%= appName %>:0.0.1-SNAPSHOT}
     platform: ${DOCKER_PLATFORM:-}
+    restart: unless-stopped
     profiles:
       - application
     depends_on:

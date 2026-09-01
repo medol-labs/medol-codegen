@@ -16,6 +16,10 @@ export const backendModules = [
 <% }) -%>
 ];
 
+export const authBackendModule =
+  backendModules.find((module) => module.name === "<%= authBackendModule.name %>")
+  ?? backendModules[0];
+
 export const fileUploadCapability = <%- fileUploadCapability ? JSON.stringify(fileUploadCapability, null, 2) : 'null' %> as const;
 
 export const resources: IResourceItem[] = [

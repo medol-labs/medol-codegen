@@ -29,7 +29,7 @@ function simulationFiles(model, options = {}) {
 function serviceFiles(root, model) {
     return {
         [outputPath(root, 'package.json')]: renderPackageJson(model),
-        [outputPath(root, '.env.example')]: renderEnvExample(),
+        [outputPath(root, '.env-example')]: renderEnvExample(),
         [outputPath(root, 'Dockerfile')]: renderDockerfile(),
         [outputPath(root, 'src/server.js')]: renderServer(),
         [outputPath(root, 'src/cli.js')]: renderCli(),

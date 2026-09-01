@@ -37,7 +37,7 @@ function dockerComposeFiles(model, environmentName = 'dev', options = {}) {
     const root = trimRoot(options.root ?? environmentName);
     return {
         [`${root}/docker-compose/docker-compose.yml`]: renderDockerCompose(model, environmentName),
-        [`${root}/.env.example`]: renderEnvironmentExample(model, environmentName),
+        [`${root}/.env-example`]: renderEnvironmentExample(model, environmentName),
         [`${root}/infrastructure/postgres/init/01-create-databases.sql`]: renderPostgresInitSql(model),
         [`${root}/docker-compose/README.md`]: renderComposeReadme(environmentName)
     };
@@ -267,7 +267,7 @@ function renderComposeReadme(environmentName) {
         `Run the ${environmentName} topology from this directory:`,
         '',
         '```bash',
-        'cp ../.env.example .env',
+        'cp ../.env-example .env',
         'docker compose --env-file .env up -d',
         '```',
         '',

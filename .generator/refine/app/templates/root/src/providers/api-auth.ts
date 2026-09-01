@@ -1,4 +1,5 @@
 import { getAppConfig } from "./app-config";
+import { authBackendModule } from "./resources";
 import { supabaseClient } from "./supabase-client";
 
 export type CurrentUser = {
@@ -20,7 +21,10 @@ export const accessControlMode = (): string =>
   getAppConfig("VITE_ACCESS_CONTROL_MODE", "permissive");
 
 export const authBackendBaseUrl = (): string =>
-  getAppConfig("VITE_AUTH_API_URL", getAppConfig("VITE_AXON_API_URL", "http://localhost:8080"));
+  getAppConfig(
+    "VITE_AUTH_API_URL",
+    authBackendModule?.apiUrl ?? getAppConfig("VITE_AXON_API_URL", "http://localhost:8080"),
+  );
 
 export const storeLocalAuth = (token: string, user?: CurrentUser) => {
   localStorage.setItem(TOKEN_KEY, token);

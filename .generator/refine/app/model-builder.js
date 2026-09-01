@@ -38,15 +38,30 @@ function buildFrontendModel(source, selectedCommandKeys) {
     const chapters = withChapterI18n(uniqueChapters(resources.map((resource) => resource.chapter).filter(Boolean)));
     const i18n = buildI18nModel(source, chapters, resources);
     const fileUploadCapability = buildFileUploadCapability(slices, allAggregates, allContexts, backendModules);
+    const authBackendModule = buildAuthBackendModule(modules);
 
     return {
         appName: source.domain ?? 'Event Sourcing App',
         backendModules: modules,
+        authBackendModule,
         fileUploadCapability,
         chapters,
         resources: resources.sort((a, b) => a.route.localeCompare(b.route)),
         i18n
     };
+}
+
+function buildAuthBackendModule(backendModules) {
+    return backendModules.find((module) => (module.contexts ?? []).includes('IdentityAccessManagement'))
+        ?? backendModules[0]
+        ?? {
+            name: 'default',
+            label: 'Backend',
+            dataProviderName: 'command',
+            envName: 'VITE_AXON_API_URL',
+            defaultApiUrl: 'http://localhost:8080',
+            apiUrl: 'http://localhost:8080'
+        };
 }
 
 function withStateFieldOptions(source) {

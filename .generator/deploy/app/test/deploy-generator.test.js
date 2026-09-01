@@ -109,7 +109,7 @@ test('generates deployment target file sets', () => {
     assert(files['dev/deployment-model.json']);
     assert(files['dev/infrastructure/apisix/apisix.yaml']);
     assert(files['dev/docker-compose/docker-compose.yml']);
-    assert(files['dev/.env.example']);
+    assert(files['dev/.env-example']);
     assert(files['dev/kubernetes/base/applications.yaml']);
     assert(files['dev/kubernetes/environments/dev/kustomization.yaml']);
     assert(!files['dev/kubernetes/environments/prod/kustomization.yaml']);

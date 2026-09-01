@@ -14,14 +14,14 @@ Run this module from the generated multi-module root so Maven can include the si
 
 ```bash
 cd ..
-cp <%= modulePrefix %>/.env.example <%= modulePrefix %>/.env
+cp <%= modulePrefix %>/.env-example <%= modulePrefix %>/.env
 ./mvnw -pl <%= modulePrefix %> -am spring-boot:run
 ```
 <% } else if (hasInfra) { -%>
 Run a backend module from this generated multi-module root. Each deployment module owns its own `docker-compose.yml`:
 
 ```bash
-cp <module-name>/.env.example <module-name>/.env
+cp <module-name>/.env-example <module-name>/.env
 ./mvnw -pl <module-name> -am spring-boot:run
 ```
 <% } else { -%>
@@ -83,15 +83,15 @@ Use the generated UmaDB DCB event store adapter from the `axon-event-storage-uma
 ```bash
 <% if (modulePrefix) { -%>
 cd ..
-cp <%= modulePrefix %>/.env.example <%= modulePrefix %>/.env
+cp <%= modulePrefix %>/.env-example <%= modulePrefix %>/.env
 docker compose -f <%= modulePrefix %>/docker-compose.yml up -d postgres umadb
 ./mvnw -pl <%= modulePrefix %> -am spring-boot:run
 <% } else if (hasInfra) { -%>
-cp <module-name>/.env.example <module-name>/.env
+cp <module-name>/.env-example <module-name>/.env
 docker compose -f <module-name>/docker-compose.yml up -d postgres umadb
 ./mvnw -pl <module-name> -am spring-boot:run
 <% } else { -%>
-cp .env.example .env
+cp .env-example .env
 docker compose up -d postgres umadb
 ./mvnw spring-boot:run
 <% } -%>
@@ -203,7 +203,7 @@ Preview the discovered dependency images:
 node scripts/dependency-images.mjs list
 ```
 
-Collect deployment Docker Compose files and matching `.env.example` files into one folder:
+Collect deployment Docker Compose files and matching `.env-example` files into one folder:
 
 ```bash
 node scripts/collect-deployment-compose-files.mjs --clean

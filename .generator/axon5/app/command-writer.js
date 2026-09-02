@@ -24,6 +24,7 @@ const {
     fallbackTags,
     selectionTargetFor,
     stateTargetFor,
+    relatedStateForCommand,
     primaryConcept,
     childStateTransitions,
     childTransitionKeyField,
@@ -114,6 +115,7 @@ function uploadMetadataExpression(field, storedVariable) {
         case 'originalFileName': return `${storedVariable}.originalFileName`;
         case 'contentType': return `${storedVariable}.contentType`;
         case 'sizeBytes': return `${storedVariable}.sizeBytes`;
+        case 'fileLocation':
         case 'stagedFileLocation': return `${storedVariable}.location`;
         case 'checksum': return `${storedVariable}.checksum`;
         case 'expiresAt': return `${storedVariable}.expiresAt`;
@@ -177,10 +179,16 @@ ${reservationSelections ? `\n${reservationSelections}` : ''}
             const inputFields = port?.inputFields ?? [];
             const returnsPortResult = commandResultFields(command).length > 0 && usePort;
             const commandReservations = commandStartsLifecycle(command) ? reservations : [];
-            const includeState = !commandStartsLifecycle(command);
+            const relatedState = relatedStateForCommand(this.model, slice, command, events);
+            const includeState = !commandStartsLifecycle(command) || Boolean(relatedState);
+            const commandStateTarget = relatedState?.stateTarget ?? stateTarget;
+            const commandStateName = commandStateTarget.name;
+            const commandInjectEntity = relatedState
+                ? `(idProperty = "${escapeKotlin(relatedState.idProperty)}")`
+                : injectEntity;
             const methodParameters = [
                 `command: ${commandName}`,
-                includeState ? `@InjectEntity${injectEntity} state: ${stateName}` : undefined,
+                includeState ? `@InjectEntity${commandInjectEntity} state: ${commandStateName}` : undefined,
                 ...commandReservations.map((reservation) =>
                     `@InjectEntity(idProperty = "${escapeKotlin(reservation.selectionProperty)}") ${reservation.stateParam}: ${reservation.stateName}`
                 ),
@@ -231,8 +239,12 @@ ${bodyEnd}
         const portConstructorParams = ports.map((port) =>
             `,\n    private val ${lowerCamel(port.capability.portName)}: ${port.capability.portName}`
         ).join('');
-        const usesState = slice.commands.some((command) => !commandStartsLifecycle(command));
-        const stateImport = usesState && stateTarget.packageName !== packageName ? `import ${stateTarget.packageName}.${stateName}\n` : '';
+        const stateImports = uniqueBy(slice.commands
+            .map((command) => relatedStateForCommand(this.model, slice, command, events)?.stateTarget
+                ?? (!commandStartsLifecycle(command) ? stateTarget : undefined))
+            .filter((target) => target && target.packageName !== packageName)
+            .map((target) => `import ${target.packageName}.${target.name}`), (value) => value)
+            .join('\n');
         const stateEnumImports = uniqueBy(slice.commands
             .map((command) => ({command, transition: transitionForCommand(this.model, command)}))
             .filter(({command, transition}) =>
@@ -242,7 +254,11 @@ ${bodyEnd}
             .map(({transition}) => `import ${this.model.rootPackage}.${contextPackage(transition.context ?? slice.context)}.domain.states.${conceptStateEnumName(transition.owner.name)}`), (value) => value)
             .join('\n');
         const reservationStateImports = reservations.map((reservation) => `import ${reservation.packageName}.${reservation.stateName}`).join('\n');
-        const injectEntityImport = slice.commands.some((command) => !commandStartsLifecycle(command) || reservations.length > 0)
+        const injectEntityImport = slice.commands.some((command) =>
+            !commandStartsLifecycle(command)
+            || Boolean(relatedStateForCommand(this.model, slice, command, events))
+            || reservations.length > 0
+        )
             ? 'import org.axonframework.modelling.annotation.InjectEntity\n'
             : '';
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${pascal(slice.name)}CommandHandler.kt`), `package ${packageName}
@@ -253,7 +269,7 @@ ${injectEntityImport}\
 import org.springframework.stereotype.Component
 ${commandImports}
 ${portImports}
-${stateImport}
+${stateImports}
 ${stateEnumImports}
 ${reservationStateImports}
 
@@ -390,7 +406,13 @@ data class ${storedName}(
             '        request: HttpServletRequest'
         ].join(',\n');
         const idField = (command.fields ?? []).find((field) => field.idAttribute);
-        const uploadIdExpression = idField ? `${idField.name}?.toString()` : 'null';
+        const resolvedIdVariable = idField?.generated ? `resolved${pascal(idField.name)}` : null;
+        const resolvedIdStatement = resolvedIdVariable
+            ? `        val ${resolvedIdVariable} = ${idField.name} ?: ${fallbackValue(idField).replaceAll('java.util.UUID.', 'UUID.')}\n`
+            : '';
+        const uploadIdExpression = resolvedIdVariable
+            ? `${resolvedIdVariable}.toString()`
+            : idField ? `${idField.name}?.toString()` : 'null';
         const storeStatements = uploadFields.map((field) => `        val ${field.name}Stored = ${storageProperty}.save(
             uploadId = ${uploadIdExpression},
             fieldName = "${field.name}",
@@ -407,6 +429,9 @@ data class ${storedName}(
                 return `            ${field.name} = ${metadataExpression}`;
             }
             if (field.generated) {
+                if (field === idField && resolvedIdVariable) {
+                    return `            ${field.name} = ${resolvedIdVariable}`;
+                }
                 return `            ${field.name} = ${field.name} ?: ${fallbackValue(field).replaceAll('java.util.UUID.', 'UUID.')}`;
             }
             return `            ${field.name} = ${field.name}`;
@@ -416,7 +441,7 @@ data class ${storedName}(
     fun ${safeIdentifier(command.name)}File(
 ${parameters}
     ): CompletableFuture<${commandName}> {
-${storeStatements}
+${resolvedIdStatement}${storeStatements}
         val command = ${commandName}(
 ${constructorArgs}
         )

@@ -15,6 +15,7 @@ const {
     constant,
     valueTypeForField,
     stateTargetFor,
+    relatedStateForCommand,
     commandStartsLifecycle,
     selectionFor,
     eventFieldsWithTags,
@@ -272,9 +273,10 @@ const testWriterMethods = {
         const fieldImports = importLines([
             kotlinFieldImports(tests.flatMap((test) => test.fields ?? []), this.model.rootPackage)
         ]);
-        const stateImport = tests.some((test) => test.usesState) && stateTarget.packageName !== packageName
-            ? [`import ${stateTarget.packageName}.${stateName}`]
-            : [];
+        const stateImport = uniqueBy(tests
+            .map((test) => test.stateTarget)
+            .filter((target) => target && target.packageName !== packageName)
+            .map((target) => `import ${target.packageName}.${target.name}`), (value) => value);
         const portImports = uniqueBy(tests.map((test) => test.port)
             .filter(Boolean)
             .map((port) => `import ${port.packageName}.${port.capability.resultName}`), (value) => value);
@@ -417,7 +419,10 @@ ${commandArguments(command, selection)}
             .filter(Boolean);
         const port = infrastructurePortForCommand(specCommand, events, slice, this.model);
         const commandName = _commandTitle(specCommand.title);
-        const includeState = !commandStartsLifecycle(specCommand);
+        const relatedState = relatedStateForCommand(this.model, slice, specCommand, events);
+        const includeState = !commandStartsLifecycle(specCommand) || Boolean(relatedState);
+        const commandStateTarget = relatedState?.stateTarget ?? stateTargetFor(this.model, slice);
+        stateName = commandStateTarget.name;
         const fields = [
             ...commandFieldsWithSelection(specCommand, selection),
             ...givenEvents.flatMap((event) => event.fields ?? []),
@@ -465,7 +470,7 @@ ${eventArguments(event, this.model)}
             ? reservations.map((reservation) => `,\n            ${reservation.stateParam} = ${reservation.stateParam}`).join('')
             : '';
         const outputIds = new Set(outboundEvents(specCommand, events).map((event) => event.id));
-        const stateFields = includeState ? uniqueBy(stateEventsForSlice(this.model, slice, events)
+        const stateFields = includeState ? uniqueBy(stateEventsForSlice(this.model, relatedState?.slice ?? slice, events)
             .filter((event) => !outputIds.has(event.id))
             .flatMap((event) => event.fields ?? []), (field) => field.name) : [];
         const portResult = port ? renderPortResult(port, expectedEvents[0], specCommand, stateFields) : undefined;
@@ -483,6 +488,7 @@ ${fieldAssertions || `        assertTrue(event is ${eventName})`}`;
             fields,
             port,
             usesState: includeState,
+            stateTarget: includeState ? commandStateTarget : undefined,
             usesNow: Boolean(port?.failureEvent),
             usesUuid,
             body: `    @Test
@@ -514,6 +520,7 @@ ${eventAssertions}
                 const commandName = _commandTitle(command.title);
                 const expectedEventName = _eventTitle(outputs[0].title);
                 const port = infrastructurePortForCommand(command, events, slice, this.model);
+                const relatedState = relatedStateForCommand(this.model, slice, command, events);
                 const portResult = port ? renderPortResult(port, outputs[0], command) : undefined;
                 const portArgs = port ? `,\n            portResult = ${portResult}${port.failureEvent ? ',\n            now = LocalDateTime.parse("2026-01-01T00:00:00")' : ''}` : '';
                 const reservationArgs = reservations.map((reservation) =>
@@ -531,10 +538,12 @@ ${eventAssertions}
                     ],
                     port,
                     usesNow: Boolean(port?.failureEvent),
+                    usesState: Boolean(relatedState),
+                    stateTarget: relatedState?.stateTarget,
                     usesUuid: JSON.stringify(command.fields ?? []).includes('"UUID"'),
                     body: `    @Test
     fun ${testMethodName(command.name)}Emits${expectedEventName}() {
-        val events = ${renderDecideCall(decisionName, commandName, command, selection, `${reservationArgs}${portArgs}`)}
+        val events = ${renderDecideCall(decisionName, commandName, command, selection, `${relatedState ? `,\n            state = ${relatedState.stateTarget.name}()` : ''}${reservationArgs}${portArgs}`)}
 
         assertTrue(events.any { it is ${expectedEventName} })
     }`

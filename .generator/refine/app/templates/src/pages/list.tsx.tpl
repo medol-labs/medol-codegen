@@ -9,15 +9,13 @@ import { CommandButton } from "@/components/refine-ui/buttons/command";
 import { EditButton } from "@/components/refine-ui/buttons/edit";
 import { ShowButton } from "@/components/refine-ui/buttons/show";
 import { RefineDataTable } from "@/components/refine-ui/data-table/refine-data-table";
+import { RowActionMenu } from "@/components/refine-ui/row-action-menu";
 import {
   ListToolbar,
   ListView,
   ListViewHeader
 } from "@/components/refine-ui/views/list-view";
-import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { MoreHorizontal } from "lucide-react";
 <% if (resource.valueTypeImports.length) { -%>
 import type { <%= resource.valueTypeImports.join(', ') %> } from "@/domain/value-types";
 <% } -%>
@@ -118,23 +116,14 @@ export const <%= resource.component %>List = () => {
             />
             )}
 <% } -%>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon">
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
+            <RowActionMenu>
 <% if (resource.editCommand) { -%>
                 {isCommandVisible(row.original, <%- JSON.stringify(resource.editCommand.enabledField ?? '') %>, <%- JSON.stringify(resource.editCommand.stateField ?? '') %>, <%- JSON.stringify(resource.editCommand.allowedStates ?? []) %>) && (
-                <DropdownMenuItem>
                   <EditButton variant="ghost" recordItemId={row.original.<%= resource.idField %>} size="sm" />
-                </DropdownMenuItem>
                 )}
 <% } -%>
 <% resource.itemCommands.forEach((command) => { -%>
                 {isCommandVisible(row.original, <%- JSON.stringify(command.enabledField ?? '') %>, <%- JSON.stringify(command.stateField ?? '') %>, <%- JSON.stringify(command.allowedStates ?? []) %>) && (
-                <DropdownMenuItem>
                   <CommandButton
                     variant="ghost"
                     command="<%= command.name %>"
@@ -148,14 +137,10 @@ export const <%= resource.component %>List = () => {
                     }}
 <% } -%>
                   />
-                </DropdownMenuItem>
                 )}
 <% }) -%>
-                <DropdownMenuItem>
-                  <ShowButton variant="ghost" recordItemId={row.original.<%= resource.idField %>} size="sm" />
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+              <ShowButton variant="ghost" recordItemId={row.original.<%= resource.idField %>} size="sm" />
+            </RowActionMenu>
           </div>
         ),
         enableSorting: false,

@@ -24,6 +24,7 @@ const {
     fallbackTags,
     selectionTargetFor,
     stateTargetFor,
+    relatedStateForCommand,
     primaryConcept,
     childStateTransitions,
     childTransitionKeyField,
@@ -341,11 +342,15 @@ ${sourcingHandlers}
             const usePort = Boolean(port);
             const capability = port?.capability;
             const commandReservations = commandStartsLifecycle(command) ? reservations : [];
-            const includeState = !commandStartsLifecycle(command);
-            const stateParam = includeState ? `, state: ${stateName}` : '';
+            const relatedState = relatedStateForCommand(this.model, slice, command, events);
+            const includeState = !commandStartsLifecycle(command) || Boolean(relatedState);
+            const commandStateTarget = relatedState?.stateTarget ?? stateTarget;
+            const stateParam = includeState ? `, state: ${commandStateTarget.name}` : '';
             const reservationParams = commandReservations.map((reservation) => `, ${reservation.stateParam}: ${reservation.stateName}`).join('');
             const portParams = usePort ? `, portResult: ${capability.resultName}${port.failureEvent ? ', now: java.time.LocalDateTime' : ''}` : '';
-            const readableStateFields = includeState ? stateFieldsBeforeCommand(this.model, slice, command, events, selection) : [];
+            const readableStateFields = includeState
+                ? stateFieldsBeforeCommand(this.model, relatedState?.slice ?? slice, command, events, selection)
+                : [];
             const reservationGuard = commandReservations.map((reservation) => [
                 `        require(!${reservation.stateParam}.reserved) {`,
                 `            "${escapeKotlin(reservation.message)}"`,
@@ -421,6 +426,11 @@ ${eventExpressions.map((item) => item.kind === 'single'
         });
         const interfaceMethods = methodDefinitions.map((method) => method.implementation).join('\n\n');
         const commandImports = slice.commands.map((command) => `import ${packageName}.${_commandTitle(command.title)}`).join('\n');
+        const relatedStateImports = uniqueBy(slice.commands
+            .map((command) => relatedStateForCommand(this.model, slice, command, events)?.stateTarget)
+            .filter((target) => target && target.packageName !== packageName)
+            .map((target) => `import ${target.packageName}.${target.name}`), (value) => value)
+            .join('\n');
         const portImports = uniqueBy(slice.commands
             .map((command) => {
                 const port = infrastructurePortForCommand(command, events, slice, this.model);
@@ -443,6 +453,7 @@ ${eventExpressions.map((item) => item.kind === 'single'
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${decisionName}.kt`), `package ${packageName}
 
 ${commandImports}
+${relatedStateImports}
 ${portImports}
 ${eventImports}
 ${stateImport}

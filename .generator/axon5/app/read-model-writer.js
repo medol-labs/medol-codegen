@@ -66,6 +66,7 @@ const {
     pascal,
     kebab,
     safeDatabaseName,
+    safeDatabaseIdentifier,
     safeIdentifier,
     httpRoute,
     constant,
@@ -293,6 +294,7 @@ function jsonTypeReference(field) {
 const readModelWriterMethods = {
     _writeReadModel(packageName, context, slicePackage, slice, readmodel) {
         const name = _readmodelTitle(readmodel.title);
+        const tableName = safeDatabaseIdentifier(readmodel.tableName ?? readmodel.title);
         const imports = readModelStorageImports(readmodel.fields, this.model.rootPackage);
         const entityImports = jpaEntityImports(readmodel.fields, this.model.rootPackage);
         const hasJsonJpaFields = (readmodel.fields ?? []).some(isJsonJpaField);
@@ -390,9 +392,11 @@ import jakarta.persistence.EnumType
 import jakarta.persistence.Enumerated
 import jakarta.persistence.Id
 import jakarta.persistence.IdClass
+import jakarta.persistence.Table
 ${metadataFields.length > 0 ? `import ${this.model.rootPackage}.shared.application.metadata.MetadataProjection\n` : ''}${compositeId ? `import ${packageName}.${keyName}\n` : ''}${allEntityImports}
 
 ${idClassAnnotation}@Entity
+@Table(name = "${tableName}")
 class ${name}Entity${metadataFields.length > 0 ? ' : MetadataProjection' : ''} {
 ${entityFields}
 }

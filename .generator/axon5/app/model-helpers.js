@@ -7,6 +7,7 @@ const {fieldOptionsFor} = require('../../common/core/field-options');
 const {typeMapping, typeImports} = require('../../common/util/generator');
 const {contextPackage, findValueType, resolvedBaseType, resolvedConstraints} = require('../../common/util/value-types');
 const {_sliceTitle} = require('../../common/util/naming');
+const crypto = require('node:crypto');
 
 function selectionFor(slice, model) {
     if (primaryConcept(slice)) {
@@ -344,6 +345,45 @@ function stateTargetFor(model, slice) {
         packageName: `${model.rootPackage}.${context}.${slicePackage}`,
         pathPrefix: `${context}/${slicePackage}`
     };
+}
+
+function relatedStateForCommand(model, slice, command, events) {
+    if (!commandStartsLifecycle(command)) return undefined;
+
+    const currentConcept = primaryConcept(slice);
+    const referencedConcepts = uniqueBy(outboundEvents(command, events)
+        .flatMap((event) => event.fields ?? [])
+        .flatMap((field) => field.source?.from ?? [])
+        .map((source) => String(source).split('.')[0])
+        .filter((concept) => concept && concept !== currentConcept), (concept) => concept);
+
+    const candidates = referencedConcepts.map((concept) => {
+        const conceptSlice = (model.slices ?? []).find((candidate) =>
+            candidate.context === slice.context && primaryConcept(candidate) === concept
+        );
+        if (!conceptSlice) return undefined;
+
+        const expectedIdName = `${concept.charAt(0).toLowerCase()}${concept.slice(1)}Id`;
+        const conceptIdNames = uniqueBy((model.slices ?? [])
+            .filter((candidate) => candidate.context === slice.context && primaryConcept(candidate) === concept)
+            .flatMap((candidate) => candidate.commands ?? [])
+            .flatMap((candidate) => candidate.fields ?? [])
+            .filter((field) => field.idAttribute)
+            .map((field) => field.name), (name) => name);
+        const idProperty = (command.fields ?? []).find((field) =>
+            field.name === expectedIdName || conceptIdNames.includes(field.name)
+        )?.name;
+        if (!idProperty) return undefined;
+
+        return {
+            concept,
+            slice: conceptSlice,
+            idProperty,
+            stateTarget: stateTargetFor(model, conceptSlice)
+        };
+    }).filter(Boolean);
+
+    return candidates.length === 1 ? candidates[0] : undefined;
 }
 
 function primaryConcept(slice) {
@@ -754,6 +794,20 @@ function safeDatabaseName(value) {
     return name || 'medol';
 }
 
+function safeDatabaseIdentifier(value, maxLength = 63) {
+    const name = safeDatabaseName(value);
+    if (name.length <= maxLength) {
+        return name;
+    }
+
+    const hash = crypto.createHash('sha1').update(name).digest('hex').slice(0, 10);
+    const prefixLength = Math.max(1, maxLength - hash.length - 1);
+    const prefix = name
+        .slice(0, prefixLength)
+        .replace(/_+$/g, '');
+    return `${prefix}_${hash}`.slice(0, maxLength);
+}
+
 function safeIdentifier(value) {
     const result = String(value ?? '').replace(/[^A-Za-z0-9_]/g, '');
     return result && /^[A-Za-z_]/.test(result) ? result : `tag${pascal(result)}`;
@@ -878,6 +932,7 @@ module.exports = {
     fallbackTags,
     selectionTargetFor,
     stateTargetFor,
+    relatedStateForCommand,
     primaryConcept,
     childStateTransitions,
     childTransitionKeyField,
@@ -923,6 +978,7 @@ module.exports = {
     pascal,
     kebab,
     safeDatabaseName,
+    safeDatabaseIdentifier,
     safeIdentifier,
     httpRoute,
     constant,

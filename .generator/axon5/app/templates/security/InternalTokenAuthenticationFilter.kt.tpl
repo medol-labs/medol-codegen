@@ -15,6 +15,8 @@ import org.springframework.web.filter.OncePerRequestFilter
 class InternalTokenAuthenticationFilter(
     private val properties: MedolSecurityProperties,
 ) : OncePerRequestFilter() {
+    override fun shouldNotFilterAsyncDispatch(): Boolean = false
+
     override fun doFilterInternal(
         request: HttpServletRequest,
         response: HttpServletResponse,

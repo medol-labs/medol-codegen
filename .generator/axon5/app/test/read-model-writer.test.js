@@ -2,6 +2,23 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {readModelWriterMethods} = require('../read-model-writer');
+const {safeDatabaseIdentifier} = require('../model-helpers');
+
+test('keeps generated database identifiers within PostgreSQL identifier length', () => {
+    const name = safeDatabaseIdentifier(
+        'Extremely Long Runtime Infrastructure Participant Execution Plan Coordination Dashboard'
+    );
+
+    assert.ok(name.length <= 63);
+    assert.match(name, /^extremely_long_runtime_infrastructure_participant_[a-z0-9_]*_[a-f0-9]{10}$/);
+    assert.ok(!name.includes('read_model_entity'));
+    assert.equal(
+        name,
+        safeDatabaseIdentifier(
+            'Extremely Long Runtime Infrastructure Participant Execution Plan Coordination Dashboard'
+        )
+    );
+});
 
 test('appends singular event fields into plural read model fields', () => {
     const event = {

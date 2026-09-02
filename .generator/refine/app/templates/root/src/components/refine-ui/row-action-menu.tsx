@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
@@ -20,7 +21,7 @@ function normalizeAction(
     variant: "ghost",
     size: "sm",
     className: cn(
-      "w-full justify-start gap-2 px-2 py-1.5",
+      "h-auto min-h-8 w-full justify-start gap-2 rounded-sm px-2 py-1.5 text-left font-normal",
       element.props.className
     ),
   });
@@ -46,14 +47,15 @@ export function RowActionMenu({
       <DropdownMenuContent
         align={align}
         sideOffset={6}
+        className="min-w-48"
       >
         {React.Children.map(children, (child) => {
           if (!React.isValidElement(child)) return null;
 
           return (
-            <div className="px-1">
+            <DropdownMenuItem asChild>
               {normalizeAction(child)}
-            </div>
+            </DropdownMenuItem>
           );
         })}
       </DropdownMenuContent>

@@ -160,7 +160,7 @@ function conditionExpression(processor, sourceElement, sourceParameter = 'todo')
         unresolved = true;
         return token;
     });
-    if (unresolved) return 'true';
+    if (unresolved) return 'false';
     return rendered;
 }
 

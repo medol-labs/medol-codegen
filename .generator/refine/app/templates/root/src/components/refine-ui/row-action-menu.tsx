@@ -2,7 +2,6 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
@@ -53,9 +52,9 @@ export function RowActionMenu({
           if (!React.isValidElement(child)) return null;
 
           return (
-            <DropdownMenuItem asChild>
+            <div className="px-1">
               {normalizeAction(child)}
-            </DropdownMenuItem>
+            </div>
           );
         })}
       </DropdownMenuContent>

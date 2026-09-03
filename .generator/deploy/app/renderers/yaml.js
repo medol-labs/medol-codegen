@@ -42,7 +42,10 @@ function renderArrayItem(item, indent) {
     const entries = Object.entries(item).filter(([, value]) => value !== undefined);
     if (entries.length === 0) return `${prefix} {}`;
     const [first, ...rest] = entries;
-    const firstLine = `${prefix} ${renderKey(first[0])}: ${renderInlineOrNested(first[1], indent + 2)}`;
+    const firstValue = renderInlineOrNested(first[1], indent + 2);
+    const firstLine = firstValue.startsWith('\n')
+        ? `${prefix} ${renderKey(first[0])}:${firstValue}`
+        : `${prefix} ${renderKey(first[0])}: ${firstValue}`;
     const restLines = rest.map(([key, value]) => renderObjectEntry(key, value, indent + 2));
     return [firstLine, ...restLines].join('\n');
 }

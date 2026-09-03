@@ -278,6 +278,7 @@ function renderComposeReadme(environmentName) {
 
 module.exports = {
     dockerComposeFiles,
+    renderPostgresInitSql,
     renderDockerCompose
 };
 

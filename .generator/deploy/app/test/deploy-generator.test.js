@@ -125,9 +125,30 @@ test('renders Kubernetes and K3s manifests from the same deployment model', () =
     assert.match(kubernetes['dev/kubernetes/base/applications.yaml'], /secretKeyRef/);
     assert.doesNotMatch(kubernetes['dev/kubernetes/base/applications.yaml'], /\$\{/);
     assert.doesNotMatch(kubernetes['dev/kubernetes/base/infrastructure.yaml'], /name: "axon-server"/);
+    assert.match(kubernetes['dev/kubernetes/base/infrastructure.yaml'], /name: "postgres-init"/);
+    assert.match(kubernetes['dev/kubernetes/base/infrastructure.yaml'], /name: "postgres-data"/);
+    assert.doesNotMatch(kubernetes['dev/kubernetes/base/infrastructure.yaml'], /postgres_data|umadb_data/);
     assert.match(kubernetes['dev/kubernetes/base/apisix.yaml'], /type: "LoadBalancer"/);
     assert.match(k3s['dev/k3s/base/apisix.yaml'], /type: "NodePort"/);
+    assert.match(k3s['dev/k3s/README.md'], /NodePort service on `30080`/);
     assert.match(kubernetes['dev/kubernetes/base/apisix-config.yaml'], /apisix.yaml: \|/);
+});
+
+test('renders K3s platform runtime-agent scheduler details when topology contains a platform and runtime agent', () => {
+    const generatedModel = JSON.parse(fs.readFileSync(
+        path.resolve(__dirname, '../../../../../federation-learning/deploy/staging/deployment-model.json'),
+        'utf8'
+    ));
+    const k3s = k3sFiles(generatedModel, { environmentName: 'staging' });
+
+    assert.match(k3s['staging/k3s/base/kustomization.yaml'], /runtime-agent-scheduler-rbac.yaml/);
+    assert.match(k3s['staging/k3s/base/runtime-agent-scheduler-rbac.yaml'], /kind: "ServiceAccount"/);
+    assert.match(k3s['staging/k3s/base/runtime-agent-scheduler-rbac.yaml'], /resources:\n\s+- "deployments"/);
+    assert.match(k3s['staging/k3s/base/applications.yaml'], /serviceAccountName: "federation-learning-platform-runtime-agent-scheduler"/);
+    assert.match(k3s['staging/k3s/base/applications.yaml'], /name: "PLATFORM_RUNTIME_K3S_NAMESPACE"/);
+    assert.match(k3s['staging/k3s/base/applications.yaml'], /value: "federation-learning-platform"/);
+    assert.match(k3s['staging/k3s/base/applications.yaml'], /name: "PLATFORM_RUNTIME_K3S_AGENT_IMAGE"/);
+    assert.match(k3s['staging/k3s/base/applications.yaml'], /value: "medol\/federation-learning-runtime-agent:0.0.1-SNAPSHOT"/);
 });
 
 function golden(name) {

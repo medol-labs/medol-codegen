@@ -209,6 +209,7 @@ function unavailableEventArgument(field, command, resultVariable, fallbackTime =
     }
     const stateField = shouldReadPortEventFieldFromState(field) ? stateFieldForEventField(field, stateFields) : undefined;
     if (stateField) return renderStateEventArgument(field, stateField);
+    if (field.optional) return `${field.name} = null`;
     return `${field.name} = ${fallbackValue(field)} /* TODO: provide ${field.name} */`;
 }
 

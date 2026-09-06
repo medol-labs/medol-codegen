@@ -66,7 +66,10 @@ function kubernetesLikeFiles(model, options) {
     files[`${options.root}/base/apisix-config.yaml`] = renderApisixConfigMap(resolved);
     files[`${options.root}/base/apisix.yaml`] = renderDocuments(apisixResources(resolved, options.gatewayServiceType));
     files[`${options.root}/environments/${options.environmentName}/kustomization.yaml`] = renderYaml({
-        resources: ['../../base'],
+        resources: [
+            '../../base',
+            'configmap.yaml'
+        ],
         namespace: resolved.name,
         labels: [{
             pairs: {
@@ -75,8 +78,17 @@ function kubernetesLikeFiles(model, options) {
             },
             includeSelectors: true,
             includeTemplates: true
-        }]
+        }],
+        patches: environmentPatchFiles(resolved).map((file) => ({ path: file }))
     });
+    files[`${options.root}/environments/${options.environmentName}/configmap.yaml`] = renderDocuments(environmentConfigMaps(resolved, options.environmentName));
+    files[`${options.root}/environments/${options.environmentName}/secrets.example.yaml`] = renderDocuments(environmentSecretExamples(resolved, options.environmentName));
+    environmentPatches(resolved).forEach((patch) => {
+        files[`${options.root}/environments/${options.environmentName}/${patch.file}`] = renderYaml(patch.document);
+    });
+    if (options.name.toLowerCase() === 'k3s' && options.environmentName === 'dev') {
+        files[`${options.root}/cluster/k3d-dev.yaml`] = renderK3dClusterConfig(resolved);
+    }
     files[`${options.root}/README.md`] = renderKubernetesReadme(options.name);
     return files;
 }
@@ -94,16 +106,15 @@ function infrastructureResources(model) {
 function applicationResources(model) {
     const schedulerEnabled = hasPlatformRuntimeScheduler(model);
     return model.applications.flatMap((application) => {
-        const platformApplication = schedulerEnabled && isPlatformApplication(model, application);
+        const baseEnv = env(applicationBaseEnvironmentVariables(model, application));
         const containers = [{
             name: application.name,
             image: application.image,
             ports: [{ containerPort: application.servicePort }],
-            env: env(platformApplication
-                ? [...application.environmentVariables, ...platformRuntimeSchedulerEnvironment(model, application)]
-                : application.environmentVariables),
+            ...(baseEnv.length ? { env: baseEnv } : {}),
             ...(application.healthCheck ? probes(application.healthCheck, application.servicePort) : {})
         }];
+        const platformApplication = schedulerEnabled && isPlatformApplication(model, application);
         const podSpec = platformApplication
             ? { serviceAccountName: runtimeAgentSchedulerServiceAccountName(model) }
             : {};
@@ -178,6 +189,38 @@ function renderApisixConfigMap(model) {
         indentBlock(renderApisixStandaloneConfig(model), 4),
         ''
     ].join('\n');
+}
+
+function renderK3dClusterConfig(model) {
+    return renderYaml({
+        apiVersion: 'k3d.io/v1alpha5',
+        kind: 'Simple',
+        metadata: {
+            name: `${model.name}-dev`
+        },
+        servers: 1,
+        agents: 2,
+        kubeAPI: {
+            hostIP: '127.0.0.1',
+            hostPort: '6550'
+        },
+        ports: [{
+            port: '30080:30080',
+            nodeFilters: ['server:0']
+        }],
+        options: {
+            k3d: {
+                wait: true,
+                timeout: '120s'
+            },
+            k3s: {
+                extraArgs: [{
+                    arg: '--disable=traefik',
+                    nodeFilters: ['server:*']
+                }]
+            }
+        }
+    });
 }
 
 function postgresResources(component, model) {
@@ -377,6 +420,154 @@ function platformRuntimeSchedulerEnvironment(model, platformApplication) {
     ];
 }
 
+function applicationEnvironmentVariables(model, application) {
+    const schedulerEnabled = hasPlatformRuntimeScheduler(model);
+    return schedulerEnabled && isPlatformApplication(model, application)
+        ? [...application.environmentVariables, ...platformRuntimeSchedulerEnvironment(model, application)]
+        : application.environmentVariables;
+}
+
+function applicationBaseEnvironmentVariables(model, application) {
+    return applicationEnvironmentVariables(model, application)
+        .filter((variable) => variable.valueFromSecret || variable.name === 'DB_USERNAME' || variable.name === 'DB_PASSWORD');
+}
+
+function environmentConfigMaps(model, environmentName) {
+    return model.applications.map((application) => {
+        const variables = applicationConfigVariables(model, application)
+            .filter((variable) => variable.name && !variable.valueFromSecret && !isSecretVariable(variable.name))
+            .map((variable) => [variable.name, kubernetesLiteralValue(variable.value)]);
+        return {
+            apiVersion: 'v1',
+            kind: 'ConfigMap',
+            metadata: namedMetadata(applicationConfigMapName(application, environmentName), 'application-config'),
+            data: Object.fromEntries(variables.sort(([left], [right]) => left.localeCompare(right)))
+        };
+    });
+}
+
+function applicationConfigVariables(model, application) {
+    return [
+        ...applicationEnvironmentVariables(model, application),
+        ...(hasApplicationContext(application, 'IdentityAccessManagement')
+            ? [{ name: 'MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED', value: 'false' }]
+            : [])
+    ];
+}
+
+function environmentSecretExamples(model, environmentName) {
+    const postgres = model.infrastructure.find((component) => component.type === 'postgres');
+    const applicationSecrets = model.applications
+        .map((application) => {
+            const stringData = Object.fromEntries(applicationSecretVariables(application).map((name) => [name, secretPlaceholder(name)]));
+            return {
+                apiVersion: 'v1',
+                kind: 'Secret',
+                metadata: namedMetadata(applicationSecretName(application, environmentName), 'application-secret'),
+                type: 'Opaque',
+                stringData
+            };
+        })
+        .filter((secret) => Object.keys(secret.stringData).length > 0);
+    return [
+        ...(postgres ? [{
+            apiVersion: 'v1',
+            kind: 'Secret',
+            metadata: namedMetadata('postgres-secret', 'application-secret'),
+            type: 'Opaque',
+            stringData: {
+                username: 'medol',
+                password: 'change-me'
+            }
+        }] : []),
+        ...applicationSecrets
+    ];
+}
+
+function environmentPatches(model) {
+    return model.applications.map((application) => ({
+        file: `patches/${application.name}-envfrom.yaml`,
+        document: {
+            apiVersion: 'apps/v1',
+            kind: 'Deployment',
+            metadata: {
+                name: application.name
+            },
+            spec: {
+                template: {
+                    spec: {
+                        containers: [{
+                            name: application.name,
+                            envFrom: [
+                                {
+                                    configMapRef: {
+                                        name: applicationConfigMapName(application, model.environment.name)
+                                    }
+                                },
+                                {
+                                    secretRef: {
+                                        name: applicationSecretName(application, model.environment.name),
+                                        optional: true
+                                    }
+                                }
+                            ]
+                        }]
+                    }
+                }
+            }
+        }
+    }));
+}
+
+function environmentPatchFiles(model) {
+    return environmentPatches(model).map((patch) => patch.file);
+}
+
+function applicationConfigMapName(application, environmentName) {
+    return kubernetesName(`${application.name}-${environmentName}-config`);
+}
+
+function applicationSecretName(application, environmentName) {
+    return kubernetesName(`${application.name}-${environmentName}-secret`);
+}
+
+function applicationSecretVariables(application) {
+    const fromApplication = application.environmentVariables
+        .map((variable) => variable.name)
+        .filter(isSecretVariable);
+    const backendDefaults = application.kind === 'backend'
+        ? [
+            'MEDOL_SECURITY_JWT_SECRET',
+            'MEDOL_SECURITY_INTERNAL_TOKEN',
+            ...(hasApplicationContext(application, 'IdentityAccessManagement')
+                ? ['MEDOL_SECURITY_ADMIN_BOOTSTRAP_SETUP_TOKEN']
+                : []),
+            'UMADB_API_KEY'
+        ]
+        : [];
+    return Array.from(new Set([...fromApplication, ...backendDefaults])).sort((left, right) => left.localeCompare(right));
+}
+
+function hasApplicationContext(application, contextName) {
+    return (application.contexts ?? []).some((context) => context === contextName || context?.name === contextName);
+}
+
+function isSecretVariable(name) {
+    if (/^VITE_/i.test(String(name ?? ''))) return false;
+    return /^DB_USERNAME$/i.test(String(name ?? ''))
+        || /(^|_)(PASSWORD|SECRET|TOKEN|API_KEY|PRIVATE_KEY|CLIENT_SECRET|CREDENTIALS?)$/i.test(String(name ?? ''))
+        || /^SUPABASE_/i.test(String(name ?? ''))
+        || /^PORTAL_SSO_/i.test(String(name ?? ''));
+}
+
+function secretPlaceholder(name) {
+    if (name === 'DB_USERNAME') return 'medol';
+    if (name === 'UMADB_API_KEY') return '';
+    if (name === 'MEDOL_SECURITY_INTERNAL_TOKEN') return 'local-dev-internal-token';
+    if (name === 'MEDOL_SECURITY_JWT_SECRET') return 'change-me-change-me-change-me-change-me';
+    return 'change-me';
+}
+
 function envValue(application, name) {
     return application?.environmentVariables.find((variable) => variable.name === name)?.value;
 }
@@ -540,9 +731,26 @@ function renderKubernetesReadme(name) {
         '- `base/apisix-config.yaml` contains standalone APISIX declarative route configuration.',
         '- `base/apisix.yaml` creates the APISIX Deployment and Service.',
         '- `environments/<environment>/kustomization.yaml` selects the base and attaches environment labels.',
+        '- `environments/<environment>/configmap.yaml` contains non-sensitive application variables for the environment.',
+        '- `environments/<environment>/secrets.example.yaml` documents required and optional secrets without being applied by Kustomize.',
+        '- `environments/<environment>/patches/*-envfrom.yaml` attaches environment ConfigMaps and optional per-application Secrets to Deployments.',
+        ...(isK3s ? [
+            '- `cluster/k3d-dev.yaml` creates a disposable local K3s development cluster with k3d.'
+        ] : []),
         '',
         '## Before Applying',
         '',
+        ...(isK3s ? [
+            'For local development with k3d, create the dev cluster from the generated config:',
+            '',
+            '```bash',
+            'k3d cluster create --config cluster/k3d-dev.yaml',
+            'kubectl config use-context k3d-federation-learning-platform-dev',
+            '```',
+            '',
+            'The config creates one server and two agent nodes, disables the default Traefik addon, exposes APISIX NodePort `30080` on localhost, and leaves application manifests under `environments/dev`.',
+            ''
+        ] : []),
         'Build or import these images on every node that may run the workloads:',
         '',
         '```bash',
@@ -572,6 +780,14 @@ function renderKubernetesReadme(name) {
         '```',
         '',
         'When security, internal service tokens, Portal SSO, or external registries are enabled, add those secrets as environment-specific Kustomize patches rather than editing `base/*.yaml` directly.',
+        '',
+        '## Environment Configuration',
+        '',
+        'Generated Deployments keep non-sensitive application settings in environment ConfigMaps so each environment can own its runtime configuration:',
+        '',
+        '- ConfigMaps are generated in `environments/<environment>/configmap.yaml` and are applied with the overlay through `envFrom`.',
+        '- Secret templates are generated in `environments/<environment>/secrets.example.yaml`; copy or translate them into your local/secret-manager workflow before applying real secrets.',
+        '- Base Deployments keep only direct secret references such as `DB_USERNAME` and `DB_PASSWORD`; non-sensitive values should be changed in the environment ConfigMap.',
         '',
         '## Apply',
         '',
@@ -605,6 +821,92 @@ function renderKubernetesReadme(name) {
         '```',
         '',
         'For k3s with the generated NodePort, replace `<gateway-host>` with `<node-ip>:30080`.',
+        '',
+        '## Operations',
+        '',
+        'Use these commands from this directory unless another path is shown. For the generated dev k3d cluster, replace `<environment>` with `dev` and `<gateway-host>` with `localhost:30080`.',
+        '',
+        'Apply environment ConfigMaps and generated manifests:',
+        '',
+        '```bash',
+        'kubectl apply -k environments/<environment>',
+        '```',
+        '',
+        'Apply local Secret values when using a copied `secrets.local.yaml` file:',
+        '',
+        '```bash',
+        'kubectl -n federation-learning-platform apply -f environments/<environment>/secrets.local.yaml',
+        '```',
+        '',
+        'ConfigMap and Secret changes are read when a Pod starts. Restart the affected Deployments after changing them:',
+        '',
+        '```bash',
+        'kubectl -n federation-learning-platform rollout restart deploy/console deploy/federation-learning-support deploy/federation-learning-platform deploy/federation-learning-runtime-agent',
+        'kubectl -n federation-learning-platform rollout status deploy/console',
+        'kubectl -n federation-learning-platform rollout status deploy/federation-learning-support',
+        'kubectl -n federation-learning-platform rollout status deploy/federation-learning-platform',
+        'kubectl -n federation-learning-platform rollout status deploy/federation-learning-runtime-agent',
+        '```',
+        '',
+        'Stop only the business services while keeping the namespace, databases, PVCs, and gateway objects:',
+        '',
+        '```bash',
+        'kubectl -n federation-learning-platform scale deploy/console deploy/federation-learning-support deploy/federation-learning-platform deploy/federation-learning-runtime-agent --replicas=0',
+        '```',
+        '',
+        'Start the business services again:',
+        '',
+        '```bash',
+        'kubectl -n federation-learning-platform scale deploy/console deploy/federation-learning-support deploy/federation-learning-platform deploy/federation-learning-runtime-agent --replicas=1',
+        '```',
+        '',
+        'Delete only the business service Deployments:',
+        '',
+        '```bash',
+        'kubectl -n federation-learning-platform delete deploy console federation-learning-support federation-learning-platform federation-learning-runtime-agent',
+        '```',
+        '',
+        ...(isK3s ? [
+            'Rebuild generated application images and import them into the local k3d cluster:',
+            '',
+            '```bash',
+            'cd ../../../../federation-learning-platform',
+            'node scripts/build-images.mjs',
+            'k3d image import \\',
+            '  medol/federation-learning-platform-console:0.0.1-SNAPSHOT \\',
+            '  medol/federation-learning-support:0.0.1-SNAPSHOT \\',
+            '  medol/federation-learning-platform:0.0.1-SNAPSHOT \\',
+            '  medol/federation-learning-runtime-agent:0.0.1-SNAPSHOT \\',
+            '  -c federation-learning-platform-dev',
+            'cd ../deploy/deploy/dev/k3s',
+            'kubectl -n federation-learning-platform rollout restart deploy/console deploy/federation-learning-support deploy/federation-learning-platform deploy/federation-learning-runtime-agent',
+            '```',
+            '',
+            'Check the local k3d cluster and node placement labels:',
+            '',
+            '```bash',
+            'kubectl config current-context',
+            'kubectl get nodes --show-labels',
+            'kubectl -n federation-learning-platform get pods -o wide',
+            '```',
+            '',
+            'Label and taint a runtime-only participant node for platform-managed agents:',
+            '',
+            '```bash',
+            'kubectl label node <node-name> medol.dev/node-role=runtime medol.dev/organization-id=<organization-id> medol.dev/runtime-infrastructure-id=<runtime-infrastructure-id> --overwrite',
+            'kubectl taint node <node-name> medol.dev/runtime-only=true:NoSchedule --overwrite',
+            '```',
+            ''
+        ] : []),
+        'Inspect common failure details:',
+        '',
+        '```bash',
+        'kubectl -n federation-learning-platform get pods',
+        'kubectl -n federation-learning-platform describe pod <pod-name>',
+        'kubectl -n federation-learning-platform logs deploy/<deployment-name> --tail=200',
+        'kubectl -n federation-learning-platform get configmap console-dev-config -o yaml',
+        'kubectl -n federation-learning-platform get secret postgres-secret -o yaml',
+        '```',
         '',
         '## Platform-Managed Runtime Agent Startup',
         '',

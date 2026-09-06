@@ -112,8 +112,12 @@ test('generates deployment target file sets', () => {
     assert(files['dev/.env-example']);
     assert(files['dev/kubernetes/base/applications.yaml']);
     assert(files['dev/kubernetes/environments/dev/kustomization.yaml']);
+    assert(files['dev/kubernetes/environments/dev/configmap.yaml']);
+    assert(files['dev/kubernetes/environments/dev/secrets.example.yaml']);
+    assert(files['dev/kubernetes/environments/dev/patches/federation-service-envfrom.yaml']);
     assert(!files['dev/kubernetes/environments/prod/kustomization.yaml']);
     assert(files['dev/k3s/base/apisix.yaml']);
+    assert(files['dev/k3s/cluster/k3d-dev.yaml']);
 });
 
 test('renders Kubernetes and K3s manifests from the same deployment model', () => {
@@ -130,25 +134,60 @@ test('renders Kubernetes and K3s manifests from the same deployment model', () =
     assert.doesNotMatch(kubernetes['dev/kubernetes/base/infrastructure.yaml'], /postgres_data|umadb_data/);
     assert.match(kubernetes['dev/kubernetes/base/apisix.yaml'], /type: "LoadBalancer"/);
     assert.match(k3s['dev/k3s/base/apisix.yaml'], /type: "NodePort"/);
+    assert.match(k3s['dev/k3s/cluster/k3d-dev.yaml'], /apiVersion: "k3d.io\/v1alpha5"/);
+    assert.match(k3s['dev/k3s/cluster/k3d-dev.yaml'], /name: "learning-platform-dev"/);
+    assert.match(k3s['dev/k3s/cluster/k3d-dev.yaml'], /port: "30080:30080"/);
+    assert.match(k3s['dev/k3s/environments/dev/kustomization.yaml'], /configmap.yaml/);
+    assert.match(k3s['dev/k3s/environments/dev/kustomization.yaml'], /patches\/federation-service-envfrom.yaml/);
+    assert.doesNotMatch(k3s['dev/k3s/environments/dev/kustomization.yaml'], /secrets\.example\.yaml/);
+    assert.match(k3s['dev/k3s/environments/dev/configmap.yaml'], /name: "federation-service-dev-config"/);
+    assert.match(k3s['dev/k3s/environments/dev/configmap.yaml'], /SERVER_PORT: "8080"/);
+    assert.match(k3s['dev/k3s/environments/dev/configmap.yaml'], /VITE_API_URL: "https:\/\/iwdfzvfqbtokqetmbmbp\.supabase\.co"/);
+    assert.match(k3s['dev/k3s/environments/dev/configmap.yaml'], /VITE_FEDERATION_SERVICE_API_URL: "\/api\/federations"/);
+    assert.match(k3s['dev/k3s/environments/dev/configmap.yaml'], /VITE_SUPABASE_API_KEY: ""/);
+    assert.doesNotMatch(k3s['dev/k3s/base/applications.yaml'], /VITE_SUPABASE_API_KEY/);
+    assert.match(k3s['dev/k3s/environments/dev/secrets.example.yaml'], /name: "postgres-secret"/);
+    assert.doesNotMatch(k3s['dev/k3s/environments/dev/secrets.example.yaml'], /VITE_SUPABASE_API_KEY/);
+    assert.match(k3s['dev/k3s/environments/dev/secrets.example.yaml'], /MEDOL_SECURITY_INTERNAL_TOKEN/);
+    assert.match(k3s['dev/k3s/environments/dev/patches/federation-service-envfrom.yaml'], /envFrom:/);
+    assert.match(k3s['dev/k3s/README.md'], /k3d cluster create --config cluster\/k3d-dev.yaml/);
     assert.match(k3s['dev/k3s/README.md'], /NodePort service on `30080`/);
     assert.match(kubernetes['dev/kubernetes/base/apisix-config.yaml'], /apisix.yaml: \|/);
+    assert(!kubernetes['dev/kubernetes/cluster/k3d-dev.yaml']);
 });
 
 test('renders K3s platform runtime-agent scheduler details when topology contains a platform and runtime agent', () => {
-    const generatedModel = JSON.parse(fs.readFileSync(
-        path.resolve(__dirname, '../../../../../federation-learning/deploy/staging/deployment-model.json'),
-        'utf8'
-    ));
+    const generatedModel = buildDeploymentModel({
+        domain: 'FederationLearningPlatform',
+        deployments: [{
+            name: 'FederationLearningSupport',
+            title: 'Federation Learning Support',
+            contexts: [
+                { name: 'SupportContext', title: 'Support Context' },
+                { name: 'IdentityAccessManagement', title: 'Identity Access Management' }
+            ]
+        }, {
+            name: 'FederationLearningPlatform',
+            title: 'Federation Learning Platform',
+            contexts: [{ name: 'RuntimeProvisioning', title: 'Runtime Provisioning' }]
+        }, {
+            name: 'FederationLearningRuntimeAgent',
+            title: 'Federation Learning Runtime Agent',
+            contexts: [{ name: 'RuntimeAgentOperations', title: 'Runtime Agent Operations' }]
+        }],
+        contexts: []
+    });
     const k3s = k3sFiles(generatedModel, { environmentName: 'staging' });
 
+    assert(!k3s['staging/k3s/cluster/k3d-dev.yaml']);
     assert.match(k3s['staging/k3s/base/kustomization.yaml'], /runtime-agent-scheduler-rbac.yaml/);
     assert.match(k3s['staging/k3s/base/runtime-agent-scheduler-rbac.yaml'], /kind: "ServiceAccount"/);
     assert.match(k3s['staging/k3s/base/runtime-agent-scheduler-rbac.yaml'], /resources:\n\s+- "deployments"/);
     assert.match(k3s['staging/k3s/base/applications.yaml'], /serviceAccountName: "federation-learning-platform-runtime-agent-scheduler"/);
-    assert.match(k3s['staging/k3s/base/applications.yaml'], /name: "PLATFORM_RUNTIME_K3S_NAMESPACE"/);
-    assert.match(k3s['staging/k3s/base/applications.yaml'], /value: "federation-learning-platform"/);
-    assert.match(k3s['staging/k3s/base/applications.yaml'], /name: "PLATFORM_RUNTIME_K3S_AGENT_IMAGE"/);
-    assert.match(k3s['staging/k3s/base/applications.yaml'], /value: "medol\/federation-learning-runtime-agent:0.0.1-SNAPSHOT"/);
+    assert.match(k3s['staging/k3s/environments/staging/configmap.yaml'], /PLATFORM_RUNTIME_K3S_NAMESPACE: "federation-learning-platform"/);
+    assert.match(k3s['staging/k3s/environments/staging/configmap.yaml'], /PLATFORM_RUNTIME_K3S_AGENT_IMAGE: "medol\/federation-learning-runtime-agent:0.0.1-SNAPSHOT"/);
+    assert.match(k3s['staging/k3s/environments/staging/configmap.yaml'], /name: "federation-learning-support-staging-config"[\s\S]*MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED: "false"/);
+    assert.match(k3s['staging/k3s/environments/staging/secrets.example.yaml'], /name: "federation-learning-support-staging-secret"[\s\S]*MEDOL_SECURITY_ADMIN_BOOTSTRAP_SETUP_TOKEN/);
 });
 
 function golden(name) {

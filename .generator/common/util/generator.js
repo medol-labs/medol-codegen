@@ -43,6 +43,7 @@ const typeMapping = (fieldType, fieldCardinality, optional, mutable) => {
     var fieldType;
     switch (fieldType?.toLowerCase()) {
         case "string":
+        case "text":
             fieldType = typeOptional ? "String?" : "String";
             break
         case "double":

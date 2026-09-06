@@ -25,9 +25,11 @@ services:
     expose:
       - "80"
     environment:
-      DATASET_SERVICE_API_URL: "/api/datasets"
-      FEDERATION_SERVICE_API_URL: "/api/federations"
+      VITE_API_URL: "https://iwdfzvfqbtokqetmbmbp.supabase.co"
       VITE_AXON_API_URL: "/api/federations"
+      VITE_DATASET_SERVICE_API_URL: "/api/datasets"
+      VITE_FEDERATION_SERVICE_API_URL: "/api/federations"
+      VITE_SUPABASE_API_KEY: "${VITE_SUPABASE_API_KEY:-}"
     networks:
       - "medol-network"
     healthcheck:

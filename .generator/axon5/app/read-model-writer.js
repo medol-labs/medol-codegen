@@ -238,9 +238,12 @@ function jpaEntityColumnAnnotation(field) {
 }
 
 function isLongTextField(field) {
-    if (field.cardinality === 'Multiple' || readModelStorageField(field).type !== 'String') {
+    if (field.cardinality === 'Multiple') {
         return false;
     }
+    if (String(readModelStorageField(field).type ?? '').toLowerCase() === 'text') return true;
+    if (String(field.type ?? '').toLowerCase() === 'text') return true;
+    if (readModelStorageField(field).type !== 'String') return false;
     return /(?:reason|reasons|message|description|error|output|log|hint|detail|stackTrace)$/i.test(field.name);
 }
 
@@ -292,6 +295,8 @@ function jsonTypeReference(field) {
 }
 
 const readModelWriterMethods = {
+    _jpaEntityColumnAnnotation: jpaEntityColumnAnnotation,
+
     _writeReadModel(packageName, context, slicePackage, slice, readmodel) {
         const name = _readmodelTitle(readmodel.title);
         const tableName = safeDatabaseIdentifier(readmodel.tableName ?? readmodel.title);

@@ -93,3 +93,10 @@ test('maps lifecycle state changes onto boolean read model fields', () => {
     assert.equal(registeredAssignments.find((assignment) => assignment.fieldName === 'active')?.code, 'entity.active = true');
     assert.equal(deactivatedAssignments.find((assignment) => assignment.fieldName === 'active')?.code, 'entity.active = false');
 });
+
+test('maps Text read model fields to PostgreSQL text columns', () => {
+    assert.equal(
+        readModelWriterMethods._jpaEntityColumnAnnotation({name: 'bootstrapCommand', type: 'Text'}),
+        '    @Column(columnDefinition = "text")\n'
+    );
+});

@@ -124,8 +124,10 @@ function buildFrontendApplication(systemName, deploymentConfig, imagePrefix, bac
         servicePort: frontendConfig.servicePort ?? 80,
         exposeExternally: false,
         environmentVariables: [
+            { name: 'VITE_API_URL', value: frontendConfig.supabaseUrl ?? 'https://iwdfzvfqbtokqetmbmbp.supabase.co' },
+            { name: 'VITE_SUPABASE_API_KEY', value: '${VITE_SUPABASE_API_KEY:-}' },
             ...backendApplications.map((application) => ({
-                name: `${application.envVarPrefix}_API_URL`,
+                name: `VITE_${application.envVarPrefix}_API_URL`,
                 value: application.gatewayPath
             })),
             ...(backendApplications[0]

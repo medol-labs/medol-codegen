@@ -1045,7 +1045,7 @@ function renderKubernetesReadme(name) {
             '  medol/federation-learning-platform:0.0.1-SNAPSHOT \\',
             '  medol/federation-learning-runtime-agent:0.0.1-SNAPSHOT \\',
             '  -c federation-learning-platform-dev',
-            'cd ../deploy/deploy/dev/k3s',
+            'cd ../operations/dev/k3s',
             'kubectl -n federation-learning-platform rollout restart deploy/console deploy/federation-learning-support deploy/federation-learning-platform deploy/federation-learning-runtime-agent',
             '```',
             '',

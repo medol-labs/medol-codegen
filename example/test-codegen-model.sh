@@ -17,7 +17,7 @@ medol_base_url="${MEDOL_BASE_URL:-http://host.docker.internal:5172}"
 axon_workspace="$script_dir/$output_root/axon"
 axon5_workspace="$script_dir/$output_root/axon5"
 refine_workspace="$script_dir/$output_root/refine"
-deploy_workspace="$script_dir/$output_root/deploy"
+operations_workspace="$script_dir/$output_root/operations"
 simulation_workspace="$script_dir/$output_root/simulation-service"
 
 if [[ "$current_dir" != "$script_dir" ]]; then
@@ -141,8 +141,8 @@ run_refine() {
 }
 
 run_deploy() {
-  rm -rf "$deploy_workspace"
-  run_gen "$deploy_workspace" --generator deploy --generator-type all --environment dev --skip-install
+  rm -rf "$operations_workspace"
+  run_gen "$operations_workspace" --generator deploy --generator-type all --environment dev --skip-install
 }
 
 run_simulation() {

@@ -182,16 +182,16 @@ You can invoke the bundled generator explicitly:
 gen /opt/codegen/.generator/app/ --generator refine --generator-type all
 ```
 
-## Generate Deploy Artifacts
+## Generate operations artifacts
 
 The `deploy` generator reads the same `codegen-model.json` and derives an intermediate `DeploymentModel` before rendering platform files. The model keeps application topology, infrastructure, gateway routes, images, ports, health checks, environment defaults, and per-environment overrides separate from renderer-specific details.
 
-Create a deployment workspace yourself, put `codegen-model.json` there, then run the generator from that directory. The generator creates one directory for the selected environment under the current directory.
+Create an `operations` workspace yourself, put `codegen-model.json` there, then run the generator from that directory. The generator creates one directory for the selected environment under the current directory.
 
 ```bash
-mkdir -p deployment
-cp /path/to/codegen-model.json deployment/codegen-model.json
-cd deployment
+mkdir -p operations
+cp /path/to/codegen-model.json operations/codegen-model.json
+cd operations
 gen /opt/codegen/.generator/app/ --generator deploy --generator-type all --environment dev
 ```
 
@@ -207,7 +207,7 @@ Supported deploy targets are:
 Generated deployment files are written under the selected environment directory:
 
 ```text
-deployment/
+operations/
   codegen-model.json
   deploy.config.json
   dev/
@@ -226,7 +226,7 @@ deployment/
 
 APISIX is generated in standalone mode with declarative YAML and Admin API disabled. Docker Compose is the primary runnable target and includes generated backend services, the generated frontend console, runtime dependencies such as PostgreSQL and UMA DB, optional/profiled Axon Server, optional Redis, volumes, networks, environment placeholders, health checks, and service startup dependencies.
 
-Deployment overrides can be supplied with `deploy.config.json` or `deployment.config.json` in the deployment workspace:
+Deployment overrides can be supplied with `deploy.config.json` or `deployment.config.json` in the `operations` workspace:
 
 ```json
 {
@@ -487,7 +487,7 @@ cd example
 ./test-codegen-model.sh
 ```
 
-This generates Axon 4, Axon 5, Refine, Deploy, and Simulation artifacts without opening generator prompts.
+This generates Axon 4, Axon 5, Refine, operations, and Simulation artifacts without opening generator prompts.
 
 Generated files are separated by target:
 
@@ -495,7 +495,7 @@ Generated files are separated by target:
 example/generated/axon
 example/generated/axon5
 example/generated/refine
-example/generated/deploy/dev
+example/generated/operations/dev
 example/generated/simulation-service
 ```
 

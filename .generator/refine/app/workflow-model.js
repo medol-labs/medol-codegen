@@ -33,6 +33,7 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
     const commandsById = new Map();
     const eventsById = new Map();
     const commandContextsById = new Map();
+    const commandScreenKeysById = new Map();
     const producerCommandsByReadModelId = new Map();
     const nextCommandsByReadModelId = new Map();
     const transitionsByCommandId = new Map();
@@ -54,11 +55,14 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
         .filter(({command}) => !isAutomationCommand(command, automationCommandKeys))
         .filter(({command}) => !selectedCommands || selectedCommands.has(commandKey(command)))
         .forEach(({command, slice}) => {
+            const screenKeys = screenKeysForSlice(slice);
             commandsById.set(commandKey(command), command);
             commandContextsById.set(commandKey(command), slice.context ?? slice.chapter);
+            commandScreenKeysById.set(commandKey(command), screenKeys);
             if (command.id) {
                 commandsById.set(command.id, command);
                 commandContextsById.set(command.id, slice.context ?? slice.chapter);
+                commandScreenKeysById.set(command.id, screenKeys);
             }
         });
 
@@ -78,6 +82,7 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
             readModel,
             slice,
             context: slice.context ?? slice.chapter,
+            screenKeys: screenKeysForSlice(slice),
             aggregate: aggregateName(readModel, { ...slice, title: readModel.slice ?? slice.title }, aggregates, contexts),
             deployment: backendModuleForContext(slice.context ?? slice.chapter, backendModules)
         }));
@@ -137,7 +142,13 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
         });
 
     const preferredReadModelIdForCommand = (command) =>
-        preferredReadModelForCommand(command, transitionsByCommandId, commandContextsById, readModelInfos)?.readModel?.id;
+        preferredReadModelForCommand(
+            command,
+            transitionsByCommandId,
+            commandContextsById,
+            commandScreenKeysById,
+            readModelInfos
+        )?.readModel?.id;
 
     readModelInfos
         .forEach(({readModel}) => {
@@ -258,8 +269,29 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
     };
 }
 
-function preferredReadModelForCommand(command, transitionsByCommandId, commandContextsById, readModelInfos) {
+function preferredReadModelForCommand(
+    command,
+    transitionsByCommandId,
+    commandContextsById,
+    commandScreenKeysById,
+    readModelInfos
+) {
     const transition = transitionForCommand(command, transitionsByCommandId);
+    const commandContext = transition?.context
+        ?? commandContextsById.get(commandKey(command))
+        ?? (command.id ? commandContextsById.get(command.id) : undefined);
+    const commandScreenKeys = commandScreenKeysById.get(commandKey(command))
+        ?? (command.id ? commandScreenKeysById.get(command.id) : undefined)
+        ?? [];
+    if (commandScreenKeys.length > 0) {
+        const screenReadModel = readModelInfos.find((info) => {
+            const sameContext = !commandContext || !info.context || info.context === commandContext;
+            return sameContext && info.screenKeys.some((key) => commandScreenKeys.includes(key));
+        });
+        if (screenReadModel) {
+            return screenReadModel;
+        }
+    }
     const ownerTitle = cleanTitle(
         transition?.owner?.title
         ?? transition?.owner?.name
@@ -272,12 +304,18 @@ function preferredReadModelForCommand(command, transitionsByCommandId, commandCo
         return null;
     }
 
-    const commandContext = transition?.context ?? commandContextsById.get(commandKey(command)) ?? (command.id ? commandContextsById.get(command.id) : undefined);
     const ownerKey = normalizeOwnerKey(ownerTitle);
     return readModelInfos.find((info) => {
         const sameContext = !commandContext || !info.context || info.context === commandContext;
         return sameContext && normalizeOwnerKey(info.aggregate.title) === ownerKey;
     }) ?? null;
+}
+
+function screenKeysForSlice(slice) {
+    return unique((slice.screens ?? [])
+        .flatMap((screen) => [screen?.name, screen?.title])
+        .filter(Boolean)
+        .map((value) => cleanTitle(value).replace(/\s+/g, '').toLowerCase()));
 }
 
 function transitionForCommand(command, transitionsByCommandId) {

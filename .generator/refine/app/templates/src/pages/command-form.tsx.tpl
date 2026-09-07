@@ -51,7 +51,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useCommandForm } from "@/hooks/command/useCommandForm";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { <%= command.schemaName %>, type <%= command.inputTypeName %> } from "@/domain/schemas";
+import { <%= command.schemaName %>, type <%= command.inputTypeName %> } from "@/contexts/domain/schemas";
 <% if (command.hasSelectFields) { -%>
 import { ResourceMultiSelect, ResourceSelect } from "@/components/refine-ui/form/resource-select";
 <% } -%>

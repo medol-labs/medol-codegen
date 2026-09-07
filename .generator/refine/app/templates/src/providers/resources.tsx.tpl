@@ -1,7 +1,7 @@
 // Generated from config.json by the refine generator.
 import { IResourceItem } from "@refinedev/core";
 import { FlaskConical, LayoutDashboard, Package } from "lucide-react";
-import { getAppConfig } from "./app-config";
+import { getAppConfig } from "@/providers/app-config";
 
 export const backendModules = [
 <% backendModules.forEach((module) => { -%>
@@ -20,7 +20,7 @@ export const authBackendModule =
   backendModules.find((module) => module.name === "<%= authBackendModule.name %>")
   ?? backendModules[0];
 
-export const fileUploadCapability = <%- fileUploadCapability ? JSON.stringify(fileUploadCapability, null, 2) : 'null' %> as const;
+export const fileUploadCapability = <%- fileUploadCapability ? `${JSON.stringify(fileUploadCapability, null, 2)} as const` : 'null' %>;
 
 export const resources: IResourceItem[] = [
   {

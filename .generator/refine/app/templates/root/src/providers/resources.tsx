@@ -1,74 +1,28 @@
-import { IResourceItem } from "@refinedev/core";
-import { FlaskConical, LayoutDashboard, Package } from "lucide-react";
-import { COMMAND_DATA_PROVIDER_NAME } from "./constants";
-import { getAppConfig } from "./app-config";
+import type { IResourceItem } from "@refinedev/core";
 
-export const backendModules = [
-  {
-    name: "default",
-    label: "Backend",
-    dataProviderName: COMMAND_DATA_PROVIDER_NAME,
-    apiUrl: getAppConfig("VITE_AXON_API_URL", "http://localhost:8080"),
-    homeRoute: "/blog-posts",
-    resources: ["blog-posts", "categories"],
-  },
-];
+import {
+  authBackendModule,
+  backendModules,
+  fileUploadCapability,
+  resources as contextResources,
+} from "@/contexts/resources";
+import { resourceOverrides } from "@/domain/resource-overrides";
 
-export const resources: IResourceItem[] = [
-  {
-    name: "dashboard",
-    list: "/dashboard",
-    meta: {
-      label: "Dashboard",
-      icon: <LayoutDashboard />,
-    },
+const mergeResource = (
+  resource: IResourceItem,
+  override: Partial<IResourceItem>,
+): IResourceItem => ({
+  ...resource,
+  ...override,
+  meta: {
+    ...(resource.meta ?? {}),
+    ...(override.meta ?? {}),
   },
-  {
-    name: "posts",
-    meta: {
-      label: "Posts",
-      icon: <FlaskConical />,
-    },
-  },
-  {
-    name: "blog_posts",
-    list: "/blog-posts",
-    create: "/blog-posts/create",
-    edit: "/blog-posts/edit/:id",
-    show: "/blog-posts/show/:id",
-    meta: {
-      parent: "posts",
-      commandRoute: "/blog-posts/:id/command/:command",
-      commands: {
-        approve: {
-          label: "Approve",
-        },
-        cancel: {
-          label: "Cancel",
-        },
-      },
-      canDelete: true,
-      dataProviderName: COMMAND_DATA_PROVIDER_NAME,
-    },
-  },
-  {
-    name: "categories",
-    list: "/categories",
-    create: "/categories/create",
-    edit: "/categories/edit/:id",
-    show: "/categories/show/:id",
-    meta: {
-      parent: "posts",
-      commandRoute: "/:resource/:id/command/:command",
-      commands: {
-        approve: {
-          label: "Approve Order",
-        },
-        cancel: {
-          label: "Cancel Order",
-        },
-      },
-      canDelete: true,
-    },
-  },
-];
+});
+
+export const resources: IResourceItem[] = contextResources.map((resource) => {
+  const override = resourceOverrides.find((item) => item.name === resource.name);
+  return override ? mergeResource(resource, override) : resource;
+});
+
+export { authBackendModule, backendModules, fileUploadCapability };

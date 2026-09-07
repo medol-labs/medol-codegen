@@ -132,23 +132,25 @@ module.exports = class extends Generator {
     }
 
     _writeResources(model) {
+        this._deleteGeneratedFile(this.destinationPath('./src/contexts/resources.tsx'));
         this.fs.copyTpl(
             this.templatePath('src/providers/resources.tsx.tpl'),
-            this.destinationPath('./src/providers/resources.tsx'),
+            this.destinationPath('./src/contexts/resources.tsx'),
             model
         );
     }
 
     _writeRouter(model) {
+        this._deleteGeneratedFile(this.destinationPath('./src/contexts/routes.tsx'));
         this.fs.copyTpl(
             this.templatePath('src/providers/app-router.tsx.tpl'),
-            this.destinationPath('./src/providers/app-router.tsx'),
+            this.destinationPath('./src/contexts/routes.tsx'),
             model
         );
     }
 
     _writePages(resource) {
-        const basePath = `./src/pages/${resource.route}`;
+        const basePath = `./src/contexts/pages/${resource.route}`;
 
         this.fs.copyTpl(
             this.templatePath('src/pages/index.ts.tpl'),
@@ -202,7 +204,7 @@ module.exports = class extends Generator {
     }
 
     _cleanupGeneratedPages(resources) {
-        const pagesRoot = this.destinationPath('./src/pages');
+        const pagesRoot = this.destinationPath('./src/contexts/pages');
         if (!fs.existsSync(pagesRoot)) {
             return;
         }
@@ -283,15 +285,21 @@ module.exports = class extends Generator {
         }
     }
 
+    _deleteGeneratedFile(filePath) {
+        if (fs.existsSync(filePath) && this._isGeneratedFile(filePath)) {
+            fs.rmSync(filePath, { force: true });
+        }
+    }
+
     _writeDomainModel(model) {
         this.fs.copyTpl(
             this.templatePath('src/domain/value-types.ts.tpl'),
-            this.destinationPath('./src/domain/value-types.ts'),
+            this.destinationPath('./src/contexts/domain/value-types.ts'),
             model
         );
         this.fs.copyTpl(
             this.templatePath('src/domain/schemas.ts.tpl'),
-            this.destinationPath('./src/domain/schemas.ts'),
+            this.destinationPath('./src/contexts/domain/schemas.ts'),
             model
         );
     }
@@ -299,7 +307,7 @@ module.exports = class extends Generator {
     _writeI18n(model) {
         this.fs.copyTpl(
             this.templatePath('src/i18n/messages.ts.tpl'),
-            this.destinationPath('./src/i18n/messages.ts'),
+            this.destinationPath('./src/contexts/i18n/messages.ts'),
             model
         );
     }

@@ -1,5 +1,5 @@
 import type { I18nProvider } from "@refinedev/core";
-import { defaultLocale, messages, supportedLocales, type SupportedLocale } from "@/i18n/messages";
+import { defaultLocale, messages, supportedLocales, type SupportedLocale } from "@/contexts/i18n/messages";
 
 export const LOCALE_STORAGE_KEY = "refine.locale";
 export const LOCALE_CHANGE_EVENT = "refine.localechange";

@@ -1,19 +1,7 @@
 // Generated from config.json by the refine generator.
-import { Authenticated } from "@refinedev/core";
-import { NuqsAdapter } from "nuqs/adapters/react-router/v7";
+import { Route } from "react-router";
 
-import {
-  CatchAllNavigate,
-  NavigateToResource
-} from "@refinedev/react-router";
-import { Outlet, Route, Routes } from "react-router";
-import { ErrorComponent } from "../components/refine-ui/layout/error-component";
-import { Layout } from "../components/refine-ui/layout/layout";
-import { Dashboard } from "../pages/dashboard";
-import { ForgotPassword } from "../pages/forgot-password";
-import { Login } from "../pages/login";
-import { Register } from "../pages/register";
-import { PortalSso } from "../pages/sso/portal";
+import { resolvePageOverride } from "@/domain/page-overrides";
 <% resources.forEach((resource) => { -%>
 import {
 <% if (resource.canList) { -%>
@@ -29,59 +17,27 @@ import {
 <% resource.routedCommands.forEach((command) => { -%>
   <%= command.pageComponent %>,
 <% }) -%>
-} from "../pages/<%= resource.route %>";
+} from "./pages/<%= resource.route %>";
 <% }) -%>
 
-export const AppRouter = () => {
-  return (
-    <Routes>
-      <Route path="/sso/portal" element={<PortalSso />} />
-      <Route
-        element={
-          <Authenticated
-            key="authenticated-inner"
-            fallback={<CatchAllNavigate to="/login" />}
-          >
-            <Layout>
-              <NuqsAdapter>
-                <Outlet />
-              </NuqsAdapter>
-            </Layout>
-          </Authenticated>
-        }
-      >
-        <Route index element={<NavigateToResource resource="dashboard" />} />
-        <Route path="/dashboard" element={<Dashboard />} />
+export const contextRoutes = (
+  <>
 <% resources.forEach((resource) => { -%>
-        <Route path="/<%= resource.route %>">
+    <Route path="/<%= resource.route %>">
 <% if (resource.canList) { -%>
-          <Route index element={<<%= resource.component %>List />} />
+      <Route index element={resolvePageOverride("<%= resource.route %>", "list", <<%= resource.component %>List />)} />
 <% } -%>
 <% if (resource.createCommand) { -%>
-          <Route path="command/<%= resource.createCommand.route %>" element={<<%= resource.createCommand.pageComponent %> />} />
+      <Route path="command/<%= resource.createCommand.route %>" element={resolvePageOverride("<%= resource.route %>", "<%= resource.createCommand.name %>", <<%= resource.createCommand.pageComponent %> />)} />
 <% } -%>
 <% if (resource.editCommand) { -%>
-          <Route path="edit/:id" element={<<%= resource.editCommand.pageComponent %> />} />
+      <Route path="edit/:id" element={resolvePageOverride("<%= resource.route %>", "edit", <<%= resource.editCommand.pageComponent %> />)} />
 <% } -%>
-          <Route path="show/:id" element={<<%= resource.component %>Show />} />
+      <Route path="show/:id" element={resolvePageOverride("<%= resource.route %>", "show", <<%= resource.component %>Show />)} />
 <% resource.routedCommands.forEach((command) => { -%>
-          <Route path=":id/command/<%= command.route %>" element={<<%= command.pageComponent %> />} />
+      <Route path=":id/command/<%= command.route %>" element={resolvePageOverride("<%= resource.route %>", "<%= command.name %>", <<%= command.pageComponent %> />)} />
 <% }) -%>
-        </Route>
+    </Route>
 <% }) -%>
-        <Route path="*" element={<ErrorComponent />} />
-      </Route>
-      <Route
-        element={
-          <Authenticated key="authenticated-outer" fallback={<Outlet />}>
-            <NavigateToResource />
-          </Authenticated>
-        }
-      >
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
-        <Route path="/forgot-password" element={<ForgotPassword />} />
-      </Route>
-    </Routes>
-  );
-};
+  </>
+);

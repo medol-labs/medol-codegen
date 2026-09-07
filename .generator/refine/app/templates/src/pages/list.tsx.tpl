@@ -20,7 +20,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { CopyableText } from "@/components/refine-ui/fields/copyable-text";
 <% } -%>
 <% if (resource.valueTypeImports.length) { -%>
-import type { <%= resource.valueTypeImports.join(', ') %> } from "@/domain/value-types";
+import type { <%= resource.valueTypeImports.join(', ') %> } from "@/contexts/domain/value-types";
 <% } -%>
 
 type <%= resource.component %>Record = {

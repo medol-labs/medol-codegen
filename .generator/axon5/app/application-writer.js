@@ -208,6 +208,9 @@ const applicationWriterMethods = {
             rootPackage: this.model.rootPackage,
             domain: this.model.domain
         });
+        this.fs.copyTpl(this.templatePath('KubernetesClientConfiguration.kt.tpl'), this._sharedKernelKotlinPath('shared/infrastructure/configuration/KubernetesClientConfiguration.kt'), {
+            rootPackage: this.model.rootPackage
+        });
         this.fs.copyTpl(this.templatePath('ApiExceptionHandler.kt.tpl'), this._sharedKernelKotlinPath('shared/infrastructure/web/ApiExceptionHandler.kt'), {
             rootPackage: this.model.rootPackage
         });

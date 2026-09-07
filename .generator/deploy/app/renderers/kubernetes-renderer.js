@@ -81,7 +81,7 @@ function kubernetesLikeFiles(model, options) {
         }],
         patches: environmentPatchFiles(resolved).map((file) => ({ path: file }))
     });
-    files[`${options.root}/environments/${options.environmentName}/configmap.yaml`] = renderDocuments(environmentConfigMaps(resolved, options.environmentName));
+    files[`${options.root}/environments/${options.environmentName}/configmap.yaml`] = renderDocuments(environmentConfigMaps(resolved, options));
     files[`${options.root}/environments/${options.environmentName}/secrets.example.yaml`] = renderDocuments(environmentSecretExamples(resolved, options.environmentName));
     environmentPatches(resolved).forEach((patch) => {
         files[`${options.root}/environments/${options.environmentName}/${patch.file}`] = renderYaml(patch.document);
@@ -115,9 +115,22 @@ function applicationResources(model) {
             ...(application.healthCheck ? probes(application.healthCheck, application.servicePort) : {})
         }];
         const platformApplication = schedulerEnabled && isPlatformApplication(model, application);
+        const runtimeAgentApplication = schedulerEnabled && isRuntimeAgentApplication(application);
+        if (runtimeAgentApplication) {
+            containers[0].volumeMounts = [
+                { name: 'runtime-datasets', mountPath: '/workspace/datasets', readOnly: true },
+                { name: 'runtime-work', mountPath: '/workspace/tmp/runtime-engine' }
+            ];
+        }
         const podSpec = platformApplication
             ? { serviceAccountName: runtimeAgentSchedulerServiceAccountName(model) }
-            : {};
+            : runtimeAgentApplication
+                ? { serviceAccountName: runtimeEngineSchedulerServiceAccountName(model) }
+                : {};
+        const volumes = runtimeAgentApplication ? [
+            { name: 'runtime-datasets', hostPath: { path: '/workspace/datasets', type: 'Directory' } },
+            { name: 'runtime-work', hostPath: { path: '/workspace/tmp/runtime-engine', type: 'DirectoryOrCreate' } }
+        ] : [];
         return [{
             apiVersion: 'apps/v1',
             kind: 'Deployment',
@@ -125,7 +138,7 @@ function applicationResources(model) {
             spec: {
                 replicas: application.replicas,
                 selector: selector(application.name),
-                template: podTemplate(application, containers, [], podSpec)
+                template: podTemplate(application, containers, volumes, podSpec)
             }
         },
         service(application.name, application.servicePort)
@@ -198,6 +211,7 @@ function renderK3dClusterConfig(model) {
         metadata: {
             name: `${model.name}-dev`
         },
+        image: 'rancher/k3s:v1.33.5-k3s1',
         servers: 1,
         agents: 2,
         kubeAPI: {
@@ -207,6 +221,13 @@ function renderK3dClusterConfig(model) {
         ports: [{
             port: '30080:30080',
             nodeFilters: ['server:0']
+        }],
+        volumes: [{
+            volume: '../../../volumes/datasets:/workspace/datasets',
+            nodeFilters: ['agent:*']
+        }, {
+            volume: '../../../volumes/tmp/runtime-engine:/workspace/tmp/runtime-engine',
+            nodeFilters: ['agent:*']
         }],
         options: {
             k3d: {
@@ -360,6 +381,7 @@ function axonServerResources(component) {
 
 function runtimeAgentSchedulerRbacResources(model) {
     const serviceAccountName = runtimeAgentSchedulerServiceAccountName(model);
+    const runtimeEngineServiceAccountName = runtimeEngineSchedulerServiceAccountName(model);
     return [
         {
             apiVersion: 'v1',
@@ -374,12 +396,12 @@ function runtimeAgentSchedulerRbacResources(model) {
                 {
                     apiGroups: ['apps'],
                     resources: ['deployments'],
-                    verbs: ['get', 'list', 'watch', 'create', 'patch', 'update']
+                    verbs: ['get', 'list', 'watch', 'create', 'patch', 'update', 'delete']
                 },
                 {
                     apiGroups: [''],
                     resources: ['services', 'pods'],
-                    verbs: ['get', 'list', 'watch', 'create', 'patch', 'update']
+                    verbs: ['get', 'list', 'watch', 'create', 'patch', 'update', 'delete']
                 }
             ]
         },
@@ -396,6 +418,40 @@ function runtimeAgentSchedulerRbacResources(model) {
                 kind: 'Role',
                 name: serviceAccountName
             }
+        },
+        {
+            apiVersion: 'rbac.authorization.k8s.io/v1',
+            kind: 'ClusterRole',
+            metadata: namedMetadata(`${serviceAccountName}-node-reader`, 'runtime-infrastructure-verifier'),
+            rules: [{ apiGroups: [''], resources: ['nodes'], verbs: ['get', 'list', 'watch'] }]
+        },
+        {
+            apiVersion: 'rbac.authorization.k8s.io/v1',
+            kind: 'ClusterRoleBinding',
+            metadata: namedMetadata(`${serviceAccountName}-node-reader`, 'runtime-infrastructure-verifier'),
+            subjects: [{ kind: 'ServiceAccount', name: serviceAccountName, namespace: model.name }],
+            roleRef: { apiGroup: 'rbac.authorization.k8s.io', kind: 'ClusterRole', name: `${serviceAccountName}-node-reader` }
+        },
+        {
+            apiVersion: 'v1',
+            kind: 'ServiceAccount',
+            metadata: namedMetadata(runtimeEngineServiceAccountName, 'runtime-engine-scheduler')
+        },
+        {
+            apiVersion: 'rbac.authorization.k8s.io/v1',
+            kind: 'Role',
+            metadata: namedMetadata(runtimeEngineServiceAccountName, 'runtime-engine-scheduler'),
+            rules: [
+                { apiGroups: ['apps'], resources: ['deployments'], verbs: ['get', 'list', 'watch', 'create', 'patch', 'update', 'delete'] },
+                { apiGroups: [''], resources: ['services', 'pods'], verbs: ['get', 'list', 'watch', 'create', 'patch', 'update', 'delete'] }
+            ]
+        },
+        {
+            apiVersion: 'rbac.authorization.k8s.io/v1',
+            kind: 'RoleBinding',
+            metadata: namedMetadata(runtimeEngineServiceAccountName, 'runtime-engine-scheduler'),
+            subjects: [{ kind: 'ServiceAccount', name: runtimeEngineServiceAccountName }],
+            roleRef: { apiGroup: 'rbac.authorization.k8s.io', kind: 'Role', name: runtimeEngineServiceAccountName }
         }
     ];
 }
@@ -416,15 +472,36 @@ function platformRuntimeSchedulerEnvironment(model, platformApplication) {
         { name: 'PLATFORM_RUNTIME_K3S_DATABASE_SECRET_NAME', value: 'postgres-secret' },
         { name: 'PLATFORM_RUNTIME_K3S_UMADB_TARGET', value: 'umadb:50051' },
         { name: 'PLATFORM_RUNTIME_K3S_ENDPOINT_SCOPE', value: 'CLUSTER' },
-        { name: 'PLATFORM_RUNTIME_K3S_AGENT_VERSION', value: 'k3s' }
+        { name: 'PLATFORM_RUNTIME_K3S_AGENT_VERSION', value: 'k3s' },
+        { name: 'PLATFORM_RUNTIME_K3S_RUNTIME_ENGINE_SERVICE_ACCOUNT_NAME', value: runtimeEngineSchedulerServiceAccountName(model) },
+        { name: 'PLATFORM_RUNTIME_K3S_RUNTIME_ENGINE_IMAGE', value: `medol/${model.name}-runtime-engine:0.0.1-SNAPSHOT` },
+        { name: 'PLATFORM_RUNTIME_K3S_RUNTIME_ENGINE_IMAGE_PULL_POLICY', value: 'IfNotPresent' },
+        { name: 'PLATFORM_RUNTIME_K3S_RUNTIME_ENGINE_DATASET_HOST_PATH', value: '/workspace/datasets' },
+        { name: 'PLATFORM_RUNTIME_K3S_RUNTIME_ENGINE_WORK_HOST_PATH', value: '/workspace/tmp/runtime-engine' }
+    ];
+}
+
+function runtimeAgentEngineEnvironment(model) {
+    return [
+        { name: 'RUNTIME_AGENT_LOCAL_RUNTIME_ENGINE_MODE', value: 'kubernetes' },
+        { name: 'RUNTIME_AGENT_LOCAL_RUNTIME_ENGINE_KUBERNETES_NAMESPACE', value: model.name },
+        { name: 'RUNTIME_AGENT_LOCAL_RUNTIME_ENGINE_KUBERNETES_SERVICE_ACCOUNT_NAME', value: runtimeEngineSchedulerServiceAccountName(model) },
+        { name: 'RUNTIME_AGENT_LOCAL_RUNTIME_ENGINE_KUBERNETES_IMAGE', value: `medol/${model.name}-runtime-engine:0.0.1-SNAPSHOT` },
+        { name: 'RUNTIME_AGENT_LOCAL_RUNTIME_ENGINE_KUBERNETES_IMAGE_PULL_POLICY', value: 'IfNotPresent' },
+        { name: 'RUNTIME_AGENT_LOCAL_RUNTIME_ENGINE_KUBERNETES_DATASET_HOST_PATH', value: '/workspace/datasets' },
+        { name: 'RUNTIME_AGENT_LOCAL_RUNTIME_ENGINE_KUBERNETES_RUNTIME_HOST_PATH', value: '/workspace/tmp/runtime-engine' }
     ];
 }
 
 function applicationEnvironmentVariables(model, application) {
     const schedulerEnabled = hasPlatformRuntimeScheduler(model);
-    return schedulerEnabled && isPlatformApplication(model, application)
-        ? [...application.environmentVariables, ...platformRuntimeSchedulerEnvironment(model, application)]
-        : application.environmentVariables;
+    if (schedulerEnabled && isPlatformApplication(model, application)) {
+        return [...application.environmentVariables, ...platformRuntimeSchedulerEnvironment(model, application)];
+    }
+    if (schedulerEnabled && isRuntimeAgentApplication(application)) {
+        return [...application.environmentVariables, ...runtimeAgentEngineEnvironment(model)];
+    }
+    return application.environmentVariables;
 }
 
 function applicationBaseEnvironmentVariables(model, application) {
@@ -432,24 +509,37 @@ function applicationBaseEnvironmentVariables(model, application) {
         .filter((variable) => variable.valueFromSecret || variable.name === 'DB_USERNAME' || variable.name === 'DB_PASSWORD');
 }
 
-function environmentConfigMaps(model, environmentName) {
+function environmentConfigMaps(model, options) {
     return model.applications.map((application) => {
-        const variables = applicationConfigVariables(model, application)
+        const variables = applicationConfigVariables(model, application, options)
             .filter((variable) => variable.name && !variable.valueFromSecret && !isSecretVariable(variable.name))
             .map((variable) => [variable.name, kubernetesLiteralValue(variable.value)]);
         return {
             apiVersion: 'v1',
             kind: 'ConfigMap',
-            metadata: namedMetadata(applicationConfigMapName(application, environmentName), 'application-config'),
+            metadata: namedMetadata(applicationConfigMapName(application, options.environmentName), 'application-config'),
             data: Object.fromEntries(variables.sort(([left], [right]) => left.localeCompare(right)))
         };
     });
 }
 
-function applicationConfigVariables(model, application) {
+function applicationConfigVariables(model, application, options) {
+    const applicationVariables = applicationEnvironmentVariables(model, application);
+    const hasIdentityAccessManagement = hasApplicationContext(application, 'IdentityAccessManagement');
+    const hasConfiguredCors = applicationVariables.some((variable) => variable.name === 'MEDOL_SECURITY_ALLOWED_ORIGINS');
+    const k3sDevCors = application.kind === 'backend'
+        && options.name.toLowerCase() === 'k3s'
+        && options.environmentName === 'dev'
+        && !hasConfiguredCors
+        ? [{
+            name: 'MEDOL_SECURITY_ALLOWED_ORIGINS',
+            value: 'http://localhost:*,http://127.0.0.1:*,http://*:30080'
+        }]
+        : [];
     return [
-        ...applicationEnvironmentVariables(model, application),
-        ...(hasApplicationContext(application, 'IdentityAccessManagement')
+        ...applicationVariables,
+        ...k3sDevCors,
+        ...(hasIdentityAccessManagement
             ? [{ name: 'MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED', value: 'false' }]
             : [])
     ];
@@ -581,8 +671,16 @@ function isPlatformApplication(model, application) {
     return application.kind === 'backend' && application.name === model.name;
 }
 
+function isRuntimeAgentApplication(application) {
+    return application.name.endsWith('-runtime-agent');
+}
+
 function runtimeAgentSchedulerServiceAccountName(model) {
     return kubernetesName(`${model.name}-runtime-agent-scheduler`);
+}
+
+function runtimeEngineSchedulerServiceAccountName(model) {
+    return kubernetesName(`${model.name}-runtime-engine-scheduler`);
 }
 
 function podTemplate(owner, containers, volumes = [], spec = {}) {
@@ -727,7 +825,7 @@ function renderKubernetesReadme(name) {
         '- `base/namespace.yaml` creates the namespace.',
         '- `base/infrastructure.yaml` creates Postgres, UmaDB, their PVCs, and the Postgres database initialization ConfigMap.',
         '- `base/applications.yaml` creates the frontend and backend Deployments and Services.',
-        '- `base/runtime-agent-scheduler-rbac.yaml` is generated when the topology contains a platform backend and runtime-agent module. It lets the platform create platform-managed runtime-agent Deployments and Services inside the application namespace.',
+        '- `base/runtime-agent-scheduler-rbac.yaml` is generated when the topology contains a platform backend and runtime-agent module. It authorizes platform-managed runtime-agent deployment, labeled Node verification, and per-round Runtime Engine scheduling.',
         '- `base/apisix-config.yaml` contains standalone APISIX declarative route configuration.',
         '- `base/apisix.yaml` creates the APISIX Deployment and Service.',
         '- `environments/<environment>/kustomization.yaml` selects the base and attaches environment labels.',
@@ -749,6 +847,49 @@ function renderKubernetesReadme(name) {
             '```',
             '',
             'The config creates one server and two agent nodes, disables the default Traefik addon, exposes APISIX NodePort `30080` on localhost, and leaves application manifests under `environments/dev`.',
+            '',
+            '### Add A K3d Runtime Node',
+            '',
+            'A k3d node is a containerized K3s node on the same Docker host. Use native K3s agents instead when nodes must run on different physical machines.',
+            '',
+            'Add an agent node to the existing cluster:',
+            '',
+            '```bash',
+            'k3d node create <k3d-node-name> \\',
+            '  --cluster <cluster-name> \\',
+            '  --role agent \\',
+            '  --volume ../../../volumes/datasets:/workspace/datasets \\',
+            '  --volume ../../../volumes/tmp/runtime-engine:/workspace/tmp/runtime-engine \\',
+            '  --wait',
+            'kubectl get nodes -o wide',
+            '```',
+            '',
+            'Replace `<kubernetes-node-name>` below with the name returned by `kubectl get nodes`, and use the organization and runtime infrastructure identifiers from the installation guide:',
+            '',
+            '```bash',
+            'kubectl label node <kubernetes-node-name> \\',
+            '  medol.dev/node-role=runtime \\',
+            '  medol.dev/organization-id=<organization-id> \\',
+            '  medol.dev/runtime-infrastructure-id=<runtime-infrastructure-id> \\',
+            '  --overwrite',
+            '',
+            'kubectl taint node <kubernetes-node-name> \\',
+            '  medol.dev/runtime-only=true:NoSchedule \\',
+            '  --overwrite',
+            '```',
+            '',
+            'Verify that platform-managed runtime-agent scheduling can find the node:',
+            '',
+            '```bash',
+            'kubectl get node <kubernetes-node-name> --show-labels',
+            'kubectl get nodes -l medol.dev/runtime-infrastructure-id=<runtime-infrastructure-id>',
+            '```',
+            '',
+            'After adding a node, import locally built images into the cluster again when the new node cannot pull them:',
+            '',
+            '```bash',
+            'k3d image import <runtime-agent-image> --cluster <cluster-name>',
+            '```',
             ''
         ] : []),
         'Build or import these images on every node that may run the workloads:',
@@ -758,6 +899,7 @@ function renderKubernetesReadme(name) {
         'medol/federation-learning-support:0.0.1-SNAPSHOT',
         'medol/federation-learning-platform:0.0.1-SNAPSHOT',
         'medol/federation-learning-runtime-agent:0.0.1-SNAPSHOT',
+        'medol/federation-learning-runtime-engine:0.0.1-SNAPSHOT',
         'postgres:16',
         'umadb/umadb:0.7.8',
         'apache/apisix:3.13.0-debian',
@@ -770,16 +912,41 @@ function renderKubernetesReadme(name) {
         'sudo k3s ctr images import dependency-images.tar',
         '```',
         '',
-        'Create real Kubernetes Secret objects outside the generator-owned base manifests. At minimum, the generated workloads require `postgres-secret`:',
+        'Create the namespace before applying environment-specific Secret objects:',
         '',
         '```bash',
         'kubectl create namespace federation-learning-platform --dry-run=client -o yaml | kubectl apply -f -',
-        'kubectl -n federation-learning-platform create secret generic postgres-secret \\',
-        '  --from-literal=username=medol \\',
-        '  --from-literal=password=<change-me>',
         '```',
         '',
-        'When security, internal service tokens, Portal SSO, or external registries are enabled, add those secrets as environment-specific Kustomize patches rather than editing `base/*.yaml` directly.',
+        'The generated `secrets.example.yaml` contains `postgres-secret` and the per-application Secret objects required by the workloads. Copy it to an environment-owned file, replace every example value, and apply it separately:',
+        '',
+        '```bash',
+        'cp environments/<environment>/secrets.example.yaml environments/<environment>/secrets.<environment>.yaml',
+        '# Edit secrets.<environment>.yaml and replace change-me, development tokens, and empty credentials.',
+        'kubectl -n federation-learning-platform apply -f environments/<environment>/secrets.<environment>.yaml',
+        'kubectl -n federation-learning-platform get secret postgres-secret',
+        '```',
+        '',
+        '`secrets.<environment>.yaml` is intentionally not referenced by the generated Kustomization and must not be committed. Production deployments should create the same Secret objects through the selected secret manager or deployment pipeline instead.',
+        '',
+        '## First Administrator',
+        '',
+        'Administrator bootstrap is disabled by default. Before creating the first administrator, set `MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED` to `"true"` in the IAM application ConfigMap and set `MEDOL_SECURITY_ADMIN_BOOTSTRAP_SETUP_TOKEN` in its environment-owned Secret file.',
+        '',
+        ...(isK3s ? [
+            'The dev K3s ConfigMap allows browser origins reaching APISIX on NodePort `30080`. For another gateway port, protocol, or production hostname, replace `MEDOL_SECURITY_ALLOWED_ORIGINS` with the exact comma-separated browser origins.',
+            ''
+        ] : []),
+        'Apply both files and restart the IAM application before submitting `POST /api/auth/setup-admin`:',
+        '',
+        '```bash',
+        'kubectl -n federation-learning-platform apply -f environments/<environment>/secrets.<environment>.yaml',
+        'kubectl apply -k environments/<environment>',
+        'kubectl -n federation-learning-platform rollout restart deploy/federation-learning-support',
+        'kubectl -n federation-learning-platform rollout status deploy/federation-learning-support',
+        '```',
+        '',
+        'After the administrator is created, set `MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED` back to `"false"`, reapply the environment, and restart the IAM application.',
         '',
         '## Environment Configuration',
         '',
@@ -832,10 +999,10 @@ function renderKubernetesReadme(name) {
         'kubectl apply -k environments/<environment>',
         '```',
         '',
-        'Apply local Secret values when using a copied `secrets.local.yaml` file:',
+        'Apply Secret values when using a copied `secrets.<environment>.yaml` file:',
         '',
         '```bash',
-        'kubectl -n federation-learning-platform apply -f environments/<environment>/secrets.local.yaml',
+        'kubectl -n federation-learning-platform apply -f environments/<environment>/secrets.<environment>.yaml',
         '```',
         '',
         'ConfigMap and Secret changes are read when a Pod starts. Restart the affected Deployments after changing them:',
@@ -943,11 +1110,11 @@ function renderKubernetesReadme(name) {
         'RUNTIME_AGENT_ENDPOINT_SCOPE=CLUSTER',
         '```',
         '',
-        'The platform must be able to execute `kubectl`. In development you can run the platform outside the cluster with a local kubeconfig. For in-cluster execution, use the generated `ServiceAccount`, `Role`, and `RoleBinding` from `runtime-agent-scheduler-rbac.yaml`, and build or extend the platform image so `PLATFORM_RUNTIME_K3S_KUBECTL_EXECUTABLE` points to an available kubectl binary.',
+        'The platform uses the Fabric8 Kubernetes API client. In cluster it automatically uses the mounted ServiceAccount credentials; no `kubectl` binary is required. The generated scheduler RBAC grants namespaced Deployment/Service management and cluster-scoped read access to labeled Nodes.',
         '',
         'A managed agent is named with the configured prefix plus a short runtime-agent id suffix, for example `federation-learning-runtime-agent-managed-000000000000`. This keeps platform-managed agents separate from the always-on development agent.',
         '',
-        'This completes platform-side runtime-agent startup. Round execution still depends on the runtime-agent `local-runtime-engine` adapter; for pure K3s training execution, add a Kubernetes Job or service-backed runtime-engine adapter and set the runtime-agent engine endpoint accordingly.',
+        'In Kubernetes mode each runtime agent creates a per-round runtime-engine Deployment and ClusterIP Service, waits for readiness, submits the training job, observes it through the service endpoint, and deletes both resources after release. Runtime nodes must expose `/workspace/datasets` and `/workspace/tmp/runtime-engine`, or the generated hostPath settings must be patched for the target cluster.',
         '',
         '## Postgres Initialization',
         '',

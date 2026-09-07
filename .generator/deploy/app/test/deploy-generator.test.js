@@ -136,7 +136,9 @@ test('renders Kubernetes and K3s manifests from the same deployment model', () =
     assert.match(k3s['dev/k3s/base/apisix.yaml'], /type: "NodePort"/);
     assert.match(k3s['dev/k3s/cluster/k3d-dev.yaml'], /apiVersion: "k3d.io\/v1alpha5"/);
     assert.match(k3s['dev/k3s/cluster/k3d-dev.yaml'], /name: "learning-platform-dev"/);
+    assert.match(k3s['dev/k3s/cluster/k3d-dev.yaml'], /image: "rancher\/k3s:v1.33.5-k3s1"/);
     assert.match(k3s['dev/k3s/cluster/k3d-dev.yaml'], /port: "30080:30080"/);
+    assert.match(k3s['dev/k3s/cluster/k3d-dev.yaml'], /volume: "\.\.\/\.\.\/\.\.\/volumes\/datasets:\/workspace\/datasets"/);
     assert.match(k3s['dev/k3s/environments/dev/kustomization.yaml'], /configmap.yaml/);
     assert.match(k3s['dev/k3s/environments/dev/kustomization.yaml'], /patches\/federation-service-envfrom.yaml/);
     assert.doesNotMatch(k3s['dev/k3s/environments/dev/kustomization.yaml'], /secrets\.example\.yaml/);
@@ -151,6 +153,12 @@ test('renders Kubernetes and K3s manifests from the same deployment model', () =
     assert.match(k3s['dev/k3s/environments/dev/secrets.example.yaml'], /MEDOL_SECURITY_INTERNAL_TOKEN/);
     assert.match(k3s['dev/k3s/environments/dev/patches/federation-service-envfrom.yaml'], /envFrom:/);
     assert.match(k3s['dev/k3s/README.md'], /k3d cluster create --config cluster\/k3d-dev.yaml/);
+    assert.match(k3s['dev/k3s/README.md'], /k3d node create <k3d-node-name>/);
+    assert.match(k3s['dev/k3s/README.md'], /medol\.dev\/runtime-infrastructure-id=<runtime-infrastructure-id>/);
+    assert.match(k3s['dev/k3s/README.md'], /k3d image import <runtime-agent-image>/);
+    assert.match(k3s['dev/k3s/README.md'], /cp environments\/<environment>\/secrets\.example\.yaml environments\/<environment>\/secrets\.<environment>\.yaml/);
+    assert.match(k3s['dev/k3s/README.md'], /apply -f environments\/<environment>\/secrets\.<environment>\.yaml/);
+    assert.match(k3s['dev/k3s/README.md'], /must not be committed/);
     assert.match(k3s['dev/k3s/README.md'], /NodePort service on `30080`/);
     assert.match(kubernetes['dev/kubernetes/base/apisix-config.yaml'], /apisix.yaml: \|/);
     assert(!kubernetes['dev/kubernetes/cluster/k3d-dev.yaml']);
@@ -183,11 +191,46 @@ test('renders K3s platform runtime-agent scheduler details when topology contain
     assert.match(k3s['staging/k3s/base/kustomization.yaml'], /runtime-agent-scheduler-rbac.yaml/);
     assert.match(k3s['staging/k3s/base/runtime-agent-scheduler-rbac.yaml'], /kind: "ServiceAccount"/);
     assert.match(k3s['staging/k3s/base/runtime-agent-scheduler-rbac.yaml'], /resources:\n\s+- "deployments"/);
+    assert.match(k3s['staging/k3s/base/runtime-agent-scheduler-rbac.yaml'], /kind: "ClusterRole"/);
+    assert.match(k3s['staging/k3s/base/runtime-agent-scheduler-rbac.yaml'], /resources:\n\s+- "nodes"/);
+    assert.match(k3s['staging/k3s/base/runtime-agent-scheduler-rbac.yaml'], /name: "federation-learning-platform-runtime-engine-scheduler"/);
     assert.match(k3s['staging/k3s/base/applications.yaml'], /serviceAccountName: "federation-learning-platform-runtime-agent-scheduler"/);
+    assert.match(k3s['staging/k3s/base/applications.yaml'], /serviceAccountName: "federation-learning-platform-runtime-engine-scheduler"/);
+    assert.match(k3s['staging/k3s/base/applications.yaml'], /mountPath: "\/workspace\/datasets"/);
     assert.match(k3s['staging/k3s/environments/staging/configmap.yaml'], /PLATFORM_RUNTIME_K3S_NAMESPACE: "federation-learning-platform"/);
     assert.match(k3s['staging/k3s/environments/staging/configmap.yaml'], /PLATFORM_RUNTIME_K3S_AGENT_IMAGE: "medol\/federation-learning-runtime-agent:0.0.1-SNAPSHOT"/);
+    assert.match(k3s['staging/k3s/environments/staging/configmap.yaml'], /RUNTIME_AGENT_LOCAL_RUNTIME_ENGINE_MODE: "kubernetes"/);
+    assert.match(k3s['staging/k3s/README.md'], /no `kubectl` binary is required/);
     assert.match(k3s['staging/k3s/environments/staging/configmap.yaml'], /name: "federation-learning-support-staging-config"[\s\S]*MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED: "false"/);
+    assert.doesNotMatch(k3s['staging/k3s/environments/staging/configmap.yaml'], /MEDOL_SECURITY_ALLOWED_ORIGINS/);
     assert.match(k3s['staging/k3s/environments/staging/secrets.example.yaml'], /name: "federation-learning-support-staging-secret"[\s\S]*MEDOL_SECURITY_ADMIN_BOOTSTRAP_SETUP_TOKEN/);
+});
+
+test('renders browser CORS origins for the dev K3s gateway', () => {
+    const generatedModel = buildDeploymentModel({
+        domain: 'FederationLearningPlatform',
+        deployments: [{
+            name: 'FederationLearningSupport',
+            title: 'Federation Learning Support',
+            contexts: [{ name: 'IdentityAccessManagement', title: 'Identity Access Management' }]
+        }, {
+            name: 'FederationLearningPlatform',
+            title: 'Federation Learning Platform',
+            contexts: [{ name: 'TrainingOrchestration', title: 'Training Orchestration' }]
+        }],
+        contexts: []
+    });
+    const k3s = k3sFiles(generatedModel, { environmentName: 'dev' });
+
+    assert.match(
+        k3s['dev/k3s/environments/dev/configmap.yaml'],
+        /MEDOL_SECURITY_ALLOWED_ORIGINS: "http:\/\/localhost:\*,http:\/\/127\.0\.0\.1:\*,http:\/\/\*:30080"/
+    );
+    assert.match(
+        k3s['dev/k3s/environments/dev/configmap.yaml'],
+        /name: "federation-learning-platform-dev-config"[\s\S]*MEDOL_SECURITY_ALLOWED_ORIGINS: "http:\/\/localhost:\*,http:\/\/127\.0\.0\.1:\*,http:\/\/\*:30080"/
+    );
+    assert.match(k3s['dev/k3s/README.md'], /Administrator bootstrap is disabled by default/);
 });
 
 function golden(name) {

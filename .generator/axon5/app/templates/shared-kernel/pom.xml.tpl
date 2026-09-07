@@ -22,6 +22,7 @@
         <kotlin.compiler.daemon>false</kotlin.compiler.daemon>
         <axon.version>5.1.1</axon.version>
         <spring-cloud.version>2025.0.0</spring-cloud.version>
+        <fabric8-kubernetes-client.version>7.8.0</fabric8-kubernetes-client.version>
     </properties>
 
     <dependencyManagement>
@@ -89,6 +90,11 @@
         <dependency>
             <groupId>org.jetbrains.kotlin</groupId>
             <artifactId>kotlin-reflect</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.fabric8</groupId>
+            <artifactId>kubernetes-client</artifactId>
+            <version>${fabric8-kubernetes-client.version}</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

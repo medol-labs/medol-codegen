@@ -2,6 +2,9 @@
 import { useShow, useTranslate } from "@refinedev/core";
 
 import { ShowView, ShowViewHeader } from "@/components/refine-ui/views/show-view";
+<% if (resource.hasLongTextFields) { -%>
+import { CopyableText } from "@/components/refine-ui/fields/copyable-text";
+<% } -%>
 import {
   Card,
   CardContent,
@@ -42,7 +45,11 @@ export const <%= resource.component %>Show = () => {
 <% resource.fields.forEach((field) => { -%>
             <div>
               <h4 className="mb-2 text-sm font-medium">{t("<%= field.i18nKey %>", "<%= field.label %>")}</h4>
+<% if (field.longText) { -%>
+              <CopyableText value={record?.<%= field.name %>} />
+<% } else { -%>
               <p className="text-sm text-muted-foreground">{formatValue(record?.<%= field.name %>, t)}</p>
+<% } -%>
             </div>
             <Separator />
 <% }) -%>

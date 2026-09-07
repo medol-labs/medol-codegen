@@ -16,6 +16,9 @@ import {
   ListViewHeader
 } from "@/components/refine-ui/views/list-view";
 import { Checkbox } from "@/components/ui/checkbox";
+<% if (resource.hasLongTextFields) { -%>
+import { CopyableText } from "@/components/refine-ui/fields/copyable-text";
+<% } -%>
 <% if (resource.valueTypeImports.length) { -%>
 import type { <%= resource.valueTypeImports.join(', ') %> } from "@/domain/value-types";
 <% } -%>

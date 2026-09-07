@@ -369,6 +369,8 @@ function decorateField(field) {
     const object = isObjectField(field);
     const list = isListField(field);
     const json = object;
+    const longText = !object && !list
+        && (field.valueType?.resolvedBaseType ?? field.type)?.toLowerCase() === 'text';
     const uploadFile = !!field.uploadFile;
     const file = !!field.file;
     const fileInput = uploadFile || file;
@@ -403,6 +405,7 @@ function decorateField(field) {
         list,
         scalarList: list && !object,
         json,
+        longText,
         jsonEmptyValue: isListField(field) ? '[]' : '{}',
         placeholder: file ? `Select ${field.label}` : optionSet ? `Select ${field.label}` : json ? jsonPlaceholder(field) : `Enter ${field.label}`,
         fieldArrayName: `${camel(field.name)}Fields`,
@@ -685,6 +688,9 @@ function inputType(field) {
 
 function cellValue(field) {
     const lower = (field.valueType?.resolvedBaseType ?? field.type)?.toLowerCase();
+    if (lower === 'text') {
+        return '<CopyableText value={getValue()} compact />';
+    }
     if (lower === 'boolean') {
         return 'getValue() ? "Yes" : "No"';
     }

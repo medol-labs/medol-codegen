@@ -113,6 +113,7 @@ module.exports = class extends Generator {
             ? undefined
             : normalizeSelectedCommands(this.answers.commands);
         const model = buildFrontendModel(codegenModel, selectedCommandKeys);
+        this._writeFrameworkComponents();
         this._writeDomainModel(buildDomainModel(codegenModel));
         this._writeI18n(model.i18n);
 
@@ -300,6 +301,13 @@ module.exports = class extends Generator {
             this.templatePath('src/i18n/messages.ts.tpl'),
             this.destinationPath('./src/i18n/messages.ts'),
             model
+        );
+    }
+
+    _writeFrameworkComponents() {
+        this.fs.copy(
+            this.templatePath('root/src/components/refine-ui/fields/copyable-text.tsx'),
+            this.destinationPath('./src/components/refine-ui/fields/copyable-text.tsx')
         );
     }
 

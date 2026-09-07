@@ -101,6 +101,7 @@ function toReadModelResource(group, readModel, allEvents, workflow) {
         readModelId: readModel?.id,
         canList: readModel ? !!readModel.listElement : true,
         fields,
+        hasLongTextFields: fields.some((field) => field.longText),
         actionControls: actionControls(queryFields),
         valueTypeImports: Array.from(new Set(fields.map((field) => field.valueType?.name).filter(Boolean))).sort(),
         createCommand,

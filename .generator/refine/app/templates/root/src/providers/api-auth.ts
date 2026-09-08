@@ -12,6 +12,7 @@ export type CurrentUser = {
 
 const TOKEN_KEY = "medol-auth-token";
 const USER_KEY = "medol-current-user";
+export const AUTH_STATE_CHANGE_EVENT = "medol-auth-state-change";
 let currentUserRequest: Promise<CurrentUser> | null = null;
 
 export const authProviderMode = (): string =>
@@ -31,6 +32,7 @@ export const storeLocalAuth = (token: string, user?: CurrentUser) => {
   if (user) {
     localStorage.setItem(USER_KEY, JSON.stringify(user));
   }
+  window.dispatchEvent(new Event(AUTH_STATE_CHANGE_EVENT));
 };
 
 export type PortalSsoExchangeResponse = {
@@ -76,6 +78,7 @@ export const exchangePortalJwtForSystemSession = async (params: {
 export const clearLocalAuth = () => {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
+  window.dispatchEvent(new Event(AUTH_STATE_CHANGE_EVENT));
 };
 
 export const cachedCurrentUser = (): CurrentUser | null => {
@@ -137,6 +140,7 @@ export const fetchCurrentUser = async (): Promise<CurrentUser> => {
 
       const user = (await response.json()) as CurrentUser;
       localStorage.setItem(USER_KEY, JSON.stringify(user));
+      window.dispatchEvent(new Event(AUTH_STATE_CHANGE_EVENT));
       return user;
     })
     .finally(() => {

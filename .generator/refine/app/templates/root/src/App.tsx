@@ -7,7 +7,7 @@ import routerProvider, {
   UnsavedChangesNotifier
 } from "@refinedev/react-router";
 import { liveProvider } from "@refinedev/supabase";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { BrowserRouter } from "react-router";
 import { Toaster } from "./components/refine-ui/notification/toaster";
 import { useNotificationProvider } from "./components/refine-ui/notification/use-notification-provider";
@@ -26,24 +26,35 @@ import {
 import { isSupabaseConfigured } from "./providers/constants";
 import { backendModules, resources } from "./providers/resources";
 import { supabaseClient } from "./providers/supabase-client";
+import {
+  AppExtensionProvider,
+  useAppExtensions,
+} from "./domain/app-extensions";
 
 import "./App.css";
 
-const backendDataProviders: Record<string, Required<DataProvider>> = Object.fromEntries(
-  backendModules.map((module) => [
-    module.dataProviderName,
-    commandDataProvider(supabaseClient, { baseUrl: module.apiUrl }),
-  ]),
-);
-
-const defaultBackendProvider =
-  backendDataProviders[backendModules[0]?.dataProviderName] ?? commandProvider;
 const configuredLiveProvider = isSupabaseConfigured()
   ? liveProvider(supabaseClient)
   : undefined;
 
-function App() {
+function RefineApplication() {
   const [localeVersion, setLocaleVersion] = useState(0);
+  const extensions = useAppExtensions();
+  const visibleBackendModules = extensions.filterBackendModules(backendModules);
+  const visibleResources = extensions.filterResources(resources);
+  const backendDataProviders = useMemo(
+    () => Object.fromEntries(
+      visibleBackendModules.map((module) => [
+        module.dataProviderName,
+        commandDataProvider(supabaseClient, {
+          baseUrl: extensions.resolveBackendBaseUrl(module),
+        }),
+      ]),
+    ) as Record<string, Required<DataProvider>>,
+    [extensions.dataProviderKey],
+  );
+  const defaultBackendProvider =
+    backendDataProviders[visibleBackendModules[0]?.dataProviderName] ?? commandProvider;
 
   useEffect(() => {
     const handleLocaleChange = () => setLocaleVersion((version) => version + 1);
@@ -58,12 +69,11 @@ function App() {
   }, []);
 
   return (
-    <BrowserRouter>
-      <RefineKbarProvider>
+    <RefineKbarProvider>
         <ThemeProvider>
           <DevtoolsProvider>
             <Refine
-              key={localeVersion}
+              key={`${localeVersion}:${extensions.dataProviderKey}`}
               dataProvider={{
                 default: defaultBackendProvider,
                 command: defaultBackendProvider,
@@ -75,7 +85,7 @@ function App() {
               routerProvider={routerProvider}
               notificationProvider={useNotificationProvider()}
               i18nProvider={i18nProvider}
-              resources={resources}
+              resources={visibleResources}
               accessControlProvider={accessControlProvider}
               options={{
                 syncWithLocation: true,
@@ -103,6 +113,15 @@ function App() {
           </DevtoolsProvider>
         </ThemeProvider>
       </RefineKbarProvider>
+  );
+}
+
+function App() {
+  return (
+    <BrowserRouter>
+      <AppExtensionProvider>
+        <RefineApplication />
+      </AppExtensionProvider>
     </BrowserRouter>
   );
 }

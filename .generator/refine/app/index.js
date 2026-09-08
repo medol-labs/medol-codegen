@@ -340,6 +340,13 @@ module.exports = class extends Generator {
             this.destinationPath('.'),
             skeletonModel
         );
+        const appExtensionsPath = this.destinationPath('./src/domain/app-extensions.tsx');
+        if (!fs.existsSync(appExtensionsPath)) {
+            this.fs.copy(
+                this.templatePath('app-extensions.tsx'),
+                appExtensionsPath
+            );
+        }
         ['.dockerignore', '.env-example', '.gitignore', '.npmrc'].forEach((file) => {
             this.fs.copyTpl(
                 this.templatePath(`root/${file}`),

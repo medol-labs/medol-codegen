@@ -14,6 +14,7 @@ import { ForgotPassword } from "@/pages/forgot-password";
 import { Login } from "@/pages/login";
 import { Register } from "@/pages/register";
 import { PortalSso } from "@/pages/sso/portal";
+import { AuthenticatedRouteExtension } from "@/domain/app-extensions";
 
 export const AppRouter = () => {
   return (
@@ -25,11 +26,13 @@ export const AppRouter = () => {
             key="authenticated-inner"
             fallback={<CatchAllNavigate to="/login" />}
           >
-            <Layout>
-              <NuqsAdapter>
-                <Outlet />
-              </NuqsAdapter>
-            </Layout>
+            <AuthenticatedRouteExtension>
+              <Layout>
+                <NuqsAdapter>
+                  <Outlet />
+                </NuqsAdapter>
+              </Layout>
+            </AuthenticatedRouteExtension>
           </Authenticated>
         }
       >

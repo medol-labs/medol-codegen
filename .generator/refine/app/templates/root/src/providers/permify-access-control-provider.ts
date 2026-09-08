@@ -3,6 +3,7 @@ import type {
   CanParams,
 } from "@refinedev/core";
 import { accessControlMode, cachedCurrentUser, fetchCurrentUser } from "./api-auth";
+import { evaluateAdditionalAccess } from "@/domain/app-extensions";
 
 const actionPermissions = (
   resource: string,
@@ -65,6 +66,16 @@ export const accessControlProvider: AccessControlProvider = {
     const user = cachedCurrentUser() ?? (await fetchCurrentUser().catch(() => null));
     if (!user) {
       return { can: accessControlMode() !== "strict" };
+    }
+
+    const additionalDecision = await evaluateAdditionalAccess({
+      user,
+      resource,
+      action,
+      params: params as Record<string, unknown> | undefined,
+    });
+    if (additionalDecision) {
+      return additionalDecision;
     }
 
     if (user.permissions.length === 0) {

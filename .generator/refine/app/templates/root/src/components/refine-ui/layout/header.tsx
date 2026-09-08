@@ -17,6 +17,10 @@ import {
 } from "@/providers/i18n";
 import { backendModules } from "@/providers/resources";
 import {
+  HeaderExtensionActions,
+  useAppExtensions,
+} from "@/domain/app-extensions";
+import {
   useActiveAuthProvider,
   useGetLocale,
   useLogout,
@@ -52,6 +56,7 @@ function DesktopHeader() {
         "z-40"
       )}
     >
+      <HeaderExtensionActions />
       <ModuleSwitcher />
       <LanguageSwitcher />
       <ThemeToggle />
@@ -135,6 +140,7 @@ function MobileHeader() {
       </div>
 
       <div className={cn("flex", "shrink-0", "items-center", "gap-1")}>
+        <HeaderExtensionActions compact />
         <ModuleSwitcher compact />
         <LanguageSwitcher compact />
         <ThemeToggle className={cn("h-8", "w-8")} />
@@ -146,15 +152,17 @@ function MobileHeader() {
 function ModuleSwitcher({ compact = false }: { compact?: boolean }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const { filterBackendModules } = useAppExtensions();
+  const visibleModules = filterBackendModules(backendModules);
 
-  if (backendModules.length <= 1) {
+  if (visibleModules.length <= 1) {
     return null;
   }
 
   const activeModule =
-    backendModules.find((module) =>
+    visibleModules.find((module) =>
       module.resources.some((route) => location.pathname.startsWith(`/${route}`)),
-    ) ?? backendModules[0];
+    ) ?? visibleModules[0];
 
   return (
     <DropdownMenu>
@@ -186,7 +194,7 @@ function ModuleSwitcher({ compact = false }: { compact?: boolean }) {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        {backendModules.map((module) => (
+        {visibleModules.map((module) => (
           <DropdownMenuItem
             key={module.name}
             className={cn("cursor-pointer", "gap-2")}

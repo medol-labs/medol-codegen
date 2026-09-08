@@ -47,12 +47,19 @@ function toReadModelResource(group, readModel, allEvents, workflow) {
     const idField = idFields[0] ?? fields.find((field) => field.name === 'id') ?? fields[0];
     const resourceCommands = uniqueElements(group.commands);
     const deployment = group.deployment;
+    const contextRoute = contextRouteFor(group.slice, group.chapter);
+    const readModelSliceRoute = sliceRouteFor(group.slice, queryTitle);
+    const readModelPagePath = `${contextRoute}/slices/${readModelSliceRoute}`;
+    const aggregatePagePath = `${contextRoute}/read-models/${route}`;
     let normalizedCommands = resourceCommands
         .filter((command) => command?.title)
-        .map((command) => ({
-            ...toCommand(command, route, component, readModel, allEvents, workflow),
-            dataProviderName: deployment.dataProviderName
-        }));
+        .map((command) => {
+            const commandSlice = workflow.commandSliceFor(command) ?? group.slice;
+            return {
+                ...toCommand(command, route, component, readModel, allEvents, workflow, commandSlice, group.chapter),
+                dataProviderName: deployment.dataProviderName
+            };
+        });
     normalizedCommands = withPrefillFields(normalizedCommands, queryFields);
     normalizedCommands = withActionControlFields(normalizedCommands, queryFields);
     const producerCommandKeys = group.producerCommandKeys ?? new Set();
@@ -86,8 +93,15 @@ function toReadModelResource(group, readModel, allEvents, workflow) {
         label: queryTitle,
         aggregateRoute: resourceAggregateRoute,
         queryRoute: axonRoute(queryTitle),
+        contextRoute,
+        sliceRoute: readModelSliceRoute,
         route,
         name,
+        pagePath: aggregatePagePath,
+        listPagePath: readModelPagePath,
+        showPagePath: readModelPagePath,
+        listFile: 'list',
+        showFile: 'show',
         tableName: tableName(readModel, queryTitle),
         component,
         chapter: group.chapter,
@@ -128,7 +142,7 @@ function isIdentifierField(field) {
 
 function uniqueResourceNames(resources) {
     const seenNames = new Map();
-    return resources.map((resource) => {
+    const uniqueResources = resources.map((resource) => {
         const count = seenNames.get(resource.name) ?? 0;
         seenNames.set(resource.name, count + 1);
 
@@ -149,6 +163,104 @@ function uniqueResourceNames(resources) {
             itemCommands: resource.itemCommands.map((command) => withResourceComponent(command, `${resource.component}${pascal(resource.aggregateTitle)}`))
         };
     });
+
+    return withPageImportPaths(withCommandPageFiles(uniqueResources));
+}
+
+function withCommandPageFiles(resources) {
+    const commandPageFiles = new Map();
+    resources.forEach((resource) => {
+        resource.commands.forEach((command) => {
+            const key = commandPageFileKey(command);
+            const components = commandPageFiles.get(key) ?? new Set();
+            components.add(command.pageComponent);
+            commandPageFiles.set(key, components);
+        });
+    });
+
+    return resources.map((resource) => {
+        const mapCommand = (command) => withUniqueCommandPageFile(command, resource, commandPageFiles);
+        const createCommand = mapCommand(resource.createCommand);
+        const editCommand = mapCommand(resource.editCommand);
+        const deleteCommand = mapCommand(resource.deleteCommand);
+        const commands = resource.commands.map(mapCommand);
+        const routedCommands = resource.routedCommands.map(mapCommand);
+        const itemCommands = resource.itemCommands.map(mapCommand);
+
+        return {
+            ...resource,
+            createCommand,
+            editCommand,
+            deleteCommand,
+            commands,
+            routedCommands,
+            itemCommands
+        };
+    });
+}
+
+function commandPageFileKey(command) {
+    return command ? `${command.pagePath}/${command.file}` : '';
+}
+
+function withUniqueCommandPageFile(command, resource, commandPageFiles) {
+    if (!command) {
+        return command;
+    }
+
+    const components = commandPageFiles.get(commandPageFileKey(command));
+    if (!components || components.size <= 1) {
+        return command;
+    }
+
+    return {
+        ...command,
+        file: `${command.file}-${resource.route}`
+    };
+}
+
+function withPageImportPaths(resources) {
+    return resources.map((resource) => {
+        const mapCommand = (command) => command
+            ? {
+                ...command,
+                importPath: relativeImportPath(resource.pagePath, `${command.pagePath}/${command.file}`)
+            }
+            : command;
+        const createCommand = mapCommand(resource.createCommand);
+        const editCommand = mapCommand(resource.editCommand);
+        const deleteCommand = mapCommand(resource.deleteCommand);
+        const commands = resource.commands.map(mapCommand);
+        const routedCommands = resource.routedCommands.map(mapCommand);
+        const itemCommands = resource.itemCommands.map(mapCommand);
+
+        return {
+            ...resource,
+            listImportPath: relativeImportPath(resource.pagePath, `${resource.listPagePath}/${resource.listFile}`),
+            showImportPath: relativeImportPath(resource.pagePath, `${resource.showPagePath}/${resource.showFile}`),
+            createCommand,
+            editCommand,
+            deleteCommand,
+            commands,
+            routedCommands,
+            itemCommands
+        };
+    });
+}
+
+function relativeImportPath(fromDirectory, toModule) {
+    const fromParts = fromDirectory.split('/').filter(Boolean);
+    const toParts = toModule.split('/').filter(Boolean);
+
+    while (fromParts.length > 0 && toParts.length > 0 && fromParts[0] === toParts[0]) {
+        fromParts.shift();
+        toParts.shift();
+    }
+
+    const prefix = fromParts.map(() => '..');
+    const relativeParts = [...prefix, ...toParts];
+    const relativePath = relativeParts.join('/');
+    return relativePath.startsWith('.') ? relativePath : `./${relativePath}`;
 }
 
 function withResourceComponent(command, resourceComponent) {
@@ -162,7 +274,7 @@ function withResourceComponent(command, resourceComponent) {
     };
 }
 
-function toCommand(command, resourceRoute, resourceComponent, readModel, allEvents, workflow) {
+function toCommand(command, resourceRoute, resourceComponent, readModel, allEvents, workflow, commandSlice, fallbackChapter) {
     const title = cleanTitle(command.title);
     const component = pascal(title);
     const rawFields = command.fields ?? [];
@@ -194,6 +306,9 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
             ...item.prefill
         }));
 
+    const contextRoute = contextRouteFor(commandSlice, fallbackChapter);
+    const sliceRoute = sliceRouteFor(commandSlice, title);
+
     return {
         id: commandKey(command),
         title,
@@ -201,6 +316,9 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
         name: camel(title),
         route: kebab(title),
         file: kebab(title),
+        pagePath: `${contextRoute}/slices/${sliceRoute}`,
+        contextRoute,
+        sliceRoute,
         component,
         schemaName: `${component}CommandSchema`,
         inputTypeName: `${component}CommandInput`,
@@ -236,6 +354,15 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
         fileFields: formFields.filter((field) => field.fileInput),
         fileUploadProducer: isFileUploadProducerCommand(command, rawFields)
     };
+}
+
+function contextRouteFor(slice, fallbackChapter) {
+    return kebab(slice?.context ?? slice?.chapter ?? fallbackChapter?.label ?? fallbackChapter?.name ?? 'default')
+        || 'default-context';
+}
+
+function sliceRouteFor(slice, fallbackTitle) {
+    return kebab(slice?.title ?? slice?.name ?? fallbackTitle) || kebab(fallbackTitle);
 }
 
 function isFileUploadProducerCommand(command, rawFields) {

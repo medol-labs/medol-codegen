@@ -17,7 +17,7 @@ import {
 <% resource.routedCommands.forEach((command) => { -%>
   <%= command.pageComponent %>,
 <% }) -%>
-} from "./pages/<%= resource.route %>";
+} from "./<%= resource.pagePath %>";
 <% }) -%>
 
 export const contextRoutes = (

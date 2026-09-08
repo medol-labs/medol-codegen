@@ -150,7 +150,7 @@ module.exports = class extends Generator {
     }
 
     _writePages(resource) {
-        const basePath = `./src/contexts/pages/${resource.route}`;
+        const basePath = `./src/contexts/${resource.pagePath}`;
 
         this.fs.copyTpl(
             this.templatePath('src/pages/index.ts.tpl'),
@@ -160,20 +160,20 @@ module.exports = class extends Generator {
         if (resource.canList) {
             this.fs.copyTpl(
                 this.templatePath('src/pages/list.tsx.tpl'),
-                this.destinationPath(`${basePath}/list.tsx`),
+                this.destinationPath(`./src/contexts/${resource.listPagePath}/${resource.listFile}.tsx`),
                 { resource }
             );
         }
         this.fs.copyTpl(
             this.templatePath('src/pages/show.tsx.tpl'),
-            this.destinationPath(`${basePath}/show.tsx`),
+            this.destinationPath(`./src/contexts/${resource.showPagePath}/${resource.showFile}.tsx`),
             { resource }
         );
 
         if (resource.createCommand) {
             this.fs.copyTpl(
                 this.templatePath('src/pages/command-form.tsx.tpl'),
-                this.destinationPath(`${basePath}/${resource.createCommand.file}.tsx`),
+                this.destinationPath(`./src/contexts/${resource.createCommand.pagePath}/${resource.createCommand.file}.tsx`),
                 { resource, command: resource.createCommand }
             );
         }
@@ -181,7 +181,7 @@ module.exports = class extends Generator {
         if (resource.editCommand) {
             this.fs.copyTpl(
                 this.templatePath('src/pages/command-form.tsx.tpl'),
-                this.destinationPath(`${basePath}/edit.tsx`),
+                this.destinationPath(`./src/contexts/${resource.editCommand.pagePath}/${resource.editCommand.file}.tsx`),
                 { resource, command: resource.editCommand }
             );
         }
@@ -189,7 +189,7 @@ module.exports = class extends Generator {
         if (resource.deleteCommand) {
             this.fs.copyTpl(
                 this.templatePath('src/pages/command-form.tsx.tpl'),
-                this.destinationPath(`${basePath}/${resource.deleteCommand.file}.tsx`),
+                this.destinationPath(`./src/contexts/${resource.deleteCommand.pagePath}/${resource.deleteCommand.file}.tsx`),
                 { resource, command: resource.deleteCommand }
             );
         }
@@ -197,46 +197,32 @@ module.exports = class extends Generator {
         resource.itemCommands.forEach((command) => {
             this.fs.copyTpl(
                 this.templatePath('src/pages/command-form.tsx.tpl'),
-                this.destinationPath(`${basePath}/${command.file}.tsx`),
+                this.destinationPath(`./src/contexts/${command.pagePath}/${command.file}.tsx`),
                 { resource, command }
             );
         });
     }
 
     _cleanupGeneratedPages(resources) {
-        const pagesRoot = this.destinationPath('./src/contexts/pages');
-        if (!fs.existsSync(pagesRoot)) {
+        this._deleteGeneratedFiles(this.destinationPath('./src/contexts/pages'));
+
+        const contextsRoot = this.destinationPath('./src/contexts');
+        if (!fs.existsSync(contextsRoot)) {
             return;
         }
 
-        const expectedFilesByRoute = new Map(resources.map((resource) => [
-            resource.route,
-            this._expectedPageFiles(resource)
-        ]));
-
-        for (const entry of fs.readdirSync(pagesRoot, { withFileTypes: true })) {
-            if (!entry.isDirectory()) {
+        for (const contextEntry of fs.readdirSync(contextsRoot, { withFileTypes: true })) {
+            if (!contextEntry.isDirectory()) {
                 continue;
             }
 
-            const route = entry.name;
-            const routePath = path.join(pagesRoot, route);
-            const expectedFiles = expectedFilesByRoute.get(route);
+            const slicesRoot = path.join(contextsRoot, contextEntry.name, 'slices');
+            this._deleteGeneratedFiles(slicesRoot);
+            this._deleteEmptyDirectories(slicesRoot);
 
-            if (!expectedFiles) {
-                this._deleteGeneratedFiles(routePath);
-                this._deleteEmptyDirectory(routePath);
-                continue;
-            }
-
-            for (const file of fs.readdirSync(routePath)) {
-                if (!file.endsWith('.ts') && !file.endsWith('.tsx')) {
-                    continue;
-                }
-                if (!expectedFiles.has(file) && this._isGeneratedFile(path.join(routePath, file))) {
-                    fs.rmSync(path.join(routePath, file), { force: true });
-                }
-            }
+            const readModelsRoot = path.join(contextsRoot, contextEntry.name, 'read-models');
+            this._deleteGeneratedFiles(readModelsRoot);
+            this._deleteEmptyDirectories(readModelsRoot);
         }
     }
 
@@ -259,6 +245,10 @@ module.exports = class extends Generator {
     }
 
     _deleteGeneratedFiles(directory) {
+        if (!fs.existsSync(directory)) {
+            return;
+        }
+
         for (const file of fs.readdirSync(directory)) {
             const filePath = path.join(directory, file);
             const stat = fs.statSync(filePath);
@@ -275,6 +265,20 @@ module.exports = class extends Generator {
         if (fs.existsSync(directory) && fs.readdirSync(directory).length === 0) {
             fs.rmdirSync(directory);
         }
+    }
+
+    _deleteEmptyDirectories(directory) {
+        if (!fs.existsSync(directory)) {
+            return;
+        }
+
+        for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+            if (entry.isDirectory()) {
+                this._deleteEmptyDirectories(path.join(directory, entry.name));
+            }
+        }
+
+        this._deleteEmptyDirectory(directory);
     }
 
     _isGeneratedFile(filePath) {

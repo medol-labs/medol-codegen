@@ -33,6 +33,7 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
     const commandsById = new Map();
     const eventsById = new Map();
     const commandContextsById = new Map();
+    const commandSlicesById = new Map();
     const commandScreenKeysById = new Map();
     const producerCommandsByReadModelId = new Map();
     const nextCommandsByReadModelId = new Map();
@@ -58,10 +59,12 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
             const screenKeys = screenKeysForSlice(slice);
             commandsById.set(commandKey(command), command);
             commandContextsById.set(commandKey(command), slice.context ?? slice.chapter);
+            commandSlicesById.set(commandKey(command), slice);
             commandScreenKeysById.set(commandKey(command), screenKeys);
             if (command.id) {
                 commandsById.set(command.id, command);
                 commandContextsById.set(command.id, slice.context ?? slice.chapter);
+                commandSlicesById.set(command.id, slice);
                 commandScreenKeysById.set(command.id, screenKeys);
             }
         });
@@ -209,6 +212,11 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
         },
         itemCommandKeys(readModel) {
             return new Set((nextCommandsByReadModelId.get(readModel.id) ?? []).map(commandKey));
+        },
+        commandSliceFor(command) {
+            return commandSlicesById.get(commandKey(command))
+                ?? (command.id ? commandSlicesById.get(command.id) : undefined)
+                ?? null;
         },
         stateControlForCommand(command, readModel) {
             const transition = transitionsByCommandId.get(commandKey(command))

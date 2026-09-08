@@ -1,14 +1,14 @@
 // Generated from config.json by the refine generator.
 <% if (resource.canList) { -%>
-export * from "./list";
+export * from "<%= resource.listImportPath %>";
 <% } -%>
-export * from "./show";
+export * from "<%= resource.showImportPath %>";
 <% if (resource.createCommand) { -%>
-export * from "./<%= resource.createCommand.file %>";
+export * from "<%= resource.createCommand.importPath %>";
 <% } -%>
 <% if (resource.editCommand) { -%>
-export * from "./edit";
+export * from "<%= resource.editCommand.importPath %>";
 <% } -%>
 <% resource.routedCommands.forEach((command) => { -%>
-export * from "./<%= command.file %>";
+export * from "<%= command.importPath %>";
 <% }) -%>

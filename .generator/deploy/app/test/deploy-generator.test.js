@@ -154,6 +154,9 @@ test('renders Kubernetes and K3s manifests from the same deployment model', () =
     assert.match(k3s['dev/k3s/environments/dev/patches/federation-service-envfrom.yaml'], /envFrom:/);
     assert.match(k3s['dev/k3s/README.md'], /k3d cluster create --config cluster\/k3d-dev.yaml/);
     assert.match(k3s['dev/k3s/README.md'], /k3d node create <k3d-node-name>/);
+    assert.match(k3s['dev/k3s/README.md'], /--k3s-node-label "medol\.dev\/node-role=runtime"/);
+    assert.match(k3s['dev/k3s/README.md'], /--k3s-node-label "medol\.dev\/organization-id=<organization-id>"/);
+    assert.match(k3s['dev/k3s/README.md'], /--k3s-node-label "medol\.dev\/runtime-infrastructure-id=<runtime-infrastructure-id>"/);
     assert.match(k3s['dev/k3s/README.md'], /medol\.dev\/runtime-infrastructure-id=<runtime-infrastructure-id>/);
     assert.match(k3s['dev/k3s/README.md'], /k3d image import <runtime-agent-image>/);
     assert.match(k3s['dev/k3s/README.md'], /cp environments\/<environment>\/secrets\.example\.yaml environments\/<environment>\/secrets\.<environment>\.yaml/);

@@ -5,7 +5,7 @@ services:
     ports:
       - "${CONSOLE_PORT:-5173}:80"
     environment:
-      VITE_API_URL: ${VITE_API_URL:-https://iwdfzvfqbtokqetmbmbp.supabase.co}
+      VITE_API_URL: ${VITE_API_URL:-}
       VITE_SUPABASE_API_KEY: ${VITE_SUPABASE_API_KEY:-}
       VITE_AUTH_PROVIDER: ${VITE_AUTH_PROVIDER:-local}
       VITE_ACCESS_CONTROL_MODE: ${VITE_ACCESS_CONTROL_MODE:-permissive}

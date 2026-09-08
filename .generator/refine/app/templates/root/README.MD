@@ -53,8 +53,8 @@ The production image is a static nginx image. Runtime environment variables are 
 
 Configure these values in `.env` or the Compose environment:
 
-- `VITE_API_URL` for Supabase URL; default: `https://iwdfzvfqbtokqetmbmbp.supabase.co`
-- `VITE_SUPABASE_API_KEY` for Supabase anon API key
+- `VITE_API_URL` for Supabase URL when Supabase auth, live updates, or the Supabase data provider are enabled
+- `VITE_SUPABASE_API_KEY` for Supabase anon API key when Supabase auth, live updates, or the Supabase data provider are enabled
 - `VITE_AUTH_PROVIDER` for authentication mode: `local` or `supabase`; default: `local`
 - `VITE_ACCESS_CONTROL_MODE` for frontend permission checks: `permissive` or `strict`; default: `permissive`
 - `VITE_AUTH_API_URL` for login and current-user API; when omitted, it falls back to the backend module that contains `IdentityAccessManagement`
@@ -63,8 +63,6 @@ Configure these values in `.env` or the Compose environment:
 <% }) -%>
 
 ```bash
-VITE_API_URL=https://iwdfzvfqbtokqetmbmbp.supabase.co \
-VITE_SUPABASE_API_KEY=<supabase-anon-key> \
 docker compose up -d
 ```
 

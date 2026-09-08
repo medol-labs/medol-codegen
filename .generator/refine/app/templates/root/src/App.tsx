@@ -23,6 +23,7 @@ import {
   i18nProvider,
   LOCALE_CHANGE_EVENT
 } from "./providers/i18n";
+import { isSupabaseConfigured } from "./providers/constants";
 import { backendModules, resources } from "./providers/resources";
 import { supabaseClient } from "./providers/supabase-client";
 
@@ -37,6 +38,9 @@ const backendDataProviders: Record<string, Required<DataProvider>> = Object.from
 
 const defaultBackendProvider =
   backendDataProviders[backendModules[0]?.dataProviderName] ?? commandProvider;
+const configuredLiveProvider = isSupabaseConfigured()
+  ? liveProvider(supabaseClient)
+  : undefined;
 
 function App() {
   const [localeVersion, setLocaleVersion] = useState(0);
@@ -66,7 +70,7 @@ function App() {
                 query: dataProvider,
                 ...backendDataProviders,
               }}
-              liveProvider={liveProvider(supabaseClient)}
+              liveProvider={configuredLiveProvider}
               authProvider={authProvider}
               routerProvider={routerProvider}
               notificationProvider={useNotificationProvider()}

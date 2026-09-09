@@ -3,7 +3,7 @@
  * Licensed under the MIT License.
  */
 
-const { resolveDeploymentModel } = require('../environment-resolver');
+const { resolveOperationsModel } = require('../environment-resolver');
 const {
     indentBlock,
     renderDocuments,
@@ -36,7 +36,8 @@ function k3sFiles(model, options = {}) {
 }
 
 function kubernetesLikeFiles(model, options) {
-    const resolved = resolveDeploymentModel(model, options.environmentName);
+    const resolved = resolveOperationsModel(model, options.environmentName);
+    const baseResolved = withoutRegistryImages(resolved);
     const resources = [
         'namespace.yaml',
         'infrastructure.yaml',
@@ -44,7 +45,7 @@ function kubernetesLikeFiles(model, options) {
         'apisix-config.yaml',
         'apisix.yaml'
     ];
-    if (hasPlatformRuntimeScheduler(resolved)) {
+    if (hasPlatformRuntimeScheduler(baseResolved)) {
         resources.splice(3, 0, 'runtime-agent-scheduler-rbac.yaml');
     }
     const files = {};
@@ -55,41 +56,45 @@ function kubernetesLikeFiles(model, options) {
         apiVersion: 'v1',
         kind: 'Namespace',
         metadata: {
-            name: resolved.name
+            name: baseResolved.name
         }
     });
-    files[`${options.root}/base/infrastructure.yaml`] = renderDocuments(infrastructureResources(resolved));
-    files[`${options.root}/base/applications.yaml`] = renderDocuments(applicationResources(resolved));
-    if (hasPlatformRuntimeScheduler(resolved)) {
-        files[`${options.root}/base/runtime-agent-scheduler-rbac.yaml`] = renderDocuments(runtimeAgentSchedulerRbacResources(resolved));
+    files[`${options.root}/base/infrastructure.yaml`] = renderDocuments(infrastructureResources(baseResolved));
+    files[`${options.root}/base/applications.yaml`] = renderDocuments(applicationResources(baseResolved));
+    if (hasPlatformRuntimeScheduler(baseResolved)) {
+        files[`${options.root}/base/runtime-agent-scheduler-rbac.yaml`] = renderDocuments(runtimeAgentSchedulerRbacResources(baseResolved));
     }
-    files[`${options.root}/base/apisix-config.yaml`] = renderApisixConfigMap(resolved);
-    files[`${options.root}/base/apisix.yaml`] = renderDocuments(apisixResources(resolved, options.gatewayServiceType));
+    files[`${options.root}/base/apisix-config.yaml`] = renderApisixConfigMap(baseResolved);
+    files[`${options.root}/base/apisix.yaml`] = renderDocuments(apisixResources(baseResolved, options.gatewayServiceType));
     files[`${options.root}/environments/${options.environmentName}/kustomization.yaml`] = renderYaml({
         resources: [
             '../../base',
             'configmap.yaml'
         ],
-        namespace: resolved.name,
+        namespace: baseResolved.name,
         labels: [{
             pairs: {
-                'app.kubernetes.io/part-of': resolved.name,
+                'app.kubernetes.io/part-of': baseResolved.name,
                 'medol.dev/environment': options.environmentName
             },
             includeSelectors: true,
             includeTemplates: true
         }],
-        patches: environmentPatchFiles(resolved).map((file) => ({ path: file }))
+        patches: environmentPatchFiles(baseResolved).map((file) => ({ path: file }))
     });
-    files[`${options.root}/environments/${options.environmentName}/configmap.yaml`] = renderDocuments(environmentConfigMaps(resolved, options));
-    files[`${options.root}/environments/${options.environmentName}/secrets.example.yaml`] = renderDocuments(environmentSecretExamples(resolved, options.environmentName));
-    environmentPatches(resolved).forEach((patch) => {
+    files[`${options.root}/environments/${options.environmentName}/configmap.yaml`] = renderDocuments(environmentConfigMaps(baseResolved, options));
+    files[`${options.root}/environments/${options.environmentName}/secrets.example.yaml`] = renderDocuments(environmentSecretExamples(baseResolved, options.environmentName));
+    environmentPatches(baseResolved).forEach((patch) => {
         files[`${options.root}/environments/${options.environmentName}/${patch.file}`] = renderYaml(patch.document);
     });
     if (options.name.toLowerCase() === 'k3s' && options.environmentName === 'dev') {
-        files[`${options.root}/cluster/k3d-dev.yaml`] = renderK3dClusterConfig(resolved);
+        files[`${options.root}/cluster/k3d-dev.yaml`] = renderK3dClusterConfig(baseResolved);
     }
-    files[`${options.root}/README.md`] = renderKubernetesReadme(options.name);
+    if (options.name.toLowerCase() === 'k3s' && resolved.registry?.host) {
+        files[`${options.root}/cluster/registries.yaml`] = renderK3sRegistriesConfig(resolved.registry);
+    }
+    Object.assign(files, registryEnvironmentFiles(baseResolved, resolved, options));
+    files[`${options.root}/README.md`] = renderKubernetesReadme(options.name, resolved);
     return files;
 }
 
@@ -242,6 +247,105 @@ function renderK3dClusterConfig(model) {
             }
         }
     });
+}
+
+function renderK3sRegistriesConfig(registry) {
+    const endpoint = `${registry.scheme ?? 'http'}://${registry.host}`;
+    return renderYaml({
+        mirrors: {
+            [registry.host]: {
+                endpoint: [endpoint]
+            }
+        }
+    });
+}
+
+function registryEnvironmentFiles(baseModel, registryModel, options) {
+    if (!registryModel.registry?.imagePrefix) return {};
+    const environmentName = `${options.environmentName}-registry`;
+    const patches = registryRuntimeImageConfigPatch(baseModel, registryModel, options);
+    const files = {};
+    files[`${options.root}/environments/${environmentName}/kustomization.yaml`] = renderYaml({
+        resources: [`../${options.environmentName}`],
+        ...(patches.length
+            ? { patches: [{ path: 'patches/runtime-image-config.yaml' }] }
+            : {}),
+        images: baseModel.applications.map((application) => ({
+            name: localApplicationImageName(application),
+            newName: registryApplicationImageName(registryModel, application),
+            newTag: registryModel.imageTag
+        }))
+    });
+    if (patches.length) {
+        files[`${options.root}/environments/${environmentName}/patches/runtime-image-config.yaml`] = renderDocuments(patches);
+    }
+    return files;
+}
+
+function registryRuntimeImageConfigPatch(baseModel, registryModel, options) {
+    if (!hasPlatformRuntimeScheduler(baseModel)) return [];
+    const runtimeAgent = baseModel.applications.find((application) => application.name.endsWith('-runtime-agent'));
+    const platform = baseModel.applications.find((application) => isPlatformApplication(baseModel, application));
+    const documents = [];
+    if (platform && runtimeAgent) {
+        documents.push({
+            apiVersion: 'v1',
+            kind: 'ConfigMap',
+            metadata: {
+                name: applicationConfigMapName(platform, options.environmentName)
+            },
+            data: {
+                PLATFORM_RUNTIME_K3S_AGENT_IMAGE: registryApplicationImage(registryModel, runtimeAgent),
+                PLATFORM_RUNTIME_K3S_RUNTIME_ENGINE_IMAGE: runtimeEngineImage(registryModel)
+            }
+        });
+    }
+    if (runtimeAgent) {
+        documents.push({
+            apiVersion: 'v1',
+            kind: 'ConfigMap',
+            metadata: {
+                name: applicationConfigMapName(runtimeAgent, options.environmentName)
+            },
+            data: {
+                RUNTIME_AGENT_LOCAL_RUNTIME_ENGINE_KUBERNETES_IMAGE: runtimeEngineImage(registryModel)
+            }
+        });
+    }
+    return documents;
+}
+
+function withoutRegistryImages(model) {
+    return {
+        ...model,
+        imagePrefix: 'medol',
+        registry: undefined,
+        applications: model.applications.map((application) => {
+            const imageName = localApplicationImageName(application);
+            return {
+                ...application,
+                imageName,
+                image: imageWithTag(imageName, model.imageTag)
+            };
+        })
+    };
+}
+
+function localApplicationImageName(application) {
+    return `medol/${application.artifactName ?? application.name}`;
+}
+
+function registryApplicationImageName(model, application) {
+    return `${model.registry.imagePrefix}/${application.artifactName ?? application.name}`;
+}
+
+function registryApplicationImage(model, application) {
+    return imageWithTag(registryApplicationImageName(model, application), model.imageTag);
+}
+
+function imageWithTag(imageName, tag) {
+    if (!tag || imageName.includes(':')) return imageName;
+    return `${imageName}:${tag}`;
 }
 
 function postgresResources(component, model) {
@@ -474,7 +578,7 @@ function platformRuntimeSchedulerEnvironment(model, platformApplication) {
         { name: 'PLATFORM_RUNTIME_K3S_ENDPOINT_SCOPE', value: 'CLUSTER' },
         { name: 'PLATFORM_RUNTIME_K3S_AGENT_VERSION', value: 'k3s' },
         { name: 'PLATFORM_RUNTIME_K3S_RUNTIME_ENGINE_SERVICE_ACCOUNT_NAME', value: runtimeEngineSchedulerServiceAccountName(model) },
-        { name: 'PLATFORM_RUNTIME_K3S_RUNTIME_ENGINE_IMAGE', value: `medol/${model.name}-runtime-engine:0.0.1-SNAPSHOT` },
+        { name: 'PLATFORM_RUNTIME_K3S_RUNTIME_ENGINE_IMAGE', value: runtimeEngineImage(model) },
         { name: 'PLATFORM_RUNTIME_K3S_RUNTIME_ENGINE_IMAGE_PULL_POLICY', value: 'IfNotPresent' },
         { name: 'PLATFORM_RUNTIME_K3S_RUNTIME_ENGINE_DATASET_HOST_PATH', value: '/workspace/datasets' },
         { name: 'PLATFORM_RUNTIME_K3S_RUNTIME_ENGINE_WORK_HOST_PATH', value: '/workspace/tmp/runtime-engine' }
@@ -486,11 +590,15 @@ function runtimeAgentEngineEnvironment(model) {
         { name: 'RUNTIME_AGENT_LOCAL_RUNTIME_ENGINE_MODE', value: 'kubernetes' },
         { name: 'RUNTIME_AGENT_LOCAL_RUNTIME_ENGINE_KUBERNETES_NAMESPACE', value: model.name },
         { name: 'RUNTIME_AGENT_LOCAL_RUNTIME_ENGINE_KUBERNETES_SERVICE_ACCOUNT_NAME', value: runtimeEngineSchedulerServiceAccountName(model) },
-        { name: 'RUNTIME_AGENT_LOCAL_RUNTIME_ENGINE_KUBERNETES_IMAGE', value: `medol/${model.name}-runtime-engine:0.0.1-SNAPSHOT` },
+        { name: 'RUNTIME_AGENT_LOCAL_RUNTIME_ENGINE_KUBERNETES_IMAGE', value: runtimeEngineImage(model) },
         { name: 'RUNTIME_AGENT_LOCAL_RUNTIME_ENGINE_KUBERNETES_IMAGE_PULL_POLICY', value: 'IfNotPresent' },
         { name: 'RUNTIME_AGENT_LOCAL_RUNTIME_ENGINE_KUBERNETES_DATASET_HOST_PATH', value: '/workspace/datasets' },
         { name: 'RUNTIME_AGENT_LOCAL_RUNTIME_ENGINE_KUBERNETES_RUNTIME_HOST_PATH', value: '/workspace/tmp/runtime-engine' }
     ];
+}
+
+function runtimeEngineImage(model) {
+    return `${model.imagePrefix}/${model.name}-runtime-engine:${model.imageTag}`;
 }
 
 function applicationEnvironmentVariables(model, application) {
@@ -792,13 +900,25 @@ function namedMetadata(name, component) {
         labels: {
             'app.kubernetes.io/name': resourceName,
             'app.kubernetes.io/component': component,
-            'app.kubernetes.io/managed-by': 'medol-deploy-generator'
+            'app.kubernetes.io/managed-by': 'medol-operations-generator'
         }
     };
 }
 
-function renderKubernetesReadme(name) {
+function renderKubernetesReadme(name, model) {
     const isK3s = name.toLowerCase() === 'k3s';
+    const registryConfigured = Boolean(model?.registry?.host);
+    const k3dCreateCommand = registryConfigured
+        ? 'k3d cluster create --config cluster/k3d-dev.yaml --registry-config cluster/registries.yaml'
+        : 'k3d cluster create --config cluster/k3d-dev.yaml';
+    const applicationImages = model?.applications?.map((application) => application.image) ?? [];
+    const runtimeImages = hasPlatformRuntimeScheduler(model ?? {})
+        ? [runtimeEngineImage(model)]
+        : [];
+    const dependencyImages = model?.infrastructure
+        ?.filter((component) => component.enabled !== false)
+        .map((component) => component.image)
+        .filter(Boolean) ?? [];
     const gatewayExposure = isK3s
         ? 'APISIX is exposed with a NodePort service on `30080`, so the default entrypoint is `http://<node-ip>:30080/`.'
         : 'APISIX is exposed with a LoadBalancer service. Use the external address assigned by your cluster or cloud provider.';
@@ -808,7 +928,7 @@ function renderKubernetesReadme(name) {
     return [
         `# ${name} Deployment`,
         '',
-        'Generated by the Medol deploy generator.',
+        'Generated by the Medol operations generator.',
         '',
         'The base manifests are generator-owned. Environment directories reference the base and are the intended place for Kustomize patches.',
         '',
@@ -832,8 +952,14 @@ function renderKubernetesReadme(name) {
         '- `environments/<environment>/configmap.yaml` contains non-sensitive application variables for the environment.',
         '- `environments/<environment>/secrets.example.yaml` documents required and optional secrets without being applied by Kustomize.',
         '- `environments/<environment>/patches/*-envfrom.yaml` attaches environment ConfigMaps and optional per-application Secrets to Deployments.',
+        ...(registryConfigured ? [
+            '- `environments/<environment>-registry/` is generated when `operations.registry` is configured. It rewrites application and runtime-engine images to the configured registry.'
+        ] : []),
         ...(isK3s ? [
             '- `cluster/k3d-dev.yaml` creates a disposable local K3s development cluster with k3d.'
+        ] : []),
+        ...(isK3s && registryConfigured ? [
+            '- `cluster/registries.yaml` configures K3s/containerd access to the configured registry.'
         ] : []),
         '',
         '## Before Applying',
@@ -842,7 +968,7 @@ function renderKubernetesReadme(name) {
             'For local development with k3d, create the dev cluster from the generated config:',
             '',
             '```bash',
-            'k3d cluster create --config cluster/k3d-dev.yaml',
+            k3dCreateCommand,
             'kubectl config use-context k3d-federation-learning-platform-dev',
             '```',
             '',
@@ -904,33 +1030,56 @@ function renderKubernetesReadme(name) {
             'kubectl get nodes -l medol.dev/runtime-infrastructure-id=<runtime-infrastructure-id>',
             '```',
             '',
-            'After adding a node, import locally built images into the cluster again when the new node cannot pull them:',
+            ...(registryConfigured ? [
+                'After adding a node, make sure the node can reach the configured registry before scheduling workloads.',
+                ''
+            ] : [
+                'After adding a node, import locally built images into the cluster again when the new node cannot pull them:',
+                '',
+                '```bash',
+                'k3d image import <runtime-agent-image> --cluster <cluster-name>',
+                '```',
+                ''
+            ]),
+            ...(registryConfigured ? [
+                '## Registry',
+                '',
+                `The default \`environments/${model.environment.name}\` overlay does not require a registry and keeps images in the \`medol/<service>:<tag>\` form.`,
+                '',
+                `Apply \`environments/${model.environment.name}-registry\` when images are pushed to \`${model.registry.imagePrefix}\`:`,
+                '',
+                '```bash',
+                `kubectl apply -k environments/${model.environment.name}-registry`,
+                '```',
+                '',
+                'For native K3s, copy `cluster/registries.yaml` to `/etc/rancher/k3s/registries.yaml` before starting or restarting K3s.',
+                ''
+            ] : [
+                '## Registry',
+                '',
+                'No registry is configured for this environment. Generated image names use the default `medol/<service>:<tag>` form. Build or import those images into each node, or configure `operations.registry` and regenerate the operations files.',
+                ''
+            ])
+        ] : []),
+        'Build, push, or import these images on every node that may run the workloads:',
+        '',
+        '```bash',
+        ...Array.from(new Set([
+            ...applicationImages,
+            ...runtimeImages,
+            ...dependencyImages
+        ])),
+        '```',
+        '',
+        ...(isK3s && !registryConfigured ? [
+            'For local k3s image testing, import image archives into containerd:',
             '',
             '```bash',
-            'k3d image import <runtime-agent-image> --cluster <cluster-name>',
+            'sudo k3s ctr images import federation-learning-platform-images.tar',
+            'sudo k3s ctr images import dependency-images.tar',
             '```',
             ''
         ] : []),
-        'Build or import these images on every node that may run the workloads:',
-        '',
-        '```bash',
-        'medol/federation-learning-platform-console:0.0.1-SNAPSHOT',
-        'medol/federation-learning-support:0.0.1-SNAPSHOT',
-        'medol/federation-learning-platform:0.0.1-SNAPSHOT',
-        'medol/federation-learning-runtime-agent:0.0.1-SNAPSHOT',
-        'medol/federation-learning-runtime-engine:0.0.1-SNAPSHOT',
-        'postgres:16',
-        'umadb/umadb:0.7.8',
-        'apache/apisix:3.13.0-debian',
-        '```',
-        '',
-        'For local k3s image testing, import image archives into containerd:',
-        '',
-        '```bash',
-        'sudo k3s ctr images import federation-learning-platform-images.tar',
-        'sudo k3s ctr images import dependency-images.tar',
-        '```',
-        '',
         'Create the namespace before applying environment-specific Secret objects:',
         '',
         '```bash',

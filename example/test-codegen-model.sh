@@ -26,9 +26,9 @@ if [[ "$current_dir" != "$script_dir" ]]; then
 fi
 
 case "$target" in
-  all|axon|axon5|refine|deploy|simulation|shell|update|model) ;;
+  all|axon|axon5|refine|operations|simulation|shell|update|model) ;;
   *)
-    echo "Usage: ./test-codegen-model.sh [all|axon|axon5|refine|deploy|simulation|shell|update [workspace-id]]" >&2
+    echo "Usage: ./test-codegen-model.sh [all|axon|axon5|refine|operations|simulation|shell|update [workspace-id]]" >&2
     exit 1
     ;;
 esac
@@ -43,7 +43,7 @@ require_image() {
 }
 
 verify_image() {
-  if ! docker run --rm "$image" /bin/sh -lc "command -v update >/dev/null && grep -q 'loadGeneratorModel' /opt/codegen/.generator/axon/app/index.js && grep -q 'allAggregates' /opt/codegen/.generator/axon/aggregates/index.js && grep -q 'loadCodegenModel' /opt/codegen/.generator/axon5/app/index.js && test -f /opt/codegen/.generator/deploy/app/index.js && test -f /opt/codegen/.generator/simulation/app/index.js"; then
+  if ! docker run --rm "$image" /bin/sh -lc "command -v update >/dev/null && grep -q 'loadGeneratorModel' /opt/codegen/.generator/axon/app/index.js && grep -q 'allAggregates' /opt/codegen/.generator/axon/aggregates/index.js && grep -q 'loadCodegenModel' /opt/codegen/.generator/axon5/app/index.js && test -f /opt/codegen/.generator/operations/app/index.js && test -f /opt/codegen/.generator/simulation/app/index.js"; then
     echo "Docker image $image does not include the latest codegen-model generator changes." >&2
     echo "Rebuild it from the code-generator root with:" >&2
     echo "  docker build -f Dockerfile.codegen -t $image ." >&2
@@ -140,9 +140,9 @@ run_refine() {
   run_gen "$refine_workspace" --generator refine --generator-type all --all-commands --skip-install
 }
 
-run_deploy() {
+run_operations() {
   rm -rf "$operations_workspace"
-  run_gen "$operations_workspace" --generator deploy --generator-type all --environment dev --skip-install
+  run_gen "$operations_workspace" --generator operations --generator-type all --environment dev --skip-install
 }
 
 run_simulation() {
@@ -155,7 +155,7 @@ case "$target" in
     run_axon
     run_axon5
     run_refine
-    run_deploy
+    run_operations
     run_simulation
     ;;
   axon)
@@ -167,8 +167,8 @@ case "$target" in
   refine)
     run_refine
     ;;
-  deploy)
-    run_deploy
+  operations)
+    run_operations
     ;;
   simulation)
     run_simulation

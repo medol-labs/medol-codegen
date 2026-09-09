@@ -7,11 +7,10 @@ const fs = require('fs');
 const path = require('path');
 
 const configFiles = [
-    'deploy.config.json',
-    'deployment.config.json'
+    'operations.config.json'
 ];
 
-function loadDeploymentConfig(cwd) {
+function loadOperationsConfig(cwd) {
     const configPath = configFiles
         .map((file) => path.join(cwd, file))
         .find((file) => fs.existsSync(file));
@@ -20,5 +19,5 @@ function loadDeploymentConfig(cwd) {
 }
 
 module.exports = {
-    loadDeploymentConfig
+    loadOperationsConfig
 };

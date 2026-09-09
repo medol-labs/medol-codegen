@@ -247,6 +247,12 @@ node scripts/export-images.mjs
 <% } -%>
 ```
 
+Push the generated images to a registry:
+
+```bash
+DOCKER_IMAGE_PREFIX=192.168.50.2:5000/<namespace> node scripts/push-images.mjs
+```
+
 Pull and export Docker Compose dependency images, such as databases and event stores, for the same target platform:
 
 ```bash

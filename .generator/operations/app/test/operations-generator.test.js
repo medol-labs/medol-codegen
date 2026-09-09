@@ -7,8 +7,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const { buildDeploymentModel, gatewayPathForApplication } = require('../deployment-model-builder');
-const { generateDeployFiles } = require('../deploy-generator');
+const { buildOperationsModel, gatewayPathForApplication } = require('../operations-model-builder');
+const { generateOperationsFiles } = require('../operations-generator');
 const { renderApisixStandaloneConfig } = require('../renderers/apisix-renderer');
 const { renderDockerCompose } = require('../renderers/docker-compose-renderer');
 const { k3sFiles, kubernetesFiles } = require('../renderers/kubernetes-renderer');
@@ -33,8 +33,8 @@ const sampleModel = {
     }]
 };
 
-test('builds deployment model applications, infrastructure, gateway, and environment defaults', () => {
-    const model = buildDeploymentModel(sampleModel);
+test('builds operations model applications, infrastructure, gateway, and environment defaults', () => {
+    const model = buildOperationsModel(sampleModel);
 
     assert.equal(model.name, 'learning-platform');
     assert.deepEqual(model.applications.map((application) => application.name), [
@@ -76,8 +76,8 @@ test('derives gateway paths from service naming conventions', () => {
 });
 
 test('enables Axon Server when it is selected as event storage', () => {
-    const model = buildDeploymentModel(sampleModel, {
-        deployment: {
+    const model = buildOperationsModel(sampleModel, {
+        operations: {
             eventStorage: 'axon-server'
         }
     });
@@ -90,38 +90,46 @@ test('enables Axon Server when it is selected as event storage', () => {
 });
 
 test('renders APISIX standalone declarative config', () => {
-    const model = buildDeploymentModel(sampleModel);
+    const model = buildOperationsModel(sampleModel);
     const actual = renderApisixStandaloneConfig(model);
     const expected = golden('apisix.yaml');
     assert.equal(actual, expected);
 });
 
 test('renders Docker Compose topology with gateway, applications, infrastructure, and volumes', () => {
-    const model = buildDeploymentModel(sampleModel);
+    const model = buildOperationsModel(sampleModel);
     const actual = renderDockerCompose(model, 'dev');
     const expected = golden('docker-compose.yml');
     assert.equal(actual, expected);
 });
 
-test('generates deployment target file sets', () => {
-    const model = buildDeploymentModel(sampleModel);
-    const files = generateDeployFiles(model, { target: 'all', environment: 'dev' });
-    assert(files['dev/deployment-model.json']);
-    assert(files['dev/infrastructure/apisix/apisix.yaml']);
-    assert(files['dev/docker-compose/docker-compose.yml']);
-    assert(files['dev/.env-example']);
-    assert(files['dev/kubernetes/base/applications.yaml']);
-    assert(files['dev/kubernetes/environments/dev/kustomization.yaml']);
-    assert(files['dev/kubernetes/environments/dev/configmap.yaml']);
-    assert(files['dev/kubernetes/environments/dev/secrets.example.yaml']);
-    assert(files['dev/kubernetes/environments/dev/patches/federation-service-envfrom.yaml']);
-    assert(!files['dev/kubernetes/environments/prod/kustomization.yaml']);
-    assert(files['dev/k3s/base/apisix.yaml']);
-    assert(files['dev/k3s/cluster/k3d-dev.yaml']);
+test('generates operations target file sets', () => {
+    const model = buildOperationsModel(sampleModel);
+    const files = generateOperationsFiles(model, { target: 'all', environment: 'dev' });
+    assert(files['operations/dev/operations-model.json']);
+    assert(files['operations/dev/infrastructure/apisix/apisix.yaml']);
+    assert(files['operations/dev/docker-compose/docker-compose.yml']);
+    assert(files['operations/dev/.env-example']);
+    assert(files['operations/dev/kubernetes/base/applications.yaml']);
+    assert(files['operations/dev/kubernetes/environments/dev/kustomization.yaml']);
+    assert(files['operations/dev/kubernetes/environments/dev/configmap.yaml']);
+    assert(files['operations/dev/kubernetes/environments/dev/secrets.example.yaml']);
+    assert(files['operations/dev/kubernetes/environments/dev/patches/federation-service-envfrom.yaml']);
+    assert(!files['operations/dev/kubernetes/environments/prod/kustomization.yaml']);
+    assert(files['operations/dev/k3s/base/apisix.yaml']);
+    assert(files['operations/dev/k3s/cluster/k3d-dev.yaml']);
+    assert(files['operations/dev/harbor/README.md']);
+    assert(files['operations/dev/harbor/.env-example']);
+    assert(files['operations/dev/harbor/harbor.yml-example']);
+    assert(files['operations/dev/harbor/install-harbor.mjs']);
+    assert(files['operations/dev/zot/README.md']);
+    assert(files['operations/dev/zot/.env-example']);
+    assert(files['operations/dev/zot/docker-compose.yml']);
+    assert(files['operations/dev/zot/config.json']);
 });
 
-test('renders Kubernetes and K3s manifests from the same deployment model', () => {
-    const model = buildDeploymentModel(sampleModel);
+test('renders Kubernetes and K3s manifests from the same operations model', () => {
+    const model = buildOperationsModel(sampleModel);
     const kubernetes = kubernetesFiles(model);
     const k3s = k3sFiles(model);
 
@@ -137,6 +145,7 @@ test('renders Kubernetes and K3s manifests from the same deployment model', () =
     assert.match(k3s['dev/k3s/cluster/k3d-dev.yaml'], /apiVersion: "k3d.io\/v1alpha5"/);
     assert.match(k3s['dev/k3s/cluster/k3d-dev.yaml'], /name: "learning-platform-dev"/);
     assert.match(k3s['dev/k3s/cluster/k3d-dev.yaml'], /image: "rancher\/k3s:v1.33.5-k3s1"/);
+    assert(!k3s['dev/k3s/cluster/registries.yaml']);
     assert.match(k3s['dev/k3s/cluster/k3d-dev.yaml'], /port: "30080:30080"/);
     assert.match(k3s['dev/k3s/cluster/k3d-dev.yaml'], /volume: "\.\.\/\.\.\/\.\.\/volumes\/datasets:\/workspace\/datasets"/);
     assert.match(k3s['dev/k3s/environments/dev/kustomization.yaml'], /configmap.yaml/);
@@ -167,8 +176,40 @@ test('renders Kubernetes and K3s manifests from the same deployment model', () =
     assert(!kubernetes['dev/kubernetes/cluster/k3d-dev.yaml']);
 });
 
+test('derives image names and K3s registry configuration from optional registry settings', () => {
+    const model = buildOperationsModel(sampleModel, {
+        operations: {
+            registry: {
+                host: 'registry.internal:5000',
+                namespace: 'team',
+                insecure: true
+            }
+        }
+    });
+    const k3s = k3sFiles(model);
+
+    assert.equal(model.imagePrefix, 'registry.internal:5000/team');
+    assert.equal(model.registry.imagePrefix, 'registry.internal:5000/team');
+    assert.match(
+        k3s['dev/k3s/base/applications.yaml'],
+        /image: "medol\/federation-service:0\.0\.1-SNAPSHOT"/
+    );
+    assert.match(
+        k3s['dev/k3s/environments/dev-registry/kustomization.yaml'],
+        /newName: "registry\.internal:5000\/team\/federation-service"/
+    );
+    assert.match(
+        k3s['dev/k3s/cluster/registries.yaml'],
+        /"registry\.internal:5000":/
+    );
+    assert.match(
+        k3s['dev/k3s/cluster/registries.yaml'],
+        /"http:\/\/registry\.internal:5000"/
+    );
+});
+
 test('renders K3s platform runtime-agent scheduler details when topology contains a platform and runtime agent', () => {
-    const generatedModel = buildDeploymentModel({
+    const generatedModel = buildOperationsModel({
         domain: 'FederationLearningPlatform',
         deployments: [{
             name: 'FederationLearningSupport',
@@ -210,7 +251,7 @@ test('renders K3s platform runtime-agent scheduler details when topology contain
 });
 
 test('renders browser CORS origins for the dev K3s gateway', () => {
-    const generatedModel = buildDeploymentModel({
+    const generatedModel = buildOperationsModel({
         domain: 'FederationLearningPlatform',
         deployments: [{
             name: 'FederationLearningSupport',

@@ -6,9 +6,9 @@
 const YeomanGenerator = require('yeoman-generator');
 const Generator = YeomanGenerator.default ?? YeomanGenerator;
 const { loadGeneratorModel } = require('../../common/core/config-loader');
-const { buildDeploymentModel } = require('./deployment-model-builder');
-const { loadDeploymentConfig } = require('./deployment-config');
-const { generateDeployFiles, targets } = require('./deploy-generator');
+const { buildOperationsModel } = require('./operations-model-builder');
+const { loadOperationsConfig } = require('./operations-config');
+const { generateOperationsFiles, targets } = require('./operations-generator');
 
 module.exports = class extends Generator {
     constructor(args, opts) {
@@ -22,7 +22,7 @@ module.exports = class extends Generator {
 
         const loaded = loadGeneratorModel(this.env.cwd);
         this.codegenModel = loaded.codegenModel;
-        this.deploymentConfig = loadDeploymentConfig(this.env.cwd);
+        this.operationsConfig = loadOperationsConfig(this.env.cwd);
     }
 
     async prompting() {
@@ -31,7 +31,7 @@ module.exports = class extends Generator {
             prompts.push({
                 type: 'list',
                 name: 'target',
-                message: 'Which deployment target should be generated?',
+                message: 'Which operations target should be generated?',
                 choices: targets,
                 default: 'all'
             });
@@ -40,7 +40,7 @@ module.exports = class extends Generator {
             prompts.push({
                 type: 'list',
                 name: 'environment',
-                message: 'Which deployment environment?',
+                message: 'Which operations environment?',
                 choices: ['dev', 'test', 'staging', 'prod'],
                 default: 'dev'
             });
@@ -56,14 +56,14 @@ module.exports = class extends Generator {
 
     writing() {
         if (!this.answers.force) {
-            this.log('Skipped deploy generation.');
+            this.log('Skipped operations generation.');
             return;
         }
         const target = targets.includes(this.answers.target)
             ? this.answers.target
             : 'all';
-        const deploymentModel = buildDeploymentModel(this.codegenModel, this.deploymentConfig);
-        const files = generateDeployFiles(deploymentModel, {
+        const operationsModel = buildOperationsModel(this.codegenModel, this.operationsConfig);
+        const files = generateOperationsFiles(operationsModel, {
             target,
             environment: this.answers.environment
         });

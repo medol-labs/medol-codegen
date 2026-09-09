@@ -102,6 +102,7 @@
     "image:build": "node scripts/build-images.mjs",
     "image:export": "node scripts/export-images.mjs",
     "image:import": "node scripts/import-images.mjs",
+    "image:push": "node scripts/push-images.mjs",
     "image:bundle": "node scripts/image-bundle.mjs all"
   },
   "browserslist": {

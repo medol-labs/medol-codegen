@@ -14,49 +14,71 @@ const DEFAULT_IMAGE_PREFIX = 'medol';
 const DEFAULT_IMAGE_TAG = '0.0.1-SNAPSHOT';
 const DEFAULT_GATEWAY_PORT = 9080;
 
-function buildDeploymentModel(source = {}, config = {}) {
-    const deploymentConfig = config.deployment ?? config ?? {};
+function buildOperationsModel(source = {}, config = {}) {
+    const operationsConfig = config.operations ?? config ?? {};
     const domainName = source.domain ?? source.name ?? 'medol-application';
-    const systemName = deploymentKebab(domainName) || 'medol-application';
-    const imagePrefix = trimSlash(deploymentConfig.imagePrefix ?? deploymentConfig.registry ?? DEFAULT_IMAGE_PREFIX);
-    const imageTag = deploymentConfig.imageTag ?? deploymentConfig.tag ?? DEFAULT_IMAGE_TAG;
-    const backendApplications = buildBackendApplications(source, deploymentConfig, imagePrefix);
-    const frontend = deploymentConfig.frontend?.enabled === false
+    const systemName = operationsKebab(domainName) || 'medol-application';
+    const registry = normalizeRegistryConfig(operationsConfig.registry);
+    const imagePrefix = trimSlash(operationsConfig.imagePrefix ?? registry?.imagePrefix ?? DEFAULT_IMAGE_PREFIX);
+    const imageTag = operationsConfig.imageTag ?? operationsConfig.tag ?? DEFAULT_IMAGE_TAG;
+    const backendApplications = buildBackendApplications(source, operationsConfig, imagePrefix);
+    const frontend = operationsConfig.frontend?.enabled === false
         ? []
-        : [buildFrontendApplication(systemName, deploymentConfig, imagePrefix, backendApplications)];
-    const infrastructure = buildInfrastructure(deploymentConfig);
+        : [buildFrontendApplication(systemName, operationsConfig, imagePrefix, backendApplications)];
+    const infrastructure = buildInfrastructure(operationsConfig);
     const applications = [...frontend, ...backendApplications];
-    const gateway = deploymentConfig.gateway?.enabled === false
+    const gateway = operationsConfig.gateway?.enabled === false
         ? undefined
-        : buildGateway(applications, backendApplications, deploymentConfig);
+        : buildGateway(applications, backendApplications, operationsConfig);
 
     return {
-        version: 'medol.deploy/v1',
+        version: 'medol.operations/v1',
         name: systemName,
         title: cleanTitle(source.domain ?? source.title ?? domainName),
         imagePrefix,
         imageTag,
+        ...(registry ? { registry } : {}),
         applications,
         infrastructure,
         ...(gateway ? { gateway } : {}),
-        environments: buildEnvironments(applications, infrastructure, deploymentConfig, imageTag)
+        environments: buildEnvironments(applications, infrastructure, operationsConfig, imageTag)
     };
 }
 
-function buildBackendApplications(source, deploymentConfig, imagePrefix) {
+function normalizeRegistryConfig(value) {
+    if (!value) return undefined;
+    if (typeof value === 'string') {
+        const imagePrefix = trimSlash(value);
+        return imagePrefix ? { imagePrefix } : undefined;
+    }
+    if (typeof value !== 'object') return undefined;
+    const host = trimSlash(value.host ?? value.hostname ?? value.registryHost ?? '');
+    const namespace = trimSlash(value.namespace ?? value.project ?? '');
+    const imagePrefix = trimSlash(value.imagePrefix ?? [host, namespace].filter(Boolean).join('/'));
+    if (!imagePrefix) return undefined;
+    return {
+        imagePrefix,
+        ...(host ? { host } : {}),
+        ...(namespace ? { namespace } : {}),
+        scheme: value.scheme ?? (value.insecure === false ? 'https' : 'http'),
+        insecure: value.insecure !== false
+    };
+}
+
+function buildBackendApplications(source, operationsConfig, imagePrefix) {
     const backendModules = buildBackendModules(source);
-    const applicationConfig = deploymentConfig.applications ?? {};
-    const eventStorage = deploymentConfig.eventStorage ?? 'umadb';
+    const applicationConfig = operationsConfig.applications ?? {};
+    const eventStorage = operationsConfig.eventStorage ?? 'umadb';
 
     return backendModules.map((module, index) => {
-        const name = deploymentKebab(module.name ?? module.dataProviderName ?? module.label) || `backend-${index + 1}`;
+        const name = operationsKebab(module.name ?? module.dataProviderName ?? module.label) || `backend-${index + 1}`;
         const port = parsePort(module.defaultApiUrl) ?? 8080 + index;
         const dbName = safeDatabaseName(name);
         const envVarPrefix = snakeCase(name).toUpperCase();
         const override = applicationConfig[name] ?? applicationConfig[module.name] ?? {};
         const otherModules = backendModules.filter((candidate) => candidate !== module);
         const integrationEnvironment = otherModules.map((target) => {
-            const targetName = deploymentKebab(target.name ?? target.dataProviderName ?? target.label);
+            const targetName = operationsKebab(target.name ?? target.dataProviderName ?? target.label);
             const targetPort = parsePort(target.defaultApiUrl) ?? 8080 + backendModules.indexOf(target);
             return {
                 name: `${snakeCase(targetName).toUpperCase()}_URL`,
@@ -73,7 +95,7 @@ function buildBackendApplications(source, deploymentConfig, imagePrefix) {
             servicePort: override.servicePort ?? port,
             exposeExternally: Boolean(override.exposeExternally),
             contexts: Array.from(module.contexts ?? []),
-            gatewayPath: override.gatewayPath ?? gatewayPathForApplication(name, deploymentConfig),
+            gatewayPath: override.gatewayPath ?? gatewayPathForApplication(name, operationsConfig),
             environmentVariables: [
                 { name: 'SERVER_PORT', value: String(override.servicePort ?? port) },
                 { name: 'SPRING_DOCKER_COMPOSE_ENABLED', value: 'false' },
@@ -112,8 +134,8 @@ function buildBackendApplications(source, deploymentConfig, imagePrefix) {
     });
 }
 
-function buildFrontendApplication(systemName, deploymentConfig, imagePrefix, backendApplications) {
-    const frontendConfig = deploymentConfig.frontend ?? {};
+function buildFrontendApplication(systemName, operationsConfig, imagePrefix, backendApplications) {
+    const frontendConfig = operationsConfig.frontend ?? {};
     const name = frontendConfig.name ?? 'console';
     return {
         kind: 'frontend',
@@ -150,9 +172,9 @@ function buildFrontendApplication(systemName, deploymentConfig, imagePrefix, bac
     };
 }
 
-function buildInfrastructure(deploymentConfig) {
-    const infrastructureConfig = deploymentConfig.infrastructure ?? {};
-    const eventStorage = deploymentConfig.eventStorage ?? 'umadb';
+function buildInfrastructure(operationsConfig) {
+    const infrastructureConfig = operationsConfig.infrastructure ?? {};
+    const eventStorage = operationsConfig.eventStorage ?? 'umadb';
     const postgresConfig = infrastructureConfig.postgres ?? {};
     const umadbConfig = infrastructureConfig.umadb ?? {};
     const axonServerConfig = infrastructureConfig.axonServer ?? {};
@@ -234,8 +256,8 @@ function buildInfrastructure(deploymentConfig) {
     return infrastructure;
 }
 
-function buildGateway(applications, backendApplications, deploymentConfig) {
-    const gatewayConfig = deploymentConfig.gateway ?? {};
+function buildGateway(applications, backendApplications, operationsConfig) {
+    const gatewayConfig = operationsConfig.gateway ?? {};
     const servicePort = gatewayConfig.servicePort ?? 9080;
     const gateway = {
         enabled: true,
@@ -293,8 +315,8 @@ function buildGateway(applications, backendApplications, deploymentConfig) {
     return gateway;
 }
 
-function buildEnvironments(applications, infrastructure, deploymentConfig, imageTag) {
-    const configured = deploymentConfig.environments ?? {};
+function buildEnvironments(applications, infrastructure, operationsConfig, imageTag) {
+    const configured = operationsConfig.environments ?? {};
     return ['dev', 'test', 'staging', 'prod'].map((name) => {
         const defaults = defaultEnvironment(name, applications, infrastructure, imageTag);
         const override = configured[name] ?? {};
@@ -353,8 +375,8 @@ function mergeOverrides(base, override = {}) {
     );
 }
 
-function gatewayPathForApplication(applicationName, deploymentConfig) {
-    const routeConfig = deploymentConfig.gateway?.routes?.[applicationName];
+function gatewayPathForApplication(applicationName, operationsConfig) {
+    const routeConfig = operationsConfig.gateway?.routes?.[applicationName];
     if (routeConfig?.path) return normalizePath(routeConfig.path);
 
     const suffixes = ['-service', '-backend', '-application', '-app'];
@@ -394,7 +416,7 @@ function trimSlash(value) {
     return String(value ?? '').replace(/\/+$/g, '');
 }
 
-function deploymentKebab(value) {
+function operationsKebab(value) {
     return kebab(String(cleanTitle(value)).replace(/([a-z0-9])([A-Z])/g, '$1 $2'));
 }
 
@@ -411,6 +433,6 @@ function escapeRegex(value) {
 }
 
 module.exports = {
-    buildDeploymentModel,
+    buildOperationsModel,
     gatewayPathForApplication
 };

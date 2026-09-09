@@ -3,7 +3,7 @@
  * Licensed under the MIT License.
  */
 
-function resolveDeploymentModel(model, environmentName = 'dev') {
+function resolveOperationsModel(model, environmentName = 'dev') {
     const environment = model.environments.find((candidate) => candidate.name === environmentName)
         ?? model.environments[0]
         ?? { name: environmentName, variables: {}, applicationOverrides: {}, infrastructureOverrides: {} };
@@ -67,5 +67,5 @@ function imageWithTag(imageName, tag) {
 }
 
 module.exports = {
-    resolveDeploymentModel
+    resolveOperationsModel
 };

@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "node --test axon5/app/test/*.test.js deploy/app/test/*.test.js simulation/app/test/*.test.js refine/app/test/*.test.js"
+    "test": "node --test axon5/app/test/*.test.js operations/app/test/*.test.js simulation/app/test/*.test.js refine/app/test/*.test.js"
   },
   "author": "",
   "license": "ISC",

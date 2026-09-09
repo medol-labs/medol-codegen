@@ -463,6 +463,7 @@ ${eventMethods}
         this.fs.copy(this.templatePath('build-images.mjs'), this.destinationPath('scripts/build-images.mjs'));
         this.fs.copy(this.templatePath('export-images.mjs'), this.destinationPath('scripts/export-images.mjs'));
         this.fs.copy(this.templatePath('import-images.mjs'), this.destinationPath('scripts/import-images.mjs'));
+        this.fs.copy(this.templatePath('push-images.mjs'), this.destinationPath('scripts/push-images.mjs'));
         this.fs.copy(this.templatePath('dependency-images.mjs'), this.destinationPath('scripts/dependency-images.mjs'));
         this.fs.copy(this.templatePath('pull-dependency-images.mjs'), this.destinationPath('scripts/pull-dependency-images.mjs'));
         this.fs.copy(this.templatePath('export-dependency-images.mjs'), this.destinationPath('scripts/export-dependency-images.mjs'));

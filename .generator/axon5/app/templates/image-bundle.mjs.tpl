@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import {existsSync} from 'node:fs';
+import {existsSync, readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
 
@@ -9,6 +9,7 @@ const defaultTar = '<%= imageTarName %>';
 const args = parseArgs(process.argv.slice(2));
 const command = args._[0] ?? 'help';
 const root = resolve(process.cwd(), args.root ?? '.');
+loadDotEnv(resolve(root, '.env'));
 const modules = selectedModules(defaultModules, args.module);
 const imagePrefix = String(args.prefix ?? process.env.DOCKER_IMAGE_PREFIX ?? 'medol').replace(/\/+$/, '');
 const imageVersion = String(args.version ?? process.env.IMAGE_VERSION ?? '0.0.1-SNAPSHOT');
@@ -27,6 +28,9 @@ switch (command) {
     case 'import':
         importImages();
         break;
+    case 'push':
+        pushImages();
+        break;
     case 'all':
         buildImages();
         exportImages();
@@ -43,13 +47,16 @@ function buildImages() {
     ensureModules();
     ensureMavenWrapper();
     run('./mvnw', ['-pl', modules.join(','), '-am', '-DskipTests', 'install']);
-    run('./mvnw', [
-        '-pl', modules.join(','),
-        '-DskipTests',
-        `-Djib.container.platform.os=${platform.os}`,
-        `-Djib.container.platform.architecture=${platform.architecture}`,
-        jibGoal
-    ]);
+    for (const moduleName of modules) {
+        run('./mvnw', [
+            '-pl', moduleName,
+            '-DskipTests',
+            `-Djib.to.image=${imageName(moduleName)}`,
+            `-Djib.container.platform.os=${platform.os}`,
+            `-Djib.container.platform.architecture=${platform.architecture}`,
+            jibGoal
+        ]);
+    }
 }
 
 function exportImages() {
@@ -62,6 +69,13 @@ function importImages() {
         fail(`Image archive was not found: ${tarFile}`);
     }
     run('docker', ['load', '-i', tarFile]);
+}
+
+function pushImages() {
+    ensureModules();
+    for (const imageName of imageNames()) {
+        run('docker', ['push', imageName]);
+    }
 }
 
 function printPlan() {
@@ -91,7 +105,11 @@ function run(commandName, commandArgs) {
 }
 
 function imageNames() {
-    return modules.map((moduleName) => `${imagePrefix}/${moduleName}:${imageVersion}`);
+    return modules.map((moduleName) => imageName(moduleName));
+}
+
+function imageName(moduleName) {
+    return `${imagePrefix}/${moduleName}:${imageVersion}`;
 }
 
 function ensureModules() {
@@ -122,6 +140,21 @@ function selectedModules(availableModules, moduleArg) {
 function valuesOf(value) {
     if (value == null) return [];
     return Array.isArray(value) ? value : [value];
+}
+
+function loadDotEnv(path) {
+    if (!existsSync(path)) return;
+    const lines = readFileSync(path, 'utf8').split(/\r?\n/);
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#') || !trimmed.includes('=')) continue;
+        const index = trimmed.indexOf('=');
+        const key = trimmed.slice(0, index).trim();
+        const value = trimmed.slice(index + 1).trim().replace(/^['"]|['"]$/g, '');
+        if (key && process.env[key] === undefined) {
+            process.env[key] = value;
+        }
+    }
 }
 
 function parsePlatform(value) {
@@ -161,6 +194,7 @@ function printUsage() {
   node scripts/image-bundle.mjs build [options]
   node scripts/image-bundle.mjs export [options]
   node scripts/image-bundle.mjs import [options]
+  node scripts/image-bundle.mjs push [options]
   node scripts/image-bundle.mjs all [options]
   node scripts/image-bundle.mjs list [options]
 
@@ -168,6 +202,7 @@ Wrappers:
   node scripts/build-images.mjs
   node scripts/export-images.mjs
   node scripts/import-images.mjs
+  node scripts/push-images.mjs
 
 Options:
   --module <name[,name]>   Limit to one or more generated deployment modules.

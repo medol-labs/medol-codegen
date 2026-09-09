@@ -1,6 +1,6 @@
 # ES Code Generator
 
-Custom Yeoman code generator for generating Axon-based Kotlin/Spring Boot, Refine frontend, deployment, and simulation artifacts from Medol's `CodegenModel`.
+Custom Yeoman code generator for generating Axon-based Kotlin/Spring Boot, Refine frontend, operations, and simulation artifacts from Medol's `CodegenModel`.
 
 The project ships a standalone Docker image built from the official Node slim base image. The image bakes `.generator` into `/opt/codegen/.generator` and exposes a small local `gen` runner that executes the bundled generator directly.
 
@@ -85,7 +85,7 @@ The top-level generator supports five targets:
 - `axon` for the Kotlin/Spring Boot backend
 - `axon5` for the Axon Framework 5 backend generated directly from CodegenModel
 - `refine` for the React refine frontend foundation
-- `deploy` for Docker Compose, APISIX, Kubernetes, and K3s deployment artifacts
+- `operations` for Docker Compose, APISIX, Kubernetes, K3s, and Harbor operations artifacts
 - `simulation` for deterministic business-flow simulation artifacts
 
 When `codegen-model.json` contains lifecycle `transitions`, the Axon 5 generator
@@ -184,7 +184,7 @@ gen /opt/codegen/.generator/app/ --generator refine --generator-type all
 
 ## Generate operations artifacts
 
-The `deploy` generator reads the same `codegen-model.json` and derives an intermediate `DeploymentModel` before rendering platform files. The model keeps application topology, infrastructure, gateway routes, images, ports, health checks, environment defaults, and per-environment overrides separate from renderer-specific details.
+The `operations` generator reads the same `codegen-model.json` and derives an intermediate `OperationsModel` before rendering platform files. The model keeps application topology, infrastructure, gateway routes, images, ports, health checks, environment defaults, and per-environment overrides separate from renderer-specific details.
 
 Create an `operations` workspace yourself, put `codegen-model.json` there, then run the generator from that directory. The generator creates one directory for the selected environment under the current directory.
 
@@ -192,26 +192,28 @@ Create an `operations` workspace yourself, put `codegen-model.json` there, then 
 mkdir -p operations
 cp /path/to/codegen-model.json operations/codegen-model.json
 cd operations
-gen /opt/codegen/.generator/app/ --generator deploy --generator-type all --environment dev
+gen /opt/codegen/.generator/app/ --generator operations --generator-type all --environment dev
 ```
 
-Supported deploy targets are:
+Supported operations targets are:
 
-- `all`: deployment model, APISIX, Docker Compose, Kubernetes, and K3s
-- `model`: only `<environment>/deployment-model.json`
+- `all`: operations model, APISIX, Docker Compose, Kubernetes, K3s, Harbor, and zot
+- `model`: only `<environment>/operations-model.json`
 - `apisix`: APISIX standalone/declarative configuration
-- `docker-compose`: Docker Compose deployment files
+- `docker-compose`: Docker Compose operations files
 - `kubernetes`: Kubernetes base manifests plus the selected environment kustomization
 - `k3s`: K3s-flavored manifests rendered from the same Kubernetes renderer
+- `harbor`: optional Harbor registry operations assets
+- `zot`: optional lightweight OCI registry operations assets with ARM64-friendly container deployment
 
-Generated deployment files are written under the selected environment directory:
+Generated operations files are written under the selected environment directory:
 
 ```text
 operations/
   codegen-model.json
-  deploy.config.json
+  operations.config.json
   dev/
-    deployment-model.json
+    operations-model.json
     README.md
     .env-example
     docker-compose/docker-compose.yml
@@ -222,16 +224,23 @@ operations/
     kubernetes/environments/dev/
     k3s/base/
     k3s/environments/dev/
+    harbor/
+    zot/
 ```
 
 APISIX is generated in standalone mode with declarative YAML and Admin API disabled. Docker Compose is the primary runnable target and includes generated backend services, the generated frontend console, runtime dependencies such as PostgreSQL and UMA DB, optional/profiled Axon Server, optional Redis, volumes, networks, environment placeholders, health checks, and service startup dependencies.
 
-Deployment overrides can be supplied with `deploy.config.json` or `deployment.config.json` in the `operations` workspace:
+Operations overrides can be supplied with `operations.config.json` in the `operations` workspace:
 
 ```json
 {
-  "deployment": {
-    "imagePrefix": "registry.example.com/team",
+  "operations": {
+    "registry": {
+      "host": "registry.internal:5000",
+      "scheme": "http",
+      "namespace": "team",
+      "insecure": true
+    },
     "imageTag": "2026.08.25",
     "eventStorage": "umadb",
     "gateway": {
@@ -257,7 +266,16 @@ Deployment overrides can be supplied with `deploy.config.json` or `deployment.co
 }
 ```
 
-The generated files use placeholder environment references only. Real passwords, tokens, certificates, and Kubernetes Secret objects must be supplied by the deployment environment.
+When `operations.registry` is omitted, generated image names keep the default
+`medol/<service>:<tag>` format. When it is present, the generator derives
+`imagePrefix` as `<host>/<namespace>`, emits a Kubernetes/K3s
+`environments/<environment>-registry` overlay for application and runtime-engine
+image overrides, and emits a K3s `cluster/registries.yaml` file for
+HTTP/insecure registry access. The default `environments/<environment>` overlay
+continues to use `medol/<service>:<tag>` so deployments can still run without a
+registry by importing local images.
+
+The generated files use placeholder environment references only. Real passwords, tokens, certificates, and Kubernetes Secret objects must be supplied by the operations environment.
 
 ## Generate Simulation Service
 
@@ -571,7 +589,7 @@ To jump directly into a target:
 ./test-codegen-model.sh axon
 ./test-codegen-model.sh axon5
 ./test-codegen-model.sh refine
-./test-codegen-model.sh deploy
+./test-codegen-model.sh operations
 ./test-codegen-model.sh simulation
 ```
 
@@ -605,7 +623,7 @@ If only `config.json` exists and these fields are present, the generator uses th
 The generator now uses the Event Modeling Toolkit `CodegenModel` as its core input:
 
 ```text
-codegen-model.json -> common/core CodegenModel -> axon/refine/deploy/simulation generators
+codegen-model.json -> common/core CodegenModel -> axon/refine/operations/simulation generators
 ```
 
 Legacy `config.json` is converted into the same core model only as a fallback.

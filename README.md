@@ -267,6 +267,9 @@ The top-level generator also creates system-level `README.md`, `AGENTS.md`,
 and `.gitignore` in the current directory when they do not already exist. Use
 `--skip-workspace-files` to skip those files, or `workspaceFiles.overwrite:
 true` in `.medol/medol.yml` when you intentionally want to regenerate them.
+Those workspace file contents live under
+`.generator/common/templates/workspace/` and are rendered by
+`.generator/common/core/workspace-templates.js`.
 
 Supported operations targets are:
 

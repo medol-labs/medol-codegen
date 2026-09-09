@@ -5,6 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { writeGeneratorWorkspaceFiles } = require('./workspace-templates');
 
 function loadMedolWorkspace(cwd, options = {}) {
     const configPath = resolveMedolConfigPath(cwd, options);
@@ -78,67 +79,7 @@ function generatorOutputRoot(workspace, generatorName, fallback = '.') {
 }
 
 function writeWorkspaceFiles(generator, workspace) {
-    const config = workspace?.config ?? {};
-    if (config.workspaceFiles?.enabled === false) return;
-
-    const title = config.title ?? config.name ?? 'Medol Generated System';
-    writeOnce(generator, 'README.md', renderReadme(title), config.workspaceFiles?.overwrite);
-    writeOnce(generator, 'AGENTS.md', renderAgents(), config.workspaceFiles?.overwrite);
-    writeOnce(generator, '.gitignore', renderGitignore(), config.workspaceFiles?.overwrite);
-}
-
-function writeOnce(generator, file, content, overwrite = false) {
-    const destination = generator.destinationPath(file);
-    if (!overwrite && fs.existsSync(destination)) return;
-    generator.fs.write(destination, content);
-}
-
-function renderReadme(title) {
-    return [
-        `# ${title}`,
-        '',
-        'This repository is a Medol generated system workspace.',
-        '',
-        '## Layout',
-        '',
-        '- `.medol/` stores the exported `codegen-model.json` and `medol.yml` generator configuration.',
-        '- Generated artifacts are written to the directories configured in `.medol/medol.yml`.',
-        '- Business-specific manual backend code should live in generated extension directories such as `domain/` and `infrastructure/`, not generated `context/` code.',
-        '',
-        '## Generation',
-        '',
-        'Run generators from this repository root so `.medol/medol.yml` can route each generator to its configured output directory.',
-        ''
-    ].join('\n');
-}
-
-function renderAgents() {
-    return [
-        '# AGENTS.md',
-        '',
-        '- Treat `.medol/codegen-model.json` and `.medol/medol.yml` as system-level generation inputs.',
-        '- Do not hand-edit generated backend `context/` code unless explicitly requested for an emergency local fix.',
-        '- Put hand-written backend adapters under `infrastructure/` and hand-written decision overrides under `domain/`.',
-        '- If a framework-level generated behavior is wrong, update `es-code-generator` templates instead of patching generated outputs.',
-        '- Do not put concrete business-system behavior into the generator; express business behavior in the Medol model or generated project extension points.',
-        ''
-    ].join('\n');
-}
-
-function renderGitignore() {
-    return [
-        '.env',
-        '**/.env',
-        '**/target/',
-        '**/build/',
-        '**/dist/',
-        '**/node_modules/',
-        '**/.venv/',
-        'volumes/',
-        'operations/**/.work/',
-        'deployment-compose-files/',
-        ''
-    ].join('\n');
+    writeGeneratorWorkspaceFiles(generator, workspace);
 }
 
 function readConfig(file) {

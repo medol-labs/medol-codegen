@@ -3,6 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
+const { writeInitialWorkspaceFiles } = require(resolveGeneratorModule("common/core/workspace-templates"));
 
 const DEFAULT_LANGUAGE = "zh-CN";
 const DEFAULT_BASE_URL = "http://host.docker.internal:5172";
@@ -95,10 +96,7 @@ function main() {
   const medolDirectory = path.join(root, ".medol");
   fs.mkdirSync(medolDirectory, { recursive: true });
 
-  writeFileIfAllowed(path.join(medolDirectory, "medol.yml"), renderMedolYml(), options.force);
-  writeFileIfAllowed(path.join(root, "README.md"), renderReadme(), options.force);
-  writeFileIfAllowed(path.join(root, "AGENTS.md"), renderAgents(), options.force);
-  writeFileIfAllowed(path.join(root, ".gitignore"), renderGitignore(), options.force);
+  writeInitialWorkspaceFiles(root, { overwrite: options.force });
 
   if (!options.skipUpdate) {
     runUpdate(options);
@@ -132,165 +130,23 @@ function runUpdate(options) {
   }
 }
 
-function writeFileIfAllowed(file, content, force) {
-  if (!force && fs.existsSync(file)) {
-    console.error(`Kept existing ${file}`);
-    return;
+function resolveGeneratorModule(relativeModule) {
+  const generatorRoot = resolveGeneratorRoot(relativeModule);
+  return path.join(generatorRoot, relativeModule);
+}
+
+function resolveGeneratorRoot(relativeModule) {
+  const candidates = [
+    process.env.CODEGEN_GENERATOR_ROOT,
+    "/opt/codegen/.generator",
+    path.join(__dirname, ".generator"),
+  ].filter(Boolean);
+
+  const found = candidates.find((candidate) => fs.existsSync(path.join(candidate, `${relativeModule}.js`)));
+  if (!found) {
+    throw new Error(`Cannot find .generator module ${relativeModule}. Checked: ${candidates.join(", ")}`);
   }
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, content);
-  console.error(`Wrote ${file}`);
-}
-
-function renderMedolYml() {
-  return [
-    "name: Medol Generated System",
-    "",
-    "generators:",
-    "  axon5:",
-    "    output: backend",
-    "  refine:",
-    "    output: console",
-    "  operations:",
-    "    output: .",
-    "",
-    "operations:",
-    "  # Configure this only when images are pushed to a registry.",
-    "  # registry:",
-    "  #   host: registry.internal:5000",
-    "  #   scheme: http",
-    "  #   namespace: team",
-    "  #   insecure: true",
-    "",
-    "workspaceFiles:",
-    "  overwrite: false",
-    "",
-  ].join("\n");
-}
-
-function renderReadme() {
-  return [
-    "# Medol Generated System",
-    "",
-    "This repository is a Medol generated system workspace.",
-    "",
-    "## Layout",
-    "",
-    "- `.medol/codegen-model.json` is exported from Medol and consumed by generators.",
-    "- `.medol/source.medol` is the downloaded MEDOL source snapshot for review and traceability.",
-    "- `.medol/medol.yml` configures generator output directories and operations settings.",
-    "- `operations/` contains generated deployment and operations assets.",
-    "",
-    "## Generation",
-    "",
-    "Run generators from this repository root.",
-    "",
-  ].join("\n");
-}
-
-function renderAgents() {
-  return [
-    "# AGENTS.md",
-    "",
-    "- Treat `.medol/codegen-model.json`, `.medol/source.medol`, and `.medol/medol.yml` as system-level generation inputs.",
-    "- Do not hand-edit generated backend `context/` code unless explicitly requested for an emergency local fix.",
-    "- Put hand-written backend adapters under `infrastructure/` and hand-written decision overrides under `domain/`.",
-    "- If a framework-level generated behavior is wrong, update `es-code-generator` templates instead of patching generated outputs.",
-    "- Do not put concrete business-system behavior into the generator; express business behavior in the Medol model or generated project extension points.",
-    "",
-  ].join("\n");
-}
-
-function renderGitignore() {
-  return [
-    "# Environment and secrets",
-    ".env",
-    ".env.*",
-    "**/.env",
-    "**/.env.*",
-    "!.env-example",
-    "!**/.env-example",
-    "",
-    "# OS and editor files",
-    ".DS_Store",
-    "**/.DS_Store",
-    ".idea/",
-    "**/.idea/",
-    ".vscode/",
-    "**/.vscode/",
-    "*.iml",
-    "*.sw?",
-    "*.suo",
-    "*.ntvs*",
-    "*.njsproj",
-    "*.sln",
-    "",
-    "# Logs",
-    "logs/",
-    "**/logs/",
-    "*.log",
-    "npm-debug.log*",
-    "yarn-debug.log*",
-    "yarn-error.log*",
-    "pnpm-debug.log*",
-    "lerna-debug.log*",
-    "",
-    "# Node / frontend",
-    "node_modules/",
-    "**/node_modules/",
-    "dist/",
-    "**/dist/",
-    "dist-ssr/",
-    "**/dist-ssr/",
-    "*.local",
-    "",
-    "# Java / Maven / Gradle",
-    "target/",
-    "**/target/",
-    "build/",
-    "**/build/",
-    ".gradle/",
-    "**/.gradle/",
-    "",
-    "# Python",
-    "__pycache__/",
-    "**/__pycache__/",
-    "*.py[cod]",
-    "*$py.class",
-    ".pytest_cache/",
-    "**/.pytest_cache/",
-    ".mypy_cache/",
-    "**/.mypy_cache/",
-    ".ruff_cache/",
-    "**/.ruff_cache/",
-    ".Python",
-    ".venv/",
-    "**/.venv/",
-    "venv/",
-    "**/venv/",
-    "*.egg-info/",
-    "**/*.egg-info/",
-    ".installed.cfg",
-    "",
-    "# Runtime data and generated local artifacts",
-    "tmp/",
-    "**/tmp/",
-    "volumes/",
-    "**/volumes/",
-    "operations/**/.work/",
-    "deployment-compose-files/",
-    "**/deployment-compose-files/",
-    "# Image and deployment bundles",
-    "*.tar",
-    "*.tar.gz",
-    "*.tgz",
-    "",
-    "# Local databases",
-    "*.sqlite",
-    "*.sqlite3",
-    "*.db",
-    "",
-  ].join("\n");
+  return found;
 }
 
 main();

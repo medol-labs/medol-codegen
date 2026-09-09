@@ -10,7 +10,11 @@ container_name="${CODEGEN_CONTAINER_NAME:-codegen}"
 host_port="${CODEGEN_HOST_PORT-3001}"
 generator_path="/opt/codegen/.generator/app/"
 output_root="${CODEGEN_OUTPUT_ROOT:-generated}"
-model_path="${CODEGEN_MODEL_PATH:-$script_dir/codegen-model.json}"
+default_model_path="$script_dir/.medol/codegen-model.json"
+if [[ ! -f "$default_model_path" && -f "$script_dir/codegen-model.json" ]]; then
+  default_model_path="$script_dir/codegen-model.json"
+fi
+model_path="${CODEGEN_MODEL_PATH:-$default_model_path}"
 translations_path="${CODEGEN_TRANSLATIONS_PATH:-}"
 model_locale="${CODEGEN_MODEL_LOCALE:-}"
 medol_base_url="${MEDOL_BASE_URL:-http://host.docker.internal:5172}"
@@ -55,7 +59,7 @@ if [[ "$target" == "model" || "$target" == "update" ]]; then
   require_image
   verify_image
 
-  model_args=(--base-url "$medol_base_url" --output /workspace/codegen-model.json)
+  model_args=(--base-url "$medol_base_url" --output /workspace/.medol/codegen-model.json)
   if [[ $# -gt 1 ]]; then
     if [[ "${2:-}" == --* ]]; then
       model_args+=("${@:2}")
@@ -82,7 +86,7 @@ fi
 
 if [[ ! -f "$model_path" ]]; then
   echo "Codegen model was not found: $model_path" >&2
-  echo "Export it from Event Modeling Toolkit first." >&2
+  echo "Export it from Medol to .medol/codegen-model.json first." >&2
   echo "Or set CODEGEN_MODEL_PATH=/path/to/codegen-model.json." >&2
   echo "Or run ./test-codegen-model.sh update [workspace-id] while Medol is running." >&2
   exit 1

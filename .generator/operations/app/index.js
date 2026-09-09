@@ -6,6 +6,7 @@
 const YeomanGenerator = require('yeoman-generator');
 const Generator = YeomanGenerator.default ?? YeomanGenerator;
 const { loadGeneratorModel } = require('../../common/core/config-loader');
+const { generatorOutputRoot, loadMedolWorkspace } = require('../../common/core/medol-workspace');
 const { buildOperationsModel } = require('./operations-model-builder');
 const { loadOperationsConfig } = require('./operations-config');
 const { generateOperationsFiles, targets } = require('./operations-generator');
@@ -20,9 +21,14 @@ module.exports = class extends Generator {
         }
         this.argument('appname', { type: String, required: false });
 
-        const loaded = loadGeneratorModel(this.env.cwd);
+        this.workspace = loadMedolWorkspace(this.env.cwd, this.opts);
+        const outputRoot = this.opts.outputRoot ?? this.opts.output ?? generatorOutputRoot(this.workspace, 'operations', '.');
+        if (outputRoot && outputRoot !== '.') {
+            this.destinationRoot(this.destinationPath(outputRoot));
+        }
+        const loaded = loadGeneratorModel(this.env.cwd, this.opts);
         this.codegenModel = loaded.codegenModel;
-        this.operationsConfig = loadOperationsConfig(this.env.cwd);
+        this.operationsConfig = loadOperationsConfig(this.env.cwd, this.workspace);
     }
 
     async prompting() {

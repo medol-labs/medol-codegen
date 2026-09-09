@@ -6,6 +6,7 @@
 const YeomanGenerator = require('yeoman-generator');
 const Generator = YeomanGenerator.default ?? YeomanGenerator;
 const {loadCodegenModel} = require('../../common/core/codegen-model-loader');
+const {generatorOutputRoot, loadMedolWorkspace} = require('../../common/core/medol-workspace');
 const {configureValueTypes} = require('../../common/util/generator');
 const {applicationWriterMethods} = require('./application-writer');
 const {domainWriterMethods} = require('./domain-writer');
@@ -88,7 +89,12 @@ class Axon5Generator extends Generator {
     constructor(args, opts) {
         super(args, opts);
         this.opts = opts ?? {};
-        this.model = loadCodegenModel(this.env.cwd);
+        this.workspace = loadMedolWorkspace(this.env.cwd, this.opts);
+        const outputRoot = this.opts.outputRoot ?? this.opts.output ?? generatorOutputRoot(this.workspace, 'axon5', '.');
+        if (outputRoot && outputRoot !== '.') {
+            this.destinationRoot(this.destinationPath(outputRoot));
+        }
+        this.model = loadCodegenModel(this.env.cwd, this.opts);
         this.fullModel = this.model;
         this.modulePrefix = '';
         this.currentDeployment = null;

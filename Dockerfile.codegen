@@ -15,8 +15,10 @@ RUN cd /opt/codegen/.generator && npm ci --omit=dev
 
 COPY gen.sh /usr/local/bin/gen
 COPY update-codegen-model.js /usr/local/bin/update
+COPY init-workspace.js /usr/local/bin/init
 RUN ln -s /usr/local/bin/update /usr/local/bin/update-codegen-model \
   && ln -s /usr/local/bin/update /usr/local/bin/fetch-codegen-model \
-  && chmod +x /usr/local/bin/gen /usr/local/bin/update
+  && ln -s /usr/local/bin/init /usr/local/bin/init-medol-workspace \
+  && chmod +x /usr/local/bin/gen /usr/local/bin/update /usr/local/bin/init
 
 CMD ["/bin/bash"]

@@ -10,12 +10,21 @@ const configFiles = [
     'operations.config.json'
 ];
 
-function loadOperationsConfig(cwd) {
+function loadOperationsConfig(cwd, workspace = {}) {
+    const workspaceConfig = workspace.config?.operations
+        ?? workspace.config?.generators?.operations?.config
+        ?? {};
     const configPath = configFiles
         .map((file) => path.join(cwd, file))
         .find((file) => fs.existsSync(file));
-    if (!configPath) return {};
-    return JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    const fileRaw = configPath ? JSON.parse(fs.readFileSync(configPath, 'utf8')) : {};
+    const fileConfig = fileRaw.operations ?? fileRaw;
+    return {
+        operations: {
+            ...fileConfig,
+            ...workspaceConfig
+        }
+    };
 }
 
 module.exports = {

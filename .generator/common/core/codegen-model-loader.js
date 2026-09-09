@@ -4,11 +4,12 @@
  */
 
 const fs = require('fs');
+const { loadMedolWorkspace } = require('./medol-workspace');
 
-function loadCodegenModel(cwd) {
-    const path = `${cwd}/codegen-model.json`;
+function loadCodegenModel(cwd, options = {}) {
+    const path = loadMedolWorkspace(cwd, options).codegenModelPath;
     if (!fs.existsSync(path)) {
-        throw new Error(`No codegen-model.json found in ${cwd}. The axon5 generator only accepts the Medol CodegenModel.`);
+        throw new Error(`No .medol/codegen-model.json or codegen-model.json found in ${cwd}. The axon5 generator only accepts the Medol CodegenModel.`);
     }
 
     const raw = JSON.parse(fs.readFileSync(path, 'utf8'));

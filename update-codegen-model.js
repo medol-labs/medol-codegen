@@ -16,7 +16,7 @@ Options:
       --locale <locale>      Include stored Medol translations for the locale.
       --language <locale>    Alias for --locale.
       --translations <path>  Merge a local translation bundle after fetching.
-  -o, --output <path>        Output file. Default: /workspace/codegen-model.json
+  -o, --output <path>        Output file. Default: /workspace/.medol/codegen-model.json
       --stdout               Print JSON to stdout instead of writing a file.
       --list-workspaces      List workspaces from the Medol service.
   -h, --help                 Show this help.
@@ -48,7 +48,7 @@ function parseArgs(argv) {
     versionId: process.env.MEDOL_VERSION_ID || process.env.CODEGEN_MODEL_VERSION_ID,
     locale: process.env.CODEGEN_MODEL_LOCALE || process.env.MEDOL_LOCALE,
     translationsPath: process.env.CODEGEN_TRANSLATIONS_PATH || process.env.MEDOL_TRANSLATIONS_PATH,
-    output: process.env.CODEGEN_MODEL_OUTPUT || "/workspace/codegen-model.json",
+    output: process.env.CODEGEN_MODEL_OUTPUT || "/workspace/.medol/codegen-model.json",
     stdout: false,
     listWorkspaces: false,
   };

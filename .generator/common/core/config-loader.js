@@ -4,12 +4,15 @@
  */
 
 const fs = require('fs');
+const path = require('path');
 const { fromCodegenModel, fromConfig, toGeneratorConfig } = require('./codegen-model');
+const { loadMedolWorkspace } = require('./medol-workspace');
 
-function loadGeneratorModel(cwd) {
-    const codegenModelPath = `${cwd}/codegen-model.json`;
+function loadGeneratorModel(cwd, options = {}) {
+    const workspace = loadMedolWorkspace(cwd, options);
+    const codegenModelPath = workspace.codegenModelPath;
     const configPath = `${cwd}/config.json`;
-    const translationBundle = loadTranslationBundle(cwd);
+    const translationBundle = loadTranslationBundle(cwd, workspace);
 
     if (fs.existsSync(codegenModelPath)) {
         const rawCodegenModel = readJson(codegenModelPath);
@@ -25,7 +28,7 @@ function loadGeneratorModel(cwd) {
     }
 
     if (!fs.existsSync(configPath)) {
-        throw new Error(`❌ No codegen-model.json or config.json found in ${cwd}. Please export codegen-model.json from Event Modeling Toolkit first.`);
+        throw new Error(`❌ No .medol/codegen-model.json, codegen-model.json, or config.json found in ${cwd}. Please export codegen-model.json from Medol first.`);
     }
 
     const rawConfig = readJson(configPath);
@@ -44,8 +47,8 @@ function readJson(path) {
     return JSON.parse(fs.readFileSync(path, 'utf8'));
 }
 
-function loadTranslationBundle(cwd) {
-    const bundles = translationBundleCandidates(cwd)
+function loadTranslationBundle(cwd, workspace = {}) {
+    const bundles = translationBundleCandidates(cwd, workspace)
         .filter((candidate) => fs.existsSync(candidate))
         .map((candidate) => normalizeTranslationBundle(readJson(candidate)))
         .filter(Boolean);
@@ -97,15 +100,19 @@ function withTranslationBundle(codegenModel, translationBundle) {
     };
 }
 
-function translationBundleCandidates(cwd) {
+function translationBundleCandidates(cwd, workspace = {}) {
     const fixed = [
+        workspace.translationsPath,
+        `${cwd}/.medol/translations.json`,
+        `${cwd}/.medol/model-translations.json`,
         `${cwd}/translations.json`,
         `${cwd}/model-translations.json`
-    ];
-    const localeBundles = fs.existsSync(cwd)
-        ? fs.readdirSync(cwd)
+    ].filter(Boolean);
+    const directories = [`${cwd}/.medol`, cwd].filter((directory) => fs.existsSync(directory));
+    const localeBundles = directories.length > 0
+        ? directories.flatMap((directory) => fs.readdirSync(directory)
             .filter((file) => /^model-translations\..+\.json$/.test(file))
-            .map((file) => `${cwd}/${file}`)
+            .map((file) => path.join(directory, file)))
         : [];
     return Array.from(new Set([...fixed, ...localeBundles]));
 }

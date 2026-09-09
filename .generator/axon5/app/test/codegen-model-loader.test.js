@@ -5,9 +5,24 @@ const path = require('node:path');
 const test = require('node:test');
 const {loadCodegenModel} = require('../../../common/core/codegen-model-loader');
 
+function restoreEnv(name, value) {
+    if (value === undefined) {
+        delete process.env[name];
+    } else {
+        process.env[name] = value;
+    }
+}
+
 function writeModel(model) {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codegen-model-loader-'));
     fs.writeFileSync(path.join(directory, 'codegen-model.json'), JSON.stringify(model, null, 2));
+    return directory;
+}
+
+function writeWorkspaceModel(model) {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codegen-model-loader-'));
+    fs.mkdirSync(path.join(directory, '.medol'));
+    fs.writeFileSync(path.join(directory, '.medol/codegen-model.json'), JSON.stringify(model, null, 2));
     return directory;
 }
 
@@ -61,8 +76,8 @@ test('keeps deployed built-in contexts when no domain is explicitly selected', (
             ['RegisterDictionary', 'RegisterUserAccount']
         );
     } finally {
-        process.env.CODEGEN_DOMAIN = previousDomain;
-        process.env.CODEGEN_DEPLOYMENT = previousDeployment;
+        restoreEnv('CODEGEN_DOMAIN', previousDomain);
+        restoreEnv('CODEGEN_DEPLOYMENT', previousDeployment);
     }
 });
 
@@ -76,7 +91,16 @@ test('still filters by domain when CODEGEN_DOMAIN is explicit', () => {
         assert.deepEqual(model.contexts.map((context) => context.name), ['DictionaryMaintenance']);
         assert.deepEqual(model.slices.map((slice) => slice.name), ['RegisterDictionary']);
     } finally {
-        process.env.CODEGEN_DOMAIN = previousDomain;
-        process.env.CODEGEN_DEPLOYMENT = previousDeployment;
+        restoreEnv('CODEGEN_DOMAIN', previousDomain);
+        restoreEnv('CODEGEN_DEPLOYMENT', previousDeployment);
     }
+});
+
+test('loads codegen model from .medol by default', () => {
+    const model = loadCodegenModel(writeWorkspaceModel(deployedMultiDomainModel()));
+    assert.equal(model.domain, 'BusinessDomain');
+    assert.deepEqual(
+        model.contexts.map((context) => context.name),
+        ['DictionaryMaintenance', 'IdentityAccessManagement']
+    );
 });

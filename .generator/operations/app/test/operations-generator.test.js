@@ -5,9 +5,12 @@
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { buildOperationsModel, gatewayPathForApplication } = require('../operations-model-builder');
+const { loadMedolWorkspace } = require('../../../common/core/medol-workspace');
+const { loadOperationsConfig } = require('../operations-config');
 const { generateOperationsFiles } = require('../operations-generator');
 const { renderApisixStandaloneConfig } = require('../renderers/apisix-renderer');
 const { renderDockerCompose } = require('../renderers/docker-compose-renderer');
@@ -206,6 +209,24 @@ test('derives image names and K3s registry configuration from optional registry 
         k3s['dev/k3s/cluster/registries.yaml'],
         /"http:\/\/registry\.internal:5000"/
     );
+});
+
+test('loads operations registry configuration from .medol/medol.yml', () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'operations-workspace-'));
+    fs.mkdirSync(path.join(workspace, '.medol'));
+    fs.writeFileSync(path.join(workspace, '.medol/medol.yml'), [
+        'operations:',
+        '  registry:',
+        '    host: registry.internal:5000',
+        '    namespace: team',
+        '    insecure: true',
+        ''
+    ].join('\n'));
+
+    const operationsConfig = loadOperationsConfig(workspace, loadMedolWorkspace(workspace));
+    const model = buildOperationsModel(sampleModel, operationsConfig);
+
+    assert.equal(model.imagePrefix, 'registry.internal:5000/team');
 });
 
 test('renders K3s platform runtime-agent scheduler details when topology contains a platform and runtime agent', () => {

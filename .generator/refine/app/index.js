@@ -8,6 +8,7 @@ const Generator = YeomanGenerator.default ?? YeomanGenerator;
 var path = require('path');
 const fs = require('fs');
 const {loadGeneratorModel} = require("../../common/core/config-loader");
+const {generatorOutputRoot, loadMedolWorkspace} = require("../../common/core/medol-workspace");
 const {
     buildFrontendModel,
     buildDomainModel,
@@ -52,7 +53,12 @@ module.exports = class extends Generator {
         }
         this.argument('appname', { type: String, required: false });
 
-        const loaded = loadGeneratorModel(this.env.cwd);
+        this.workspace = loadMedolWorkspace(this.env.cwd, this.opts);
+        const outputRoot = this.opts.outputRoot ?? this.opts.output ?? generatorOutputRoot(this.workspace, 'refine', '.');
+        if (outputRoot && outputRoot !== '.') {
+            this.destinationRoot(this.destinationPath(outputRoot));
+        }
+        const loaded = loadGeneratorModel(this.env.cwd, this.opts);
         config = loaded.config;
         codegenModel = loaded.codegenModel;
     }

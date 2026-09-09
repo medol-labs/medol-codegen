@@ -91,7 +91,7 @@ The top-level generator supports five targets:
 ## Initialize A Generated System Workspace
 
 Run `init` from a system root to create the standard `.medol` workspace, fetch
-the latest CodegenModel, and create root `README.md`, `AGENTS.md`, and
+the latest CodegenModel plus the MEDOL source snapshot, and create root `README.md`, `AGENTS.md`, and
 `.gitignore` templates:
 
 ```bash
@@ -99,22 +99,23 @@ cd federation-learning
 init --workspace-id <medol-workspace-id> --language zh-CN
 ```
 
-`init` writes the fetched model to `.medol/codegen-model.json` and creates
-`.medol/medol.yml` when it is missing. It keeps existing template files unless
+`init` writes the fetched model to `.medol/codegen-model.json`, writes the MEDOL
+source to `.medol/source.medol`, and creates `.medol/medol.yml` when it is missing. It keeps existing template files unless
 `--force` is passed. The default language is `zh-CN`, so this is equivalent:
 
 ```bash
 init <medol-workspace-id>
 ```
 
-To refresh only the model later:
+To refresh only the model and MEDOL source later:
 
 ```bash
 update --workspace-id <medol-workspace-id>
 ```
 
-`update` also defaults to `.medol/codegen-model.json`; use `--output` only when
-you intentionally want a different path.
+`update` also defaults to `.medol/codegen-model.json` and `.medol/source.medol`;
+use `--output` or `--source-output` only when you intentionally want a different
+path. Pass `--no-source` to refresh only the CodegenModel JSON.
 
 When `codegen-model.json` contains lifecycle `transitions`, the Axon 5 generator
 uses them to generate command state guards for transitions with an inferred
@@ -483,6 +484,17 @@ update
 update <workspace-id>
 update --workspace-id <workspace-id>
 ```
+
+The same command also downloads the MEDOL source document that produced the
+CodegenModel and writes it next to the model:
+
+```text
+/workspace/.medol/codegen-model.json
+/workspace/.medol/source.medol
+```
+
+Use `--source-output <path>` to choose a different MEDOL source path, or
+`--no-source` when only the JSON should be refreshed.
 
 To include stored MEDOL model translations in the exported CodegenModel, pass a locale:
 

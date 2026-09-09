@@ -17,6 +17,8 @@ Options:
       --language <locale>    Alias for --locale.
       --translations <path>  Merge a local translation bundle after fetching.
   -o, --output <path>        Output file. Default: /workspace/.medol/codegen-model.json
+      --source-output <path> MEDOL source output file. Default: alongside --output as source.medol
+      --no-source            Do not download the MEDOL source document.
       --stdout               Print JSON to stdout instead of writing a file.
       --list-workspaces      List workspaces from the Medol service.
   -h, --help                 Show this help.
@@ -28,6 +30,7 @@ Environment:
   CODEGEN_MODEL_LOCALE       Default --locale.
   CODEGEN_TRANSLATIONS_PATH  Default --translations.
   CODEGEN_MODEL_OUTPUT       Default --output.
+  MEDOL_SOURCE_OUTPUT        Default --source-output.
 `);
 }
 
@@ -49,6 +52,8 @@ function parseArgs(argv) {
     locale: process.env.CODEGEN_MODEL_LOCALE || process.env.MEDOL_LOCALE,
     translationsPath: process.env.CODEGEN_TRANSLATIONS_PATH || process.env.MEDOL_TRANSLATIONS_PATH,
     output: process.env.CODEGEN_MODEL_OUTPUT || "/workspace/.medol/codegen-model.json",
+    sourceOutput: process.env.MEDOL_SOURCE_OUTPUT,
+    source: process.env.MEDOL_SOURCE_OUTPUT !== "false",
     stdout: false,
     listWorkspaces: false,
   };
@@ -92,6 +97,15 @@ function parseArgs(argv) {
       index += 1;
     } else if (arg.startsWith("--output=")) {
       options.output = arg.slice("--output=".length);
+    } else if (arg === "--source-output") {
+      options.sourceOutput = requireValue(args, index, arg);
+      options.source = true;
+      index += 1;
+    } else if (arg.startsWith("--source-output=")) {
+      options.sourceOutput = arg.slice("--source-output=".length);
+      options.source = true;
+    } else if (arg === "--no-source") {
+      options.source = false;
     } else if (arg === "--stdout") {
       options.stdout = true;
     } else if (arg === "--list-workspaces") {
@@ -124,6 +138,10 @@ function endpointUrl(options) {
 }
 
 async function readJson(url) {
+  return (await readJsonResponse(url)).json;
+}
+
+async function readJsonResponse(url) {
   const response = await fetch(url, {
     headers: {
       Accept: "application/json",
@@ -134,7 +152,10 @@ async function readJson(url) {
     throw new Error(`GET ${url} failed with ${response.status}: ${body}`);
   }
   try {
-    return JSON.parse(body);
+    return {
+      json: JSON.parse(body),
+      headers: response.headers,
+    };
   } catch (error) {
     throw new Error(`GET ${url} did not return valid JSON: ${error.message}`);
   }
@@ -159,13 +180,18 @@ async function main() {
   }
 
   const url = endpointUrl(options);
-  let json = await readJson(url);
+  const response = await readJsonResponse(url);
+  let json = response.json;
   if (options.listWorkspaces) {
     printWorkspaces(json);
     return;
   }
 
   const output = path.resolve(process.cwd(), options.output);
+  const sourceOutput = path.resolve(
+    process.cwd(),
+    options.sourceOutput || path.join(path.dirname(options.output), "source.medol")
+  );
   const localTranslations = loadLocalTranslationBundle({
     cwd: process.cwd(),
     output,
@@ -189,6 +215,36 @@ async function main() {
   fs.mkdirSync(path.dirname(output), { recursive: true });
   fs.writeFileSync(output, content);
   console.error(`Wrote ${output}`);
+
+  if (options.source) {
+    const source = await readMedolSource(options, response.headers);
+    fs.mkdirSync(path.dirname(sourceOutput), { recursive: true });
+    fs.writeFileSync(sourceOutput, source.endsWith("\n") ? source : `${source}\n`);
+    console.error(`Wrote ${sourceOutput}`);
+  }
+}
+
+async function readMedolSource(options, codegenHeaders) {
+  const workspaceId = options.workspaceId || codegenHeaders.get("x-medol-workspace-id");
+  const versionId = options.versionId || codegenHeaders.get("x-medol-version-id");
+  if (!workspaceId) {
+    throw new Error("Could not resolve Medol workspace id for source download. Pass --workspace-id or --no-source.");
+  }
+
+  const payload = await readJson(sourceEndpointUrl(options, workspaceId, versionId));
+  const source = versionId ? payload.version?.dsl : payload.workspace?.dsl;
+  if (typeof source !== "string") {
+    throw new Error("MEDOL source endpoint did not return a dsl string.");
+  }
+  return source;
+}
+
+function sourceEndpointUrl(options, workspaceId, versionId) {
+  const workspaceSegment = encodeURIComponent(workspaceId);
+  const path = versionId
+    ? `/api/modeling/workspaces/${workspaceSegment}/versions/${encodeURIComponent(versionId)}`
+    : `/api/modeling/workspaces/${workspaceSegment}`;
+  return new URL(path, options.baseUrl);
 }
 
 function loadLocalTranslationBundle(options) {

@@ -6,4 +6,4 @@ target/
 *.tar
 *.tar.gz
 deployment-compose-files/
-volumes/umadb/uma.db
+volumes/

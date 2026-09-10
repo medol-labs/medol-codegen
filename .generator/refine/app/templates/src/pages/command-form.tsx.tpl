@@ -352,6 +352,9 @@ export const <%= command.pageComponent %> = () => {
             <input type="hidden" {...form.register("<%= field.name %>" as never)} />
           ) : null}
 <% }) -%>
+<% command.snapshotFields.forEach((field) => { -%>
+          <input type="hidden" {...form.register("<%= field.name %>" as never)} />
+<% }) -%>
 <% command.fields.forEach((field) => { -%>
 <% if (field.object && field.list) { -%>
           <div className="space-y-4 rounded-md border p-4">
@@ -596,7 +599,18 @@ export const <%= command.pageComponent %> = () => {
                   optionLabel="<%= field.select.optionLabel %>"
                   optionValue="<%= field.select.optionValue %>"
                   value={field.value || ""}
-                  onValueChange={field.onChange}
+                  onValueChange={(value, option) => {
+                    field.onChange(value);
+<% if (field.select.snapshots?.length) { -%>
+<% field.select.snapshots.forEach((snapshot) => { -%>
+                    form.setValue(
+                      "<%= snapshot.fieldName %>" as never,
+                      String(option?.record?.["<%= snapshot.sourceField %>"] ?? option?.label ?? "") as never,
+                      { shouldDirty: true, shouldValidate: true },
+                    );
+<% }) -%>
+<% } -%>
+                  }}
                   placeholder={t("<%= field.placeholderKey %>", "Select <%= field.label %>")}
 <% if (field.select.filters?.length) { -%>
                   filters={<%- JSON.stringify(field.select.filters) %>}

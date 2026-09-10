@@ -327,6 +327,126 @@ test('links non-lifecycle producer commands as row actions and supports explicit
     assert.equal(command?.fields[0]?.select?.optionLabel, 'productName');
 });
 
+test('uses derived lookup command fields as hidden display snapshots for id selectors', () => {
+    const model = {
+        domain: 'Demo',
+        contexts: [{name: 'OrderManagement', title: 'Order Management'}],
+        aggregates: [],
+        transitions: [],
+        deployments: [{
+            name: 'BackOffice',
+            title: 'Back Office',
+            contexts: ['OrderManagement']
+        }],
+        slices: [{
+            id: 'slice-add-product-to-order',
+            context: 'OrderManagement',
+            chapter: 'Order Management',
+            title: 'Add Product To Order',
+            commands: [{
+                id: 'command-add-product-to-order',
+                title: 'Add Product To Order',
+                concept: 'Order',
+                fields: [
+                    {name: 'orderId', type: 'UUID', idAttribute: true, technicalAttribute: true},
+                    {name: 'productId', type: 'UUID'},
+                    {
+                        name: 'selectedProductName',
+                        type: 'String',
+                        display: true,
+                        source: {
+                            kind: 'derived',
+                            from: ['ProductCatalog.productName'],
+                            lookup: {
+                                key: 'productId',
+                                sourceField: 'productName',
+                                targetField: 'selectedProductName',
+                                cacheProjection: 'ProductCatalog',
+                                missingValuePolicy: 'keep'
+                            }
+                        }
+                    }
+                ],
+                dependencies: [{
+                    id: 'event-product-added-to-order',
+                    direction: 'OUTBOUND',
+                    title: 'Product Added To Order',
+                    elementType: 'EVENT'
+                }]
+            }],
+            events: [{
+                id: 'event-product-added-to-order',
+                title: 'Product Added To Order',
+                fields: [
+                    {name: 'orderId', type: 'UUID', idAttribute: true, technicalAttribute: true},
+                    {name: 'productId', type: 'UUID'},
+                    {name: 'selectedProductName', type: 'String'}
+                ],
+                dependencies: [{
+                    id: 'command-add-product-to-order',
+                    direction: 'INBOUND',
+                    title: 'Add Product To Order',
+                    elementType: 'COMMAND'
+                }, {
+                    id: 'readmodel-order-catalog',
+                    direction: 'OUTBOUND',
+                    title: 'Order Catalog',
+                    elementType: 'READMODEL'
+                }]
+            }],
+            readmodels: []
+        }, {
+            id: 'slice-order-catalogs',
+            context: 'OrderManagement',
+            chapter: 'Order Management',
+            title: 'Order Catalogs',
+            commands: [],
+            events: [],
+            readmodels: [{
+                id: 'readmodel-order-catalog',
+                title: 'Order Catalog',
+                listElement: true,
+                fields: [
+                    {name: 'orderId', type: 'UUID', idAttribute: true},
+                    {name: 'customerName', type: 'String', display: true}
+                ],
+                dependencies: [{
+                    id: 'event-product-added-to-order',
+                    direction: 'INBOUND',
+                    title: 'Product Added To Order',
+                    elementType: 'EVENT'
+                }]
+            }, {
+                id: 'readmodel-product-catalog',
+                title: 'Product Catalog',
+                listElement: true,
+                fields: [
+                    {name: 'productId', type: 'UUID', idAttribute: true},
+                    {name: 'productCode', type: 'String'},
+                    {name: 'productName', type: 'String', display: true}
+                ],
+                dependencies: []
+            }]
+        }]
+    };
+
+    const frontend = buildFrontendModel(model);
+    const orderCatalog = frontend.resources.find((resource) => resource.name === 'order_catalog');
+    const command = orderCatalog?.commands.find((item) => item.name === 'addProductToOrder');
+
+    assert.deepEqual(command?.fields.map((field) => field.name), ['productId']);
+    assert.deepEqual(command?.snapshotFields.map((field) => field.name), ['selectedProductName']);
+    assert.equal(command?.fields[0]?.select?.resource, 'product_catalog');
+    assert.equal(command?.fields[0]?.select?.optionValue, 'productId');
+    assert.equal(command?.fields[0]?.select?.optionLabel, 'productName');
+    assert.deepEqual(command?.fields[0]?.select?.snapshots, [{
+        fieldName: 'selectedProductName',
+        sourceField: 'productName',
+        keyField: 'productId',
+        display: true
+    }]);
+});
+
 test('prefers command owner catalog over relation projection catalog for row actions', () => {
     const model = {
         domain: 'Demo',

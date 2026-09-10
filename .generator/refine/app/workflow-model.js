@@ -227,6 +227,9 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
         selectForField(field) {
             return readModelSelectForFieldSource(field, selectableReadModelsByFieldSource);
         },
+        selectForSnapshotField(field) {
+            return readModelSelectForSnapshotField(field, selectableReadModelsByFieldSource);
+        },
         historyPrefillForField(command, ownerReadModel, field, ownerFields) {
             return historyPrefillForField(readModelInfos, command, ownerReadModel, field, ownerFields);
         },
@@ -359,6 +362,44 @@ function readModelSelectForFieldSource(field, selectableReadModelsByFieldSource)
         }
     }
     return null;
+}
+
+function readModelSelectForSnapshotField(field, selectableReadModelsByFieldSource) {
+    const lookup = field?.source?.lookup;
+    const key = singleLookupKey(lookup);
+    if (!key || field?.source?.kind !== 'derived') {
+        return null;
+    }
+
+    const sourceField = lookup?.sourceField
+        ?? normalizeArray(field?.source?.from)
+            .map((source) => String(source).split('.').filter(Boolean).at(-1))
+            .find(Boolean)
+        ?? field.name;
+    const sourceSelect = readModelSelectForFieldSource(field, selectableReadModelsByFieldSource);
+    const idField = sourceSelect?.meta?.idField;
+    if (!sourceSelect || !idField) {
+        return null;
+    }
+
+    return {
+        ...sourceSelect,
+        optionValue: idField,
+        optionLabel: sourceField,
+        snapshot: {
+            fieldName: field.name,
+            sourceField,
+            keyField: key,
+            display: !!field.display
+        }
+    };
+}
+
+function singleLookupKey(lookup) {
+    const keys = normalizeArray(lookup?.keys?.length ? lookup.keys : lookup?.key)
+        .map((key) => String(key).trim())
+        .filter(Boolean);
+    return keys.length === 1 ? keys[0] : null;
 }
 
 function historyPrefillForField(readModelInfos, command, ownerReadModel, field, ownerFields) {

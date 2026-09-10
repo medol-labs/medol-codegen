@@ -30,13 +30,19 @@ import { cn } from "@/lib/utils";
 
 type UseSelectParams = NonNullable<Parameters<typeof useSelect>[0]>;
 
+type ResourceSelectOption = {
+  value: string | number;
+  label: React.ReactNode;
+  record?: BaseRecord;
+};
+
 type ResourceSelectProps = Omit<
   React.ComponentProps<typeof SelectTrigger>,
   "defaultValue" | "disabled" | "onValueChange" | "value"
 > & {
   resource: UseSelectParams["resource"];
   value?: string | number | null;
-  onValueChange?: (value: string) => void;
+  onValueChange?: (value: string, option?: ResourceSelectOption) => void;
   placeholder?: string;
   loadingPlaceholder?: string;
   emptyPlaceholder?: string;
@@ -138,6 +144,16 @@ const readableOptionLabel = (
 const hasText = (value: unknown) =>
   value !== null && value !== undefined && String(value).trim().length > 0;
 
+const readableOptionValue = (
+  item: BaseRecord,
+  optionValue?: string | ((item: BaseRecord) => string | number),
+) =>
+  typeof optionValue === "function"
+    ? optionValue(item)
+    : typeof optionValue === "string"
+      ? item[optionValue]
+      : item.id;
+
 const searchFilters = (
   value: string,
   searchField: string | undefined,
@@ -213,6 +229,23 @@ export const ResourceSelect = React.forwardRef<
     });
     const options = select.options ?? [];
     const loading = isLoadingSelect(select);
+    const records = (
+      (select as { query?: { data?: { data?: BaseRecord[] } } }).query?.data
+        ?.data ??
+      (select as { queryResult?: { data?: { data?: BaseRecord[] } } })
+        .queryResult?.data?.data ??
+      []
+    ) as BaseRecord[];
+    const recordsByValue = React.useMemo(() => {
+      const next = new Map<string, BaseRecord>();
+      records.forEach((record) => {
+        const optionValueForRecord = readableOptionValue(record, optionValue);
+        if (optionValueForRecord !== undefined && optionValueForRecord !== null) {
+          next.set(String(optionValueForRecord), record);
+        }
+      });
+      return next;
+    }, [records, optionValue]);
     const trigger = (
       <SelectTrigger
         {...triggerProps}
@@ -226,7 +259,21 @@ export const ResourceSelect = React.forwardRef<
     return (
       <Select
         value={value === null || value === undefined ? "" : String(value)}
-        onValueChange={onValueChange}
+        onValueChange={(nextValue) => {
+          const selected = options.find(
+            (option) => String(option.value) === nextValue,
+          );
+          onValueChange?.(
+            nextValue,
+            selected
+              ? {
+                  value: selected.value,
+                  label: selected.label,
+                  record: recordsByValue.get(nextValue),
+                }
+              : undefined,
+          );
+        }}
         disabled={disabled || loading}
       >
         {withFormControl ? <FormControl>{trigger}</FormControl> : trigger}

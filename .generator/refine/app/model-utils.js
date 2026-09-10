@@ -353,6 +353,7 @@ function normalizeFields(fields = []) {
             technicalAttribute: !!field.technicalAttribute,
             portOutput: !!field.portOutput,
             idAttribute: !!field.idAttribute,
+            display: !!field.display,
             uploadFile: !!field.uploadFile,
             file: !!field.file,
             cardinality: field.cardinality ?? 'Single',

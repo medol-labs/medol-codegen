@@ -204,6 +204,8 @@ When generating `all`, `resources`, `router`, or `pages`, the refine generator p
 
 Constrained values should be modeled explicitly in Medol with `enum` or scalar `oneOf` value types. The Refine generator renders those static fields as `Select` controls and emits matching Zod schemas. For runtime-maintained option sets, mark a string field with `dictionary "DICTIONARY_CODE"` and provide a standard `DictionaryValueCatalog` read model with `dictionaryCode`, `valueCode`, `displayName`, optional `displayOrder`, and either `state` or `active`. The generated form submits the selected `valueCode` and queries the catalog by `dictionaryCode`. `.generator/common/core/field-options.js` only preserves compatibility with explicit option metadata in the codegen model; it no longer carries business-specific field-name dictionaries.
 
+Command forms also understand Medol derived lookup fields as display snapshots. When a command has an id field plus a derived field such as `selectedCustomerName: String? display derived from CustomerCatalog.customerName by customerId`, the generated form renders only the `customerId` selector. Selecting a customer submits both `customerId` and the hidden `selectedCustomerName` snapshot, copied from `CustomerCatalog.customerName`. Multiple snapshot fields may point at the same selector key with the same `by customerId` lookup; the form copies each snapshot from the selected read-model record. These snapshot values are for display/audit payloads only and should not be used for authorization or business invariants.
+
 You can invoke the bundled generator explicitly:
 
 ```bash

@@ -111,6 +111,8 @@ test('generates operations target file sets', () => {
     const files = generateOperationsFiles(model, { target: 'all', environment: 'dev' });
     assert(files['operations/dev/operations-model.json']);
     assert(files['operations/dev/infrastructure/apisix/apisix.yaml']);
+    assert(files['operations/dev/images.mjs']);
+    assert.match(files['operations/dev/images.mjs'], /node operations\/dev\/images\.mjs package/);
     assert(files['operations/dev/docker-compose/docker-compose.yml']);
     assert(files['operations/dev/.env-example']);
     assert(files['operations/dev/kubernetes/base/applications.yaml']);

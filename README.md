@@ -307,6 +307,17 @@ federation-learning/
       zot/
 ```
 
+Each operations environment also includes `images.mjs`, a monorepo-level image
+orchestrator for backend, frontend, runtime-engine, and infrastructure images:
+
+```bash
+node operations/dev/images.mjs list
+node operations/dev/images.mjs all --platform linux/amd64
+node operations/dev/images.mjs push --prefix registry.example.com/team
+node operations/dev/images.mjs push-dependencies --prefix registry.example.com/team
+node operations/dev/images.mjs import
+```
+
 APISIX is generated in standalone mode with declarative YAML and Admin API disabled. Docker Compose is the primary runnable target and includes generated backend services, the generated frontend console, runtime dependencies such as PostgreSQL and UMA DB, optional/profiled Axon Server, optional Redis, volumes, networks, environment placeholders, health checks, and service startup dependencies.
 
 Operations overrides can be supplied in `.medol/medol.yml` under the

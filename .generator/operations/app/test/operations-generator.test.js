@@ -150,7 +150,8 @@ test('renders Kubernetes and K3s manifests from the same operations model', () =
     assert.match(k3s['dev/k3s/cluster/k3d-dev.yaml'], /image: "rancher\/k3s:v1.33.5-k3s1"/);
     assert(!k3s['dev/k3s/cluster/registries.yaml']);
     assert.match(k3s['dev/k3s/cluster/k3d-dev.yaml'], /port: "30080:30080"/);
-    assert.match(k3s['dev/k3s/cluster/k3d-dev.yaml'], /volume: "\.\.\/\.\.\/\.\.\/volumes\/datasets:\/workspace\/datasets"/);
+    assert.doesNotMatch(k3s['dev/k3s/cluster/k3d-dev.yaml'], /\/workspace\/datasets/);
+    assert.doesNotMatch(k3s['dev/k3s/cluster/k3d-dev.yaml'], /\/workspace\/tmp\/runtime-engine/);
     assert.match(k3s['dev/k3s/environments/dev/kustomization.yaml'], /configmap.yaml/);
     assert.match(k3s['dev/k3s/environments/dev/kustomization.yaml'], /patches\/federation-service-envfrom.yaml/);
     assert.doesNotMatch(k3s['dev/k3s/environments/dev/kustomization.yaml'], /secrets\.example\.yaml/);
@@ -165,12 +166,9 @@ test('renders Kubernetes and K3s manifests from the same operations model', () =
     assert.match(k3s['dev/k3s/environments/dev/secrets.example.yaml'], /MEDOL_SECURITY_INTERNAL_TOKEN/);
     assert.match(k3s['dev/k3s/environments/dev/patches/federation-service-envfrom.yaml'], /envFrom:/);
     assert.match(k3s['dev/k3s/README.md'], /k3d cluster create --config cluster\/k3d-dev.yaml/);
-    assert.match(k3s['dev/k3s/README.md'], /k3d node create <k3d-node-name>/);
-    assert.match(k3s['dev/k3s/README.md'], /--k3s-node-label "medol\.dev\/node-role=runtime"/);
-    assert.match(k3s['dev/k3s/README.md'], /--k3s-node-label "medol\.dev\/organization-id=<organization-id>"/);
-    assert.match(k3s['dev/k3s/README.md'], /--k3s-node-label "medol\.dev\/runtime-infrastructure-id=<runtime-infrastructure-id>"/);
-    assert.match(k3s['dev/k3s/README.md'], /medol\.dev\/runtime-infrastructure-id=<runtime-infrastructure-id>/);
-    assert.match(k3s['dev/k3s/README.md'], /k3d image import <runtime-agent-image>/);
+    assert.match(k3s['dev/k3s/README.md'], /project-specific Kubernetes extensions in a separate overlay/);
+    assert.doesNotMatch(k3s['dev/k3s/README.md'], /runtime-agent-scheduler-rbac/);
+    assert.doesNotMatch(k3s['dev/k3s/README.md'], /medol\.dev\/runtime-infrastructure-id/);
     assert.match(k3s['dev/k3s/README.md'], /cp environments\/<environment>\/secrets\.example\.yaml environments\/<environment>\/secrets\.<environment>\.yaml/);
     assert.match(k3s['dev/k3s/README.md'], /apply -f environments\/<environment>\/secrets\.<environment>\.yaml/);
     assert.match(k3s['dev/k3s/README.md'], /must not be committed/);
@@ -229,7 +227,7 @@ test('loads operations registry configuration from .medol/medol.yml', () => {
     assert.equal(model.imagePrefix, 'registry.internal:5000/team');
 });
 
-test('renders K3s platform runtime-agent scheduler details when topology contains a platform and runtime agent', () => {
+test('does not infer platform runtime scheduling from application names', () => {
     const generatedModel = buildOperationsModel({
         domain: 'FederationLearningPlatform',
         deployments: [{
@@ -253,19 +251,13 @@ test('renders K3s platform runtime-agent scheduler details when topology contain
     const k3s = k3sFiles(generatedModel, { environmentName: 'staging' });
 
     assert(!k3s['staging/k3s/cluster/k3d-dev.yaml']);
-    assert.match(k3s['staging/k3s/base/kustomization.yaml'], /runtime-agent-scheduler-rbac.yaml/);
-    assert.match(k3s['staging/k3s/base/runtime-agent-scheduler-rbac.yaml'], /kind: "ServiceAccount"/);
-    assert.match(k3s['staging/k3s/base/runtime-agent-scheduler-rbac.yaml'], /resources:\n\s+- "deployments"/);
-    assert.match(k3s['staging/k3s/base/runtime-agent-scheduler-rbac.yaml'], /kind: "ClusterRole"/);
-    assert.match(k3s['staging/k3s/base/runtime-agent-scheduler-rbac.yaml'], /resources:\n\s+- "nodes"/);
-    assert.match(k3s['staging/k3s/base/runtime-agent-scheduler-rbac.yaml'], /name: "federation-learning-platform-runtime-engine-scheduler"/);
-    assert.match(k3s['staging/k3s/base/applications.yaml'], /serviceAccountName: "federation-learning-platform-runtime-agent-scheduler"/);
-    assert.match(k3s['staging/k3s/base/applications.yaml'], /serviceAccountName: "federation-learning-platform-runtime-engine-scheduler"/);
-    assert.match(k3s['staging/k3s/base/applications.yaml'], /mountPath: "\/workspace\/datasets"/);
-    assert.match(k3s['staging/k3s/environments/staging/configmap.yaml'], /PLATFORM_RUNTIME_K3S_NAMESPACE: "federation-learning-platform"/);
-    assert.match(k3s['staging/k3s/environments/staging/configmap.yaml'], /PLATFORM_RUNTIME_K3S_AGENT_IMAGE: "medol\/federation-learning-runtime-agent:0.0.1-SNAPSHOT"/);
-    assert.match(k3s['staging/k3s/environments/staging/configmap.yaml'], /RUNTIME_AGENT_LOCAL_RUNTIME_ENGINE_MODE: "kubernetes"/);
-    assert.match(k3s['staging/k3s/README.md'], /no `kubectl` binary is required/);
+    assert.doesNotMatch(k3s['staging/k3s/base/kustomization.yaml'], /runtime-agent-scheduler-rbac.yaml/);
+    assert(!k3s['staging/k3s/base/runtime-agent-scheduler-rbac.yaml']);
+    assert.doesNotMatch(k3s['staging/k3s/base/applications.yaml'], /serviceAccountName: "federation-learning-platform-runtime-agent-scheduler"/);
+    assert.doesNotMatch(k3s['staging/k3s/base/applications.yaml'], /mountPath: "\/workspace\/datasets"/);
+    assert.doesNotMatch(k3s['staging/k3s/environments/staging/configmap.yaml'], /PLATFORM_RUNTIME_K3S_NAMESPACE/);
+    assert.doesNotMatch(k3s['staging/k3s/environments/staging/configmap.yaml'], /RUNTIME_AGENT_LOCAL_RUNTIME_ENGINE_MODE/);
+    assert.doesNotMatch(k3s['staging/k3s/README.md'], /Platform-Managed Runtime Agent Startup/);
     assert.match(k3s['staging/k3s/environments/staging/configmap.yaml'], /name: "federation-learning-support-staging-config"[\s\S]*MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED: "false"/);
     assert.doesNotMatch(k3s['staging/k3s/environments/staging/configmap.yaml'], /MEDOL_SECURITY_ALLOWED_ORIGINS/);
     assert.match(k3s['staging/k3s/environments/staging/secrets.example.yaml'], /name: "federation-learning-support-staging-secret"[\s\S]*MEDOL_SECURITY_ADMIN_BOOTSTRAP_SETUP_TOKEN/);

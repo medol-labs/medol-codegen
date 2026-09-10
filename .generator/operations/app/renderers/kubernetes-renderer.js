@@ -759,7 +759,7 @@ function renderKubernetesReadme(name, model) {
             '',
             '```bash',
             k3dCreateCommand,
-            `k3d kubeconfig merge ${namespace}-dev --kubeconfig-switch-context`,
+            `export KUBECONFIG="$(k3d kubeconfig write ${namespace}-dev)"`,
             'kubectl config current-context',
             '```',
             '',

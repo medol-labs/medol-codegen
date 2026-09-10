@@ -452,7 +452,7 @@ function applicationConfigVariables(model, application, options) {
         ...applicationVariables,
         ...k3sDevCors,
         ...(hasIdentityAccessManagement
-            ? [{ name: 'MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED', value: 'false' }]
+            ? [{ name: 'MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED', value: 'true' }]
             : [])
     ];
 }
@@ -822,7 +822,7 @@ function renderKubernetesReadme(name, model) {
         '## First Administrator',
         '',
         ...(iamApplication ? [
-            `Administrator bootstrap is disabled by default for \`${iamApplication.name}\`. Before creating the first administrator, set \`MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED\` to \`"true"\` in that application ConfigMap and set \`MEDOL_SECURITY_ADMIN_BOOTSTRAP_SETUP_TOKEN\` in its environment-owned Secret file.`,
+            `Administrator bootstrap is enabled by default for \`${iamApplication.name}\`. Before creating the first administrator, set \`MEDOL_SECURITY_ADMIN_BOOTSTRAP_SETUP_TOKEN\` in that application's environment-owned Secret file.`,
             ''
         ] : [
             'No generated application in this topology contains the built-in IdentityAccessManagement context.',
@@ -845,7 +845,7 @@ function renderKubernetesReadme(name, model) {
         '```',
         '',
         ...(iamApplication ? [
-            'After the administrator is created, set `MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED` back to `"false"`, reapply the environment, and restart the IAM application.',
+        'After the administrator is created, set `MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED` to `"false"`, reapply the environment, and restart the IAM application.',
             ''
         ] : []),
         '## Environment Configuration',

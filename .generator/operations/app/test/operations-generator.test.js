@@ -258,7 +258,7 @@ test('does not infer platform runtime scheduling from application names', () => 
     assert.doesNotMatch(k3s['staging/k3s/environments/staging/configmap.yaml'], /PLATFORM_RUNTIME_K3S_NAMESPACE/);
     assert.doesNotMatch(k3s['staging/k3s/environments/staging/configmap.yaml'], /RUNTIME_AGENT_LOCAL_RUNTIME_ENGINE_MODE/);
     assert.doesNotMatch(k3s['staging/k3s/README.md'], /Platform-Managed Runtime Agent Startup/);
-    assert.match(k3s['staging/k3s/environments/staging/configmap.yaml'], /name: "federation-learning-support-staging-config"[\s\S]*MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED: "false"/);
+    assert.match(k3s['staging/k3s/environments/staging/configmap.yaml'], /name: "federation-learning-support-staging-config"[\s\S]*MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED: "true"/);
     assert.doesNotMatch(k3s['staging/k3s/environments/staging/configmap.yaml'], /MEDOL_SECURITY_ALLOWED_ORIGINS/);
     assert.match(k3s['staging/k3s/environments/staging/secrets.example.yaml'], /name: "federation-learning-support-staging-secret"[\s\S]*MEDOL_SECURITY_ADMIN_BOOTSTRAP_SETUP_TOKEN/);
 });
@@ -287,7 +287,7 @@ test('renders browser CORS origins for the dev K3s gateway', () => {
         k3s['dev/k3s/environments/dev/configmap.yaml'],
         /name: "federation-learning-platform-dev-config"[\s\S]*MEDOL_SECURITY_ALLOWED_ORIGINS: "http:\/\/localhost:\*,http:\/\/127\.0\.0\.1:\*,http:\/\/\*:30080"/
     );
-    assert.match(k3s['dev/k3s/README.md'], /Administrator bootstrap is disabled by default/);
+    assert.match(k3s['dev/k3s/README.md'], /Administrator bootstrap is enabled by default/);
 });
 
 function golden(name) {

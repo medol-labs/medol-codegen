@@ -759,10 +759,11 @@ function renderKubernetesReadme(name, model) {
             '',
             '```bash',
             k3dCreateCommand,
-            `kubectl config use-context k3d-${namespace}-dev`,
+            `k3d kubeconfig merge ${namespace}-dev --kubeconfig-switch-context`,
+            'kubectl config current-context',
             '```',
             '',
-            'The config creates one server and two agent nodes, disables the default Traefik addon, exposes APISIX NodePort `30080` on localhost, and leaves application manifests under `environments/dev`.',
+            'The config creates one server and two agent nodes, disables the default Traefik addon, and maps host port `30080` to the k3d server node. The generated APISIX NodePort Service also uses `30080`, so APISIX is reachable at `http://localhost:30080/` after applying the manifests.',
             '',
             ...(registryConfigured ? [
                 '## Registry',

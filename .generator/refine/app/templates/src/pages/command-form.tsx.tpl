@@ -352,7 +352,8 @@ export const <%= command.pageComponent %> = () => {
             <input type="hidden" {...form.register("<%= field.name %>" as never)} />
           ) : null}
 <% }) -%>
-<% command.snapshotFields.forEach((field) => { -%>
+<% const hiddenPrefillFieldNames = new Set(command.hiddenPrefillFields.map((field) => field.name)); -%>
+<% command.snapshotFields.filter((field) => !hiddenPrefillFieldNames.has(field.name)).forEach((field) => { -%>
           <input type="hidden" {...form.register("<%= field.name %>" as never)} />
 <% }) -%>
 <% command.fields.forEach((field) => { -%>
@@ -599,7 +600,7 @@ export const <%= command.pageComponent %> = () => {
                   optionLabel="<%= field.select.optionLabel %>"
                   optionValue="<%= field.select.optionValue %>"
                   value={field.value || ""}
-                  onValueChange={(value, option) => {
+                  onValueChange={(value<% if (field.select.snapshots?.length) { -%>, option<% } -%>) => {
                     field.onChange(value);
 <% if (field.select.snapshots?.length) { -%>
 <% field.select.snapshots.forEach((snapshot) => { -%>

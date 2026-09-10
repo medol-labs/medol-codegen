@@ -441,10 +441,13 @@ ${reservationEventArguments(reservation, specCommand)}
             )
         )`).join('\n');
             const reservationArgs = reservations.map((reservation) => `,\n                ${reservation.stateParam} = ${reservation.stateParam}`).join('');
+            const portResult = port ? renderPortResult(port, port.successEvent, specCommand) : undefined;
+            const portArgs = port ? `,\n                portResult = ${portResult}${port.failureEvent ? ',\n                now = LocalDateTime.parse("2026-01-01T00:00:00")' : ''}` : '';
             return {
                 command: specCommand,
                 reservations,
                 fields,
+                port,
                 usesUuid,
                 throws: true,
                 body: `    @Test
@@ -452,7 +455,7 @@ ${reservationEventArguments(reservation, specCommand)}
 ${reservationSetup}
 
         assertThrows<IllegalArgumentException> {
-            ${renderDecideCall(decisionName, commandName, specCommand, selection, reservationArgs).replaceAll('\n', '\n            ')}
+            ${renderDecideCall(decisionName, commandName, specCommand, selection, `${reservationArgs}${portArgs}`).replaceAll('\n', '\n            ')}
         }
     }`
             };

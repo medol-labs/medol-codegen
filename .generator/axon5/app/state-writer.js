@@ -402,10 +402,14 @@ ${eventExpressions.map((item) => item.kind === 'single'
                     const failure = port.failureEvent;
                     const successFields = eventFieldsWithTags(success.fields ?? [], eventTagFieldsFor(slice, success, selection, true));
                     const successArgs = successFields.map((field) => resultEventArgument(field, command, 'portResult', selection, readableStateFields)).join(', ');
+                    const successEvents = [
+                        ...reservationEvents,
+                        `            ${_eventTitle(success.title)}(${successArgs})`
+                    ];
                     if (!failure) {
                         return [
                             'return when (portResult) {',
-                            `            is ${capability.resultName}.Succeeded -> listOf(${_eventTitle(success.title)}(${successArgs}))`,
+                            `            is ${capability.resultName}.Succeeded -> listOf(\n${successEvents.join(',\n')}\n            )`,
                             '        }'
                         ].join('\n        ');
                     }
@@ -414,7 +418,7 @@ ${eventExpressions.map((item) => item.kind === 'single'
                     const unavailableArgs = failureFields.map((field) => unavailableEventArgument(field, command, 'portResult', 'now', selection, readableStateFields)).join(', ');
                     return [
                         'return when (portResult) {',
-                        `            is ${capability.resultName}.Succeeded -> listOf(${_eventTitle(success.title)}(${successArgs}))`,
+                        `            is ${capability.resultName}.Succeeded -> listOf(\n${successEvents.join(',\n')}\n            )`,
                         `            is ${capability.resultName}.Rejected -> listOf(${_eventTitle(failure.title)}(${failureArgs}))`,
                         `            is ${capability.resultName}.Unavailable -> listOf(${_eventTitle(failure.title)}(${unavailableArgs}))`,
                         '        }'

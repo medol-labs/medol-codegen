@@ -279,7 +279,29 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
     const component = pascal(title);
     const rawFields = command.fields ?? [];
     const normalizedFields = normalizeFields(command.fields).filter((field) => !field.generated);
-    const formFields = normalizedFields.filter(isCommandFormField);
+    const snapshotFields = commandSnapshotFields(normalizedFields, workflow);
+    const snapshotFieldNames = new Set(snapshotFields.map((field) => field.name));
+    const snapshotsByKeyField = snapshotFields.reduce((result, field) => {
+        const keyField = field.snapshotSelect?.snapshot?.keyField;
+        if (!keyField) {
+            return result;
+        }
+        const current = result.get(keyField) ?? [];
+        current.push(field.snapshotSelect.snapshot);
+        result.set(keyField, current);
+        return result;
+    }, new Map());
+    const snapshotSelectsByKeyField = snapshotFields.reduce((result, field) => {
+        const keyField = field.snapshotSelect?.snapshot?.keyField;
+        if (keyField && !result.has(keyField)) {
+            const {snapshot, ...select} = field.snapshotSelect;
+            result.set(keyField, select);
+        }
+        return result;
+    }, new Map());
+    const formFields = normalizedFields
+        .filter((field) => !snapshotFieldNames.has(field.name))
+        .filter(isCommandFormField);
     const resultFields = normalizeFields(command.resultFields ?? []);
     const workflowFields = commandWorkflowFields(command, readModel, allEvents, workflow);
     const stateControl = workflow.stateControlForCommand(command, readModel);
@@ -290,10 +312,22 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
         ?? command.aggregate
         ?? title
     );
-    const commandFields = formFields.map((field) => ({
-        ...field,
-        select: field.fileInput ? null : workflowFields.selects.get(field.name) ?? null
-    }));
+    const commandFields = formFields.map((field) => {
+        const snapshots = snapshotsByKeyField.get(field.name) ?? [];
+        const displaySnapshot = snapshots.find((snapshot) => snapshot.display);
+        const baseSelect = workflowFields.selects.get(field.name) ?? snapshotSelectsByKeyField.get(field.name) ?? null;
+        const select = field.fileInput || !baseSelect
+            ? null
+            : {
+                ...baseSelect,
+                ...(displaySnapshot ? {optionLabel: displaySnapshot.sourceField} : {}),
+                ...(snapshots.length > 0 ? {snapshots} : {})
+            };
+        return {
+            ...field,
+            select
+        };
+    });
     const historyPrefillFields = commandFields
         .filter((field) => field.select && field.scalarList)
         .map((field) => ({
@@ -330,6 +364,7 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
         targetState: stateControl.targetState,
         stateField: stateControl.stateField,
         fields: commandFields,
+        snapshotFields,
         historyPrefillFields,
         hasHistoryPrefillFields: historyPrefillFields.length > 0,
         resultFields,
@@ -347,13 +382,23 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
                 name: field.name,
                 defaultValue: field.list && workflowFields.selects.has(field.name) ? '[]' : defaultValueExpression(field)
             })),
-        hasSelectFields: formFields.some((field) => workflowFields.selects.has(field.name)),
+        hasSelectFields: commandFields.some((field) => field.select),
         hasObjectFields: formFields.some((field) => field.object),
         hasArrayFields: formFields.some((field) => field.list || hasNestedArrayField(field)),
         hasFileFields: formFields.some((field) => field.fileInput),
         fileFields: formFields.filter((field) => field.fileInput),
         fileUploadProducer: isFileUploadProducerCommand(command, rawFields)
     };
+}
+
+function commandSnapshotFields(fields, workflow) {
+    return fields
+        .filter((field) => isCommandFormField(field))
+        .map((field) => ({
+            ...field,
+            snapshotSelect: workflow.selectForSnapshotField(field)
+        }))
+        .filter((field) => field.snapshotSelect?.snapshot?.keyField);
 }
 
 function contextRouteFor(slice, fallbackChapter) {

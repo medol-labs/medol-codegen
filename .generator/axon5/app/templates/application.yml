@@ -57,7 +57,7 @@ medol:
     internal-roles: ${MEDOL_SECURITY_INTERNAL_ROLES:SERVICE}
     internal-permissions: ${MEDOL_SECURITY_INTERNAL_PERMISSIONS:*:*}
     admin-bootstrap:
-      enabled: ${MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED:false}
+      enabled: ${MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED:true}
       setup-token: ${MEDOL_SECURITY_ADMIN_BOOTSTRAP_SETUP_TOKEN:}
     supabase:
       issuer-uri: ${SUPABASE_JWT_ISSUER_URI:}

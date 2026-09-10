@@ -72,9 +72,19 @@ tmp/
 **/tmp/
 volumes/
 **/volumes/
+.medol/*.local.yml
+.medol/*.local.yaml
 operations/**/.work/
 deployment-compose-files/
 **/deployment-compose-files/
+
+# Local Kubernetes/K3s environment overlays
+operations/**/secrets.*.yaml
+!operations/**/secrets.example.yaml
+operations/**/k3s/cluster/registries.yaml
+operations/**/k3s/environments/*-registry/
+operations/**/k3s/overlays/*-registry/
+
 # Image and deployment bundles
 *.tar
 *.tar.gz
@@ -84,4 +94,3 @@ deployment-compose-files/
 *.sqlite
 *.sqlite3
 *.db
-

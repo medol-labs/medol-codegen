@@ -84,6 +84,8 @@ operations/**/secrets.*.yaml
 operations/**/k3s/cluster/registries.yaml
 operations/**/k3s/environments/*-registry/**
 operations/**/k3s/overlays/*-registry/**
+operations/**/kubernetes/environments/*-registry/**
+operations/**/kubernetes/overlays/*-registry/**
 
 # Image and deployment bundles
 *.tar

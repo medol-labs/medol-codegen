@@ -142,7 +142,7 @@ function renderOperationsImageScript(model, environment) {
             ]
             : [])
     ].filter(Boolean);
-    const defaultPrefix = model.registry?.imagePrefix ?? model.imagePrefix ?? 'medol';
+    const defaultPrefix = model.registry ? 'medol' : (model.imagePrefix ?? 'medol');
     return `#!/usr/bin/env node
 
 import {copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync} from 'node:fs';

@@ -218,8 +218,9 @@ gen /opt/codegen/.generator/app/ --generator refine --generator-type all
 The `operations` generator reads the same `codegen-model.json` and derives an intermediate `OperationsModel` before rendering platform files. The model keeps application topology, infrastructure, gateway routes, images, ports, health checks, environment defaults, and per-environment overrides separate from renderer-specific details.
 
 Run generators from the generated system root. By default the generator reads
-`.medol/codegen-model.json` and `.medol/medol.yml` from the current directory.
-Legacy `codegen-model.json` at the current directory root is still accepted for
+`.medol/codegen-model.json`, `.medol/medol.yml`, and then optional local
+overrides from `.medol/medol.local.yml` in the current directory. Legacy
+`codegen-model.json` at the current directory root is still accepted for
 compatibility.
 
 Example system workspace:
@@ -246,6 +247,13 @@ generators:
     output: federation-learning-console
   operations:
     output: .
+```
+
+Keep machine-specific settings such as a local development registry in
+`.medol/medol.local.yml`; this file is ignored by the generated workspace
+`.gitignore`:
+
+```yaml
 operations:
   registry:
     host: registry.internal:5000
@@ -308,15 +316,21 @@ federation-learning/
 ```
 
 Each operations environment also includes `images.mjs`, a monorepo-level image
-orchestrator for backend, frontend, runtime-engine, and infrastructure images:
+orchestrator for backend, frontend, and infrastructure images:
 
 ```bash
 node operations/dev/images.mjs list
 node operations/dev/images.mjs all --platform linux/amd64
+node operations/dev/images.mjs build --exclude-service <service>
+node operations/dev/images.mjs build --service <backend-module>
 node operations/dev/images.mjs push --prefix registry.example.com/team
 node operations/dev/images.mjs push-dependencies --prefix registry.example.com/team
 node operations/dev/images.mjs import
 ```
+
+Use `--service` to process only selected application services, or
+`--exclude-service` / `--skip-service` to skip selected services during
+development.
 
 APISIX is generated in standalone mode with declarative YAML and Admin API disabled. Docker Compose is the primary runnable target and includes generated backend services, the generated frontend console, runtime dependencies such as PostgreSQL and UMA DB, optional/profiled Axon Server, optional Redis, volumes, networks, environment placeholders, health checks, and service startup dependencies.
 
@@ -361,11 +375,11 @@ is still accepted for compatibility:
 When `operations.registry` is omitted, generated image names keep the default
 `medol/<service>:<tag>` format. When it is present, the generator derives
 `imagePrefix` as `<host>/<namespace>`, emits a Kubernetes/K3s
-`environments/<environment>-registry` overlay for application and runtime-engine
-image overrides, and emits a K3s `cluster/registries.yaml` file for
-HTTP/insecure registry access. The default `environments/<environment>` overlay
-continues to use `medol/<service>:<tag>` so deployments can still run without a
-registry by importing local images.
+`environments/<environment>-registry` overlay for application image overrides,
+and emits a K3s `cluster/registries.yaml` file for HTTP/insecure registry
+access. The default `environments/<environment>` overlay continues to use
+`medol/<service>:<tag>` so deployments can still run without a registry by
+importing local images.
 
 The generated files use placeholder environment references only. Real passwords, tokens, certificates, and Kubernetes Secret objects must be supplied by the operations environment.
 

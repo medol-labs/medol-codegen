@@ -229,7 +229,7 @@ function renderEnvironmentExample(model, environmentName) {
     ];
 
     resolved.applications.forEach((application) => {
-        lines.push(`${application.envVarPrefix}_IMAGE=${application.image}`);
+        lines.push(`${application.envVarPrefix}_IMAGE=${imageWithTag(localApplicationImageName(application), resolved.imageTag)}`);
         if (application.exposePorts) {
             lines.push(`${application.envVarPrefix}_PORT=${application.hostPort ?? application.servicePort}`);
         }
@@ -256,6 +256,15 @@ function renderPostgresInitSql(model) {
 function databaseName(application) {
     const dbUrl = application.environmentVariables.find((variable) => variable.name === 'DB_URL')?.value;
     return dbUrl?.split('/').pop();
+}
+
+function localApplicationImageName(application) {
+    return `medol/${application.artifactName ?? application.name}`;
+}
+
+function imageWithTag(imageName, tag) {
+    if (!tag || imageName.includes(':')) return imageName;
+    return `${imageName}:${tag}`;
 }
 
 function renderComposeReadme(environmentName) {

@@ -95,15 +95,21 @@ function renderDeployReadme(model, environment) {
         '',
         '## Image Bundle Command',
         '',
-        'Use `images.mjs` to orchestrate generated backend, frontend, runtime-engine, and infrastructure images from this monorepo:',
+        'Use `images.mjs` to orchestrate generated backend, frontend, and infrastructure images from this monorepo:',
         '',
         '```bash',
         'node operations/<environment>/images.mjs list',
         'node operations/<environment>/images.mjs all --platform linux/amd64',
+        'node operations/<environment>/images.mjs build --exclude-service <service>',
+        'node operations/<environment>/images.mjs build --service <backend-module>',
         'node operations/<environment>/images.mjs push --prefix registry.example.com/team',
         'node operations/<environment>/images.mjs push-dependencies --prefix registry.example.com/team',
         'node operations/<environment>/images.mjs import',
         '```',
+        '',
+        'Use `--service` to process only selected application services, or `--exclude-service` / `--skip-service` to skip selected services during development.',
+        '',
+        'When pushing dependency images for K3s registry mirrors, application images use `--prefix` as a registry namespace, while dependency images default to the registry root. For example, `--prefix registry.example.com/team` pushes `postgres:16` to `registry.example.com/library/postgres:16` so containerd mirror rewrites can resolve the original image path.',
         '',
         '## Not Implemented',
         '',
@@ -125,13 +131,22 @@ function renderOperationsImageScript(model, environment) {
             .filter((component) => component.enabled !== false)
             .map((component) => component.image)
             .filter(Boolean),
-        model.gateway?.image
+        model.gateway?.image,
+        ...(model.cluster?.provider === 'k3s' || model.environments?.some((environment) => environment.name === 'dev')
+            ? [
+                'rancher/mirrored-pause:3.6',
+                'rancher/local-path-provisioner:v0.0.31',
+                'rancher/mirrored-library-busybox:1.36.1',
+                'rancher/mirrored-coredns-coredns:1.12.3',
+                'rancher/mirrored-metrics-server:v0.8.0'
+            ]
+            : [])
     ].filter(Boolean);
     const defaultPrefix = model.registry?.imagePrefix ?? model.imagePrefix ?? 'medol';
     return `#!/usr/bin/env node
 
 import {copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync} from 'node:fs';
-import {dirname, join, relative, resolve} from 'node:path';
+import {basename, dirname, join, relative, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
 
@@ -141,6 +156,7 @@ const command = args._[0] ?? 'help';
 const monorepoRoot = resolve(scriptDir, args.root ?? process.env.MONOREPO_ROOT ?? '../..');
 const platform = String(args.platform ?? process.env.DOCKER_DEFAULT_PLATFORM ?? 'linux/amd64');
 const imagePrefix = String(args.prefix ?? process.env.DOCKER_IMAGE_PREFIX ?? '${defaultPrefix}').replace(/\\/+$/g, '');
+const dependencyImagePrefix = String(args['dependency-prefix'] ?? process.env.DEPENDENCY_IMAGE_PREFIX ?? defaultDependencyImagePrefix(imagePrefix)).replace(/\\/+$/g, '');
 const imageVersion = String(args.version ?? process.env.IMAGE_VERSION ?? '${model.imageTag ?? '0.0.1-SNAPSHOT'}');
 const outputRoot = resolve(scriptDir, args.output ?? process.env.IMAGE_BUNDLE_OUTPUT ?? '.work/image-bundle');
 const packageArchive = resolve(scriptDir, args.archive ?? process.env.IMAGE_BUNDLE_ARCHIVE ?? \`\${outputRoot}.tar.gz\`);
@@ -148,13 +164,15 @@ const dryRun = Boolean(args['dry-run']);
 const clean = args.clean !== false && args.clean !== 'false';
 const skipBackend = Boolean(args['skip-backend']);
 const skipConsole = Boolean(args['skip-console']);
-const skipRuntimeEngine = Boolean(args['skip-runtime-engine']);
 const skipDependencies = Boolean(args['skip-dependencies']);
+const serviceIncludes = serviceFilterValues('service', 'include-service', 'only-service');
+const serviceExcludes = serviceFilterValues('exclude-service', 'skip-service');
+const applicationNames = ${JSON.stringify(applicationNames, null, 4)};
+const backendModuleNames = applicationNames.filter((name) => name !== 'console');
 const projectRoots = resolveProjectRoots();
 const appArchives = {
     backend: join(outputRoot, 'images', 'backend-images.tar'),
-    console: join(outputRoot, 'images', 'console-images.tar'),
-    runtimeEngine: join(outputRoot, 'images', 'runtime-engine-images.tar')
+    console: join(outputRoot, 'images', 'console-images.tar')
 };
 const dependencyArchive = join(outputRoot, 'images', 'dependency-images.tar');
 
@@ -217,7 +235,17 @@ function packageImages() {
 
 function buildImages() {
     for (const project of selectedProjects()) {
-        runNode(project.root, ['scripts/image-bundle.mjs', 'build', '--platform', platform, '--prefix', imagePrefix, '--version', imageVersion]);
+        runNode(project.root, [
+            'scripts/image-bundle.mjs',
+            'build',
+            '--platform',
+            platform,
+            '--prefix',
+            imagePrefix,
+            '--version',
+            imageVersion,
+            ...projectImageArgs(project)
+        ]);
     }
 }
 
@@ -232,6 +260,7 @@ function exportImages() {
             imagePrefix,
             '--version',
             imageVersion,
+            ...projectImageArgs(project),
             '--output',
             appArchives[project.key]
         ]);
@@ -247,18 +276,28 @@ function importImages() {
 
 function pushImages() {
     for (const project of selectedProjects()) {
-        runNode(project.root, ['scripts/image-bundle.mjs', 'push', '--platform', platform, '--prefix', imagePrefix, '--version', imageVersion]);
+        runNode(project.root, [
+            'scripts/image-bundle.mjs',
+            'push',
+            '--platform',
+            platform,
+            '--prefix',
+            imagePrefix,
+            '--version',
+            imageVersion,
+            ...projectImageArgs(project)
+        ]);
     }
 }
 
 function pullDependencyImages() {
     if (skipDependencies || !projectRoots.backend) return;
-    runNode(projectRoots.backend, ['scripts/dependency-images.mjs', 'pull', '--platform', platform]);
+    runNode(projectRoots.backend, ['scripts/dependency-images.mjs', 'pull', '--platform', platform, '--image', infrastructureImages().join(',')]);
 }
 
 function exportDependencyImages() {
     if (skipDependencies || !projectRoots.backend) return;
-    runNode(projectRoots.backend, ['scripts/dependency-images.mjs', 'export', '--platform', platform, '--output', dependencyArchive]);
+    runNode(projectRoots.backend, ['scripts/dependency-images.mjs', 'export', '--platform', platform, '--output', dependencyArchive, '--image', infrastructureImages().join(',')]);
 }
 
 function importDependencyImages() {
@@ -280,18 +319,20 @@ function pushDependencyImages() {
 
 function collectComposeFiles() {
     const composeRoot = join(outputRoot, 'compose');
-    if (projectRoots.backend && existsSync(join(projectRoots.backend, 'scripts/collect-deployment-compose-files.mjs'))) {
-        runNode(projectRoots.backend, [
+    const projects = selectedProjects();
+    const backendProject = projects.find((project) => project.key === 'backend');
+    const consoleProject = projects.find((project) => project.key === 'console');
+    if (backendProject && existsSync(join(backendProject.root, 'scripts/collect-deployment-compose-files.mjs'))) {
+        runNode(backendProject.root, [
             'scripts/collect-deployment-compose-files.mjs',
             '--output',
             join(composeRoot, 'backend'),
             '--clean'
         ]);
     } else {
-        copyKnownFiles(projectRoots.backend, join(composeRoot, 'backend'), ['docker-compose.yml', '.env-example']);
+        copyKnownFiles(backendProject?.root, join(composeRoot, 'backend'), ['docker-compose.yml', '.env-example']);
     }
-    copyKnownFiles(projectRoots.console, join(composeRoot, 'console'), ['docker-compose.yml', '.env-example']);
-    copyKnownFiles(projectRoots.runtimeEngine, join(composeRoot, 'runtime-engine'), ['docker-compose.yml', '.env-example']);
+    copyKnownFiles(consoleProject?.root, join(composeRoot, 'console'), ['docker-compose.yml', '.env-example']);
 }
 
 function copyKnownFiles(sourceRoot, targetRoot, files) {
@@ -313,9 +354,10 @@ function writeManifest() {
         environment: '${environment}',
         platform,
         imagePrefix,
+        dependencyImagePrefix,
         imageVersion,
         monorepoRoot,
-        applications: ${JSON.stringify(applicationNames, null, 8)},
+        applications: selectedApplicationNames(),
         infrastructureImages: ${JSON.stringify(infrastructureImages, null, 8)},
         projects: Object.fromEntries(selectedProjects().map((project) => [project.key, project.root])),
         archives: {
@@ -352,18 +394,36 @@ function prepareOutput() {
 }
 
 function selectedProjects() {
+    validateServiceFilters();
+    const selectedBackendModules = backendModuleNames.filter((moduleName) => serviceMatches([moduleName]));
     return [
-        projectRoots.backend && !skipBackend ? {key: 'backend', root: projectRoots.backend} : undefined,
-        projectRoots.console && !skipConsole ? {key: 'console', root: projectRoots.console} : undefined,
-        projectRoots.runtimeEngine && !skipRuntimeEngine ? {key: 'runtimeEngine', root: projectRoots.runtimeEngine} : undefined
+        projectRoots.backend && !skipBackend && selectedBackendModules.length > 0
+            ? {key: 'backend', root: projectRoots.backend, modules: selectedBackendModules}
+            : undefined,
+        projectRoots.console && !skipConsole && serviceMatches(consoleServiceAliases())
+            ? {key: 'console', root: projectRoots.console}
+            : undefined
     ].filter(Boolean);
+}
+
+function selectedApplicationNames() {
+    return [
+        ...backendModuleNames.filter((moduleName) => serviceMatches([moduleName])),
+        ...(projectRoots.console && !skipConsole && serviceMatches(consoleServiceAliases()) ? ['console'] : [])
+    ];
+}
+
+function projectImageArgs(project) {
+    if (project.key === 'backend' && project.modules?.length > 0) {
+        return ['--module', project.modules.join(',')];
+    }
+    return [];
 }
 
 function resolveProjectRoots() {
     return {
-        backend: explicitRoot('backend-root', 'BACKEND_ROOT') ?? findProjectRoot(['federation-learning-platform', 'backend'], isBackendProject),
-        console: explicitRoot('console-root', 'CONSOLE_ROOT') ?? findProjectRoot(['federation-learning-console', 'console', 'frontend'], isConsoleProject),
-        runtimeEngine: explicitRoot('runtime-engine-root', 'RUNTIME_ENGINE_ROOT') ?? findProjectRoot(['federation-learning-runtime-engine', 'runtime-engine'], isRuntimeEngineProject)
+        backend: explicitRoot('backend-root', 'BACKEND_ROOT') ?? findProjectRoot(['backend'], isBackendProject),
+        console: explicitRoot('console-root', 'CONSOLE_ROOT') ?? findProjectRoot(['console', 'frontend'], isConsoleProject)
     };
 }
 
@@ -395,24 +455,22 @@ function isConsoleProject(root) {
     return existsSync(join(root, 'package.json')) && existsSync(join(root, 'Dockerfile')) && existsSync(join(root, 'scripts/image-bundle.mjs'));
 }
 
-function isRuntimeEngineProject(root) {
-    return existsSync(join(root, 'docker/pytorch/Dockerfile')) && existsSync(join(root, 'scripts/image-bundle.mjs'));
-}
-
 function printPlan() {
     console.log('[operations-images] monorepo:', monorepoRoot);
     console.log('[operations-images] environment:', '${environment}');
     console.log('[operations-images] platform:', platform);
     console.log('[operations-images] image prefix:', imagePrefix);
+    console.log('[operations-images] dependency image prefix:', dependencyImagePrefix);
     console.log('[operations-images] image version:', imageVersion);
     console.log('[operations-images] output:', outputRoot);
     console.log('[operations-images] package:', packageArchive);
     console.log('[operations-images] projects:');
     for (const project of selectedProjects()) {
-        console.log(\`  - \${project.key}: \${relative(monorepoRoot, project.root) || '.'}\`);
+        const moduleText = project.modules?.length ? \` (\${project.modules.join(', ')})\` : '';
+        console.log(\`  - \${project.key}\${moduleText}: \${relative(monorepoRoot, project.root) || '.'}\`);
     }
     if (!skipDependencies && projectRoots.backend) {
-        console.log('  - dependencies: backend compose infrastructure images');
+        console.log('  - dependencies: generated infrastructure and K3s system images');
     }
     const dependencyTargets = infrastructureImages().map((image) => \`\${image} -> \${dependencyRegistryImage(image)}\`);
     if (dependencyTargets.length > 0) {
@@ -423,13 +481,57 @@ function printPlan() {
     }
 }
 
+function serviceMatches(aliases) {
+    const normalizedAliases = aliases.map(normalizeServiceName);
+    const included = serviceIncludes.length === 0 || serviceIncludes.some((value) => normalizedAliases.includes(normalizeServiceName(value)));
+    const excluded = serviceExcludes.some((value) => normalizedAliases.includes(normalizeServiceName(value)));
+    return included && !excluded;
+}
+
+function validateServiceFilters() {
+    const allAliases = [
+        ...backendModuleNames,
+        ...consoleServiceAliases()
+    ].map(normalizeServiceName);
+    const unknownIncludes = serviceIncludes.filter((value) => !allAliases.includes(normalizeServiceName(value)));
+    if (unknownIncludes.length > 0) {
+        fail(\`Unknown service filter(s): \${unknownIncludes.join(', ')}. Available: \${[
+            ...backendModuleNames,
+            'console'
+        ].join(', ')}\`);
+    }
+    const unknownExcludes = serviceExcludes.filter((value) => !allAliases.includes(normalizeServiceName(value)));
+    if (unknownExcludes.length > 0) {
+        console.log(\`[operations-images] ignore unmanaged excluded service(s): \${unknownExcludes.join(', ')}\`);
+    }
+}
+
+function consoleServiceAliases() {
+    return unique(['console', 'frontend', projectRoots.console ? basename(projectRoots.console) : undefined]);
+}
+
+function normalizeServiceName(value) {
+    return String(value ?? '').trim().toLowerCase().replace(/_/g, '-');
+}
+
+function serviceFilterValues(...keys) {
+    return keys
+        .flatMap((key) => valuesOf(args[key]))
+        .flatMap((value) => String(value).split(','))
+        .map((value) => value.trim())
+        .filter(Boolean);
+}
+
 function infrastructureImages() {
-    return ${JSON.stringify(infrastructureImages, null, 8)};
+    return unique([
+        ...${JSON.stringify(infrastructureImages, null, 8)},
+        ...extraDependencyImages()
+    ]);
 }
 
 function dependencyRegistryImage(image) {
     const { repository, tag } = splitImage(image);
-    return \`\${imagePrefix}/dependencies/\${repository}:\${tag}\`;
+    return \`\${dependencyImagePrefix}/\${repository}:\${tag}\`;
 }
 
 function splitImage(image) {
@@ -446,6 +548,31 @@ function splitImage(image) {
         repository: repository.includes('/') ? repository : \`library/\${repository}\`,
         tag
     };
+}
+
+function extraDependencyImages() {
+    return String(args['dependency-image'] ?? process.env.EXTRA_DEPENDENCY_IMAGES ?? '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
+}
+
+function defaultDependencyImagePrefix(prefix) {
+    const first = String(prefix ?? '').split('/')[0];
+    return isRegistryHost(first) ? first : \`\${prefix}/dependencies\`;
+}
+
+function isRegistryHost(value) {
+    return value?.includes('.') || value?.includes(':') || value === 'localhost';
+}
+
+function unique(values) {
+    return Array.from(new Set(values.filter(Boolean)));
+}
+
+function valuesOf(value) {
+    if (value == null) return [];
+    return Array.isArray(value) ? value : [value];
 }
 
 function runNode(cwd, commandArgs) {
@@ -497,18 +624,20 @@ function printUsage() {
   node operations/${environment}/images.mjs all [options]
 
 Commands:
-  build                Build backend, frontend, and runtime-engine images.
+  build                Build backend and frontend images.
   export               Save application images into per-project tar archives.
   import               Load application and dependency image archives.
   push                 Push application images to --prefix / DOCKER_IMAGE_PREFIX.
-  pull-dependencies    Pull infrastructure images discovered from backend compose files.
+  pull-dependencies    Pull generated infrastructure and K3s system images.
   export-dependencies  Save infrastructure images into dependency-images.tar.
   import-dependencies  Load dependency-images.tar.
-  push-dependencies    Retag known infrastructure images under <prefix>/dependencies and push them.
+  push-dependencies    Retag dependencies under a registry-root mirror path and push them.
   package, all         Build, pull dependencies, export images, collect compose files, and tar the bundle.
 
 Options:
   --prefix <name>                 Image prefix or registry namespace. Defaults to DOCKER_IMAGE_PREFIX or ${defaultPrefix}.
+  --dependency-prefix <name>      Registry root for dependency mirrors. Defaults to DEPENDENCY_IMAGE_PREFIX, or the registry host from --prefix.
+  --dependency-image <image[,..]> Add extra dependency images to pull/export/push.
   --version <tag>                 Image tag. Defaults to IMAGE_VERSION or ${model.imageTag ?? '0.0.1-SNAPSHOT'}.
   --platform <os/arch>            Docker platform. Defaults to DOCKER_DEFAULT_PLATFORM or linux/amd64.
   --output <dir>                  Bundle directory. Defaults to .work/image-bundle beside this script.
@@ -516,10 +645,11 @@ Options:
   --root <dir>                    Monorepo root. Defaults to ../.. from this operations environment.
   --backend-root <dir>            Override backend project root.
   --console-root <dir>            Override frontend project root.
-  --runtime-engine-root <dir>     Override runtime-engine project root.
+  --service <name[,name]>         Only process selected application services. Can be repeated.
+  --exclude-service <name[,name]> Skip selected application services. Can be repeated.
+  --skip-service <name[,name]>    Alias for --exclude-service.
   --skip-backend                  Skip backend image operations.
   --skip-console                  Skip frontend image operations.
-  --skip-runtime-engine           Skip runtime-engine image operations.
   --skip-dependencies             Skip infrastructure dependency image operations.
   --skip-archive                  Leave package directory unpacked.
   --dry-run                       Print commands without running them.\`);

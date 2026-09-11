@@ -82,8 +82,8 @@ deployment-compose-files/
 operations/**/secrets.*.yaml
 !operations/**/secrets.example.yaml
 operations/**/k3s/cluster/registries.yaml
-operations/**/k3s/environments/*-registry/
-operations/**/k3s/overlays/*-registry/
+operations/**/k3s/environments/*-registry/**
+operations/**/k3s/overlays/*-registry/**
 
 # Image and deployment bundles
 *.tar

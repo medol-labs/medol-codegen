@@ -8,12 +8,15 @@ const path = require('path');
 const { writeGeneratorWorkspaceFiles } = require('./workspace-templates');
 
 function loadMedolWorkspace(cwd, options = {}) {
-    const configPath = resolveMedolConfigPath(cwd, options);
-    const config = configPath ? readConfig(configPath) : {};
+    const configPaths = resolveMedolConfigPaths(cwd, options);
+    const config = configPaths
+        .map((file) => readConfig(file))
+        .reduce((merged, next) => deepMerge(merged, next), {});
     return {
         root: cwd,
         medolDirectory: path.join(cwd, '.medol'),
-        configPath,
+        configPath: configPaths[0],
+        configPaths,
         config,
         codegenModelPath: resolveCodegenModelPath(cwd, options, config),
         translationsPath: resolveTranslationsPath(cwd, options, config)
@@ -47,18 +50,31 @@ function resolveTranslationsPath(cwd, options = {}, config = {}) {
 }
 
 function resolveMedolConfigPath(cwd, options = {}) {
+    return resolveMedolConfigPaths(cwd, options)[0];
+}
+
+function resolveMedolConfigPaths(cwd, options = {}) {
     const explicit = options.medolConfig
         ?? options.medolConfigPath
         ?? options.config
         ?? process.env.MEDOL_CONFIG_PATH;
-    const candidates = [
-        explicit,
+    if (explicit) {
+        const file = absolutePath(cwd, explicit);
+        return fs.existsSync(file) ? [file] : [];
+    }
+    const base = [
         '.medol/medol.yml',
         '.medol/medol.yaml',
         'medol.yml',
         'medol.yaml'
-    ].filter(Boolean).map((candidate) => absolutePath(cwd, candidate));
-    return candidates.find((candidate) => fs.existsSync(candidate));
+    ].map((candidate) => absolutePath(cwd, candidate)).find((candidate) => fs.existsSync(candidate));
+    const local = [
+        '.medol/medol.local.yml',
+        '.medol/medol.local.yaml',
+        'medol.local.yml',
+        'medol.local.yaml'
+    ].map((candidate) => absolutePath(cwd, candidate)).find((candidate) => fs.existsSync(candidate));
+    return [base, local].filter(Boolean);
 }
 
 function generatorConfig(workspace, generatorName) {
@@ -120,6 +136,19 @@ function parseScalar(value) {
     if (unquoted === 'null') return null;
     if (/^-?\d+(\.\d+)?$/.test(unquoted)) return Number(unquoted);
     return unquoted;
+}
+
+function deepMerge(base, override) {
+    if (!isPlainObject(base) || !isPlainObject(override)) return override;
+    const merged = { ...base };
+    Object.entries(override).forEach(([key, value]) => {
+        merged[key] = key in merged ? deepMerge(merged[key], value) : value;
+    });
+    return merged;
+}
+
+function isPlainObject(value) {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function absolutePath(cwd, file) {

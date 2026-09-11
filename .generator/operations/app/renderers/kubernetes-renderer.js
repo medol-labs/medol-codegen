@@ -83,6 +83,7 @@ function kubernetesLikeFiles(model, options) {
     });
     if (options.name.toLowerCase() === 'k3s' && options.environmentName === 'dev') {
         files[`${options.root}/cluster/k3d-dev.yaml`] = renderK3dClusterConfig(baseResolved);
+        files[`${options.root}/scripts/k3d-dev.sh`] = renderK3dDevHelper(baseResolved, options.environmentName);
     }
     if (options.name.toLowerCase() === 'k3s' && resolved.registry?.host) {
         files[`${options.root}/cluster/registries.yaml`] = renderK3sRegistriesConfig(resolved.registry);
@@ -209,10 +210,20 @@ function renderK3dClusterConfig(model) {
                 timeout: '120s'
             },
             k3s: {
-                extraArgs: [{
-                    arg: '--disable=traefik',
-                    nodeFilters: ['server:*']
-                }]
+                extraArgs: [
+                    {
+                        arg: '--disable=traefik',
+                        nodeFilters: ['server:*']
+                    },
+                    {
+                        arg: '--disable-default-registry-endpoint',
+                        nodeFilters: ['server:*']
+                    },
+                    {
+                        arg: '--disable-default-registry-endpoint',
+                        nodeFilters: ['agent:*']
+                    }
+                ]
             }
         }
     });
@@ -220,13 +231,26 @@ function renderK3dClusterConfig(model) {
 
 function renderK3sRegistriesConfig(registry) {
     const endpoint = `${registry.scheme ?? 'http'}://${registry.host}`;
-    return renderYaml({
+    const config = {
         mirrors: {
             [registry.host]: {
                 endpoint: [endpoint]
+            },
+            'docker.io': {
+                endpoint: [endpoint]
             }
         }
-    });
+    };
+    if (registry.insecure === true && endpoint.startsWith('https://')) {
+        config.configs = {
+            [registry.host]: {
+                tls: {
+                    insecure_skip_verify: true
+                }
+            }
+        };
+    }
+    return renderYaml(config);
 }
 
 function registryEnvironmentFiles(baseModel, registryModel, options) {
@@ -686,18 +710,25 @@ function namedMetadata(name, component) {
 
 function renderKubernetesReadme(name, model) {
     const isK3s = name.toLowerCase() === 'k3s';
-    const registryConfigured = Boolean(model?.registry?.host);
     const namespace = model.name;
     const environmentName = model.environment.name;
-    const k3dCreateCommand = registryConfigured
-        ? 'k3d cluster create --config cluster/k3d-dev.yaml --registry-config cluster/registries.yaml'
-        : 'k3d cluster create --config cluster/k3d-dev.yaml';
-    const applicationImages = model?.applications?.map((application) => application.image) ?? [];
+    const applicationImages = model?.applications?.map((application) => imageWithTag(localApplicationImageName(application), model.imageTag)) ?? [];
     const dependencyImages = model?.infrastructure
         ?.filter((component) => component.enabled !== false)
         .map((component) => component.image)
         .filter(Boolean) ?? [];
-    const workloadImages = Array.from(new Set([...applicationImages, ...dependencyImages]));
+    const gatewayImages = model.gateway?.image ? [model.gateway.image] : [];
+    const k3sSystemImages = isK3s
+        ? [
+            'rancher/mirrored-pause:3.6',
+            'rancher/local-path-provisioner:v0.0.31',
+            'rancher/mirrored-library-busybox:1.36.1',
+            'rancher/mirrored-coredns-coredns:1.12.3',
+            'rancher/mirrored-metrics-server:v0.8.0'
+        ]
+        : [];
+    const nonApplicationImages = Array.from(new Set([...dependencyImages, ...gatewayImages, ...k3sSystemImages]));
+    const workloadImages = Array.from(new Set([...applicationImages, ...nonApplicationImages]));
     const applicationNames = model.applications.map((application) => application.name);
     const deploymentNames = [
         ...model.infrastructure.filter((component) => component.enabled !== false).map((component) => component.name),
@@ -742,14 +773,15 @@ function renderKubernetesReadme(name, model) {
         '- `environments/<environment>/configmap.yaml` contains non-sensitive application variables for the environment.',
         '- `environments/<environment>/secrets.example.yaml` documents required and optional secrets without being applied by Kustomize.',
         '- `environments/<environment>/patches/*-envfrom.yaml` attaches environment ConfigMaps and optional per-application Secrets to Deployments.',
-        ...(registryConfigured ? [
-            '- `environments/<environment>-registry/` is generated when `operations.registry` is configured. It rewrites application images to the configured registry.'
-        ] : []),
+        '- `environments/<environment>-registry/` may be generated from local `operations.registry` settings. It rewrites application images to a registry without changing the committed base overlay.',
         ...(isK3s ? [
             '- `cluster/k3d-dev.yaml` creates a disposable local K3s development cluster with k3d.'
         ] : []),
-        ...(isK3s && registryConfigured ? [
-            '- `cluster/registries.yaml` configures K3s/containerd access to the configured registry.'
+        ...(isK3s ? [
+            '- `scripts/k3d-dev.sh` is a local helper for repeated k3d create, apply, restart, and status commands.'
+        ] : []),
+        ...(isK3s ? [
+            '- `cluster/registries.yaml` may be generated from local `operations.registry` settings to configure K3s/containerd registry mirrors.'
         ] : []),
         '',
         '## Before Applying',
@@ -758,32 +790,38 @@ function renderKubernetesReadme(name, model) {
             'For local development with k3d, create the dev cluster from the generated config:',
             '',
             '```bash',
-            k3dCreateCommand,
+            'scripts/k3d-dev.sh recreate',
+            'eval "$(scripts/k3d-dev.sh kubeconfig)"',
+            'scripts/k3d-dev.sh apply',
+            '```',
+            '',
+            'The helper script is generated for local debugging. You can override paths and the cluster name with environment variables.',
+            `\`scripts/k3d-dev.sh apply\` automatically applies \`environments/${environmentName}/secrets.${environmentName}.yaml\` first when the file exists.`,
+            '`PRE_APPLY_FILE` can point at a manifest that must exist before Deployments are applied, such as ServiceAccount and RBAC objects referenced by custom overlays.',
+            'When `REGISTRY_OVERLAY` and `EXTRA_COMPONENT` are both configured, the helper applies a temporary combined overlay so registry image overrides and extra resources are applied together.',
+            '',
+            '```bash',
+            'k3d cluster create --config cluster/k3d-dev.yaml',
+            '# If cluster/registries.yaml was locally generated, use:',
+            '# k3d cluster create --config cluster/k3d-dev.yaml --registry-config cluster/registries.yaml',
             `export KUBECONFIG="$(k3d kubeconfig write ${namespace}-dev)"`,
             'kubectl config current-context',
             '```',
             '',
-            'The config creates one server and two agent nodes, disables the default Traefik addon, and maps host port `30080` to the k3d server node. The generated APISIX NodePort Service also uses `30080`, so APISIX is reachable at `http://localhost:30080/` after applying the manifests.',
+            'The config creates one server and two agent nodes, disables the default Traefik addon, disables default registry endpoint fallback for configured registry mirrors, and maps host port `30080` to the k3d server node. The generated APISIX NodePort Service also uses `30080`, so APISIX is reachable at `http://localhost:30080/` after applying the manifests.',
             '',
-            ...(registryConfigured ? [
-                '## Registry',
-                '',
-                `The default \`environments/${environmentName}\` overlay does not require a registry and keeps images in the \`medol/<service>:<tag>\` form.`,
-                '',
-                `Apply \`environments/${environmentName}-registry\` when images are pushed to \`${model.registry.imagePrefix}\`:`,
-                '',
-                '```bash',
-                `kubectl apply -k environments/${environmentName}-registry`,
-                '```',
-                '',
-                'For native K3s, copy `cluster/registries.yaml` to `/etc/rancher/k3s/registries.yaml` before starting or restarting K3s.',
-                ''
-            ] : [
-                '## Registry',
-                '',
-                'No registry is configured for this environment. Generated image names use the default `medol/<service>:<tag>` form. Build or import those images into each node, or configure `operations.registry` and regenerate the operations files.',
-                ''
-            ])
+            '## Registry',
+            '',
+            `The committed \`environments/${environmentName}\` overlay keeps images in the \`medol/<service>:<tag>\` form.`,
+            '',
+            'For machine-specific registry settings, keep `operations.registry` in `.medol/medol.local.yml` and regenerate operations files. Local registry overlays and `cluster/registries.yaml` are ignored by git.',
+            '',
+            `If \`environments/${environmentName}-registry\` was locally generated, use it in the Apply step after namespace and Secret objects are prepared.`,
+            '',
+            'For native K3s, copy `cluster/registries.yaml` to `/etc/rancher/k3s/registries.yaml` before starting or restarting K3s.',
+            '',
+            'In offline environments, recreate the cluster after changing `cluster/registries.yaml`; K3s/containerd reads this configuration during node startup. If CoreDNS or the pause image is still pulled from Docker Hub, the cluster was created without the registry config or the required system image is missing from the local registry.',
+            ''
         ] : []),
         'Build, push, or import these images on every node that may run the workloads:',
         '',
@@ -793,7 +831,7 @@ function renderKubernetesReadme(name, model) {
         ])),
         '```',
         '',
-        ...(isK3s && !registryConfigured ? [
+        ...(isK3s ? [
             'For local k3s image testing, import image archives into containerd:',
             '',
             '```bash',
@@ -838,6 +876,8 @@ function renderKubernetesReadme(name, model) {
         '```bash',
         `kubectl -n ${namespace} apply -f environments/<environment>/secrets.<environment>.yaml`,
         'kubectl apply -k environments/<environment>',
+        '# Or, when a local registry overlay was generated:',
+        '# kubectl apply -k environments/<environment>-registry',
         ...(iamApplication ? [
             `kubectl -n ${namespace} rollout restart deploy/${iamApplication.name}`,
             `kubectl -n ${namespace} rollout status deploy/${iamApplication.name}`
@@ -858,8 +898,12 @@ function renderKubernetesReadme(name, model) {
         '',
         '## Apply',
         '',
+        'Apply exactly one environment overlay after the namespace and real Secret objects exist:',
+        '',
         '```bash',
         'kubectl apply -k environments/<environment>',
+        '# Or, when a local registry overlay was generated:',
+        '# kubectl apply -k environments/<environment>-registry',
         `kubectl -n ${namespace} get pods,svc,pvc`,
         '```',
         '',
@@ -928,10 +972,10 @@ function renderKubernetesReadme(name, model) {
             'cd <application-build-workspace>',
             'node scripts/build-images.mjs',
             'k3d image import \\',
-            ...applicationImages.map((image, index) => `  ${image}${index === applicationImages.length - 1 ? '' : ' \\'}`),
+            ...applicationImages.map((image) => `  ${image} \\`),
             `  -c ${namespace}-dev`,
             'k3d image import \\',
-            ...dependencyImages.map((image, index) => `  ${image}${index === dependencyImages.length - 1 ? '' : ' \\'}`),
+            ...nonApplicationImages.map((image) => `  ${image} \\`),
             `  -c ${namespace}-dev`,
             `kubectl -n ${namespace} rollout restart ${applicationNames.map((application) => `deploy/${application}`).join(' ')}`,
             '```',
@@ -940,12 +984,12 @@ function renderKubernetesReadme(name, model) {
             '',
             '```bash',
             'docker save \\',
-            ...applicationImages.map((image, index) => `  ${image}${index === applicationImages.length - 1 ? '' : ' \\'}`),
+            ...applicationImages.map((image) => `  ${image} \\`),
             `  -o /tmp/${namespace}-application-images.tar`,
             `sudo k3s ctr images import /tmp/${namespace}-application-images.tar`,
             '',
             'docker save \\',
-            ...dependencyImages.map((image, index) => `  ${image}${index === dependencyImages.length - 1 ? '' : ' \\'}`),
+            ...nonApplicationImages.map((image) => `  ${image} \\`),
             `  -o /tmp/${namespace}-dependency-images.tar`,
             `sudo k3s ctr images import /tmp/${namespace}-dependency-images.tar`,
             `sudo k3s ctr images ls | grep ${namespace}`,
@@ -1000,6 +1044,196 @@ function renderKubernetesReadme(name, model) {
         '- Kustomize overlays are the right place for image tags, replica counts, resources, storage class names, node selectors, tolerations, registry pull secrets, and TLS-specific gateway changes.',
         ''
     ].join('\n');
+}
+
+function renderK3dDevHelper(model, environmentName) {
+    const namespace = model.name;
+    const deployments = [
+        ...model.applications.map((application) => application.name),
+        ...(model.gateway?.enabled ? [model.gateway.name] : [])
+    ];
+    const deploymentArgs = deployments
+        .map((deployment, index) => index === deployments.length - 1
+            ? `        deploy/${deployment}`
+            : `        deploy/${deployment} \\`)
+        .join('\n');
+    return `#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+K3S_DIR="$(cd "\${SCRIPT_DIR}/.." && pwd)"
+WORK_DIR="\${K3S_DIR}/.work"
+
+CLUSTER_NAME="\${CLUSTER_NAME:-${namespace}-dev}"
+NAMESPACE="\${NAMESPACE:-${namespace}}"
+K3D_CONFIG="\${K3D_CONFIG:-\${K3S_DIR}/cluster/k3d-dev.yaml}"
+REGISTRY_CONFIG="\${REGISTRY_CONFIG:-\${K3S_DIR}/cluster/registries.yaml}"
+KUBECONFIG_FILE="\${KUBECONFIG_FILE:-\${WORK_DIR}/kubeconfig-\${CLUSTER_NAME}.yaml}"
+ENVIRONMENT_OVERLAY="\${ENVIRONMENT_OVERLAY:-\${K3S_DIR}/environments/${environmentName}}"
+REGISTRY_OVERLAY="\${REGISTRY_OVERLAY:-\${K3S_DIR}/environments/${environmentName}-registry}"
+SECRETS_FILE="\${SECRETS_FILE:-\${K3S_DIR}/environments/${environmentName}/secrets.${environmentName}.yaml}"
+EXTRA_COMPONENT="\${EXTRA_COMPONENT:-}"
+EXTRA_OVERLAY="\${EXTRA_OVERLAY:-}"
+PRE_APPLY_FILE="\${PRE_APPLY_FILE:-}"
+
+command="\${1:-help}"
+
+usage() {
+    cat <<USAGE
+Usage:
+  $0 create        Create the dev k3d cluster and write kubeconfig
+  $0 recreate      Delete and create the dev k3d cluster
+  $0 delete        Delete the dev k3d cluster
+  $0 kubeconfig    Write kubeconfig and print export command
+  $0 apply         Apply the dev manifests
+  $0 restart       Roll out restart generated application deployments
+  $0 status        Show pods, services, pvc, and recent events
+
+Environment overrides:
+  CLUSTER_NAME=\${CLUSTER_NAME}
+  NAMESPACE=\${NAMESPACE}
+  K3D_CONFIG=\${K3D_CONFIG}
+  REGISTRY_CONFIG=\${REGISTRY_CONFIG}
+  KUBECONFIG_FILE=\${KUBECONFIG_FILE}
+  ENVIRONMENT_OVERLAY=\${ENVIRONMENT_OVERLAY}
+  REGISTRY_OVERLAY=\${REGISTRY_OVERLAY}
+  SECRETS_FILE=\${SECRETS_FILE}
+  EXTRA_COMPONENT=\${EXTRA_COMPONENT}
+  EXTRA_OVERLAY=\${EXTRA_OVERLAY}
+  PRE_APPLY_FILE=\${PRE_APPLY_FILE}
+USAGE
+}
+
+ensure_work_dir() {
+    mkdir -p "\${WORK_DIR}"
+}
+
+registry_args() {
+    if [[ -f "\${REGISTRY_CONFIG}" ]]; then
+        printf '%s\\n' "--registry-config" "\${REGISTRY_CONFIG}"
+    fi
+}
+
+kustomize_path() {
+    local path="$1"
+    if [[ "\${path}" == "\${K3S_DIR}/"* ]]; then
+        printf '../../%s\\n' "\${path#"\${K3S_DIR}/"}"
+    else
+        printf '%s\\n' "\${path}"
+    fi
+}
+
+apply_overlay() {
+    local overlay="$1"
+    if [[ -f "\${EXTRA_COMPONENT}/kustomization.yaml" ]]; then
+        local combined="\${WORK_DIR}/apply-overlay"
+        rm -rf "\${combined}"
+        mkdir -p "\${combined}"
+        cat > "\${combined}/kustomization.yaml" <<YAML
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - "$(kustomize_path "\${overlay}")"
+components:
+  - "$(kustomize_path "\${EXTRA_COMPONENT}")"
+YAML
+        echo "[k3d-dev] kubectl apply -k \${combined}"
+        kubectl apply -k "\${combined}"
+        return
+    fi
+    echo "[k3d-dev] kubectl apply -k \${overlay}"
+    kubectl apply -k "\${overlay}"
+    if [[ -n "\${EXTRA_OVERLAY}" && -f "\${EXTRA_OVERLAY}/kustomization.yaml" ]]; then
+        echo "[k3d-dev] kubectl apply -k \${EXTRA_OVERLAY}"
+        kubectl apply -k "\${EXTRA_OVERLAY}"
+    fi
+}
+
+create_cluster() {
+    ensure_work_dir
+    local args=("--config" "\${K3D_CONFIG}")
+    while IFS= read -r item; do
+        args+=("\${item}")
+    done < <(registry_args)
+    echo "[k3d-dev] k3d cluster create \${args[*]}"
+    k3d cluster create "\${args[@]}"
+    write_kubeconfig
+}
+
+delete_cluster() {
+    echo "[k3d-dev] k3d cluster delete \${CLUSTER_NAME}"
+    k3d cluster delete "\${CLUSTER_NAME}"
+}
+
+write_kubeconfig() {
+    ensure_work_dir
+    echo "[k3d-dev] writing kubeconfig: \${KUBECONFIG_FILE}" >&2
+    k3d kubeconfig write "\${CLUSTER_NAME}" --output "\${KUBECONFIG_FILE}" >/dev/null
+    echo "export KUBECONFIG=\${KUBECONFIG_FILE}"
+}
+
+apply_manifests() {
+    local overlay="\${ENVIRONMENT_OVERLAY}"
+    if [[ -f "\${REGISTRY_OVERLAY}/kustomization.yaml" ]]; then
+        overlay="\${REGISTRY_OVERLAY}"
+    fi
+    echo "[k3d-dev] ensure namespace \${NAMESPACE}"
+    kubectl create namespace "\${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+    if [[ -f "\${SECRETS_FILE}" ]]; then
+        echo "[k3d-dev] kubectl -n \${NAMESPACE} apply -f \${SECRETS_FILE}"
+        kubectl -n "\${NAMESPACE}" apply -f "\${SECRETS_FILE}"
+    else
+        echo "[k3d-dev] skip missing secrets file: \${SECRETS_FILE}"
+    fi
+    if [[ -f "\${PRE_APPLY_FILE}" ]]; then
+        echo "[k3d-dev] kubectl -n \${NAMESPACE} apply -f \${PRE_APPLY_FILE}"
+        kubectl -n "\${NAMESPACE}" apply -f "\${PRE_APPLY_FILE}"
+    fi
+    apply_overlay "\${overlay}"
+}
+
+restart_apps() {
+    kubectl -n "\${NAMESPACE}" rollout restart \\
+${deploymentArgs}
+}
+
+show_status() {
+    kubectl -n "\${NAMESPACE}" get pods,svc,pvc
+    kubectl -n "\${NAMESPACE}" get events --sort-by=.lastTimestamp | tail -n 40
+}
+
+case "\${command}" in
+    create)
+        create_cluster
+        ;;
+    recreate)
+        delete_cluster || true
+        create_cluster
+        ;;
+    delete)
+        delete_cluster
+        ;;
+    kubeconfig)
+        write_kubeconfig
+        ;;
+    apply)
+        apply_manifests
+        ;;
+    restart)
+        restart_apps
+        ;;
+    status)
+        show_status
+        ;;
+    help|--help|-h)
+        usage
+        ;;
+    *)
+        usage
+        exit 1
+        ;;
+esac
+`;
 }
 
 module.exports = {

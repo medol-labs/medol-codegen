@@ -113,6 +113,9 @@ test('generates operations target file sets', () => {
     assert(files['operations/dev/infrastructure/apisix/apisix.yaml']);
     assert(files['operations/dev/images.mjs']);
     assert.match(files['operations/dev/images.mjs'], /node operations\/dev\/images\.mjs package/);
+    assert.match(files['operations/dev/images.mjs'], /--exclude-service <name\[,name\]>/);
+    assert.match(files['operations/dev/images.mjs'], /projectImageArgs\(project\)/);
+    assert.doesNotMatch(files['operations/dev/images.mjs'], /runtime-engine-images|RUNTIME_ENGINE_ROOT|skip-runtime-engine/);
     assert(files['operations/dev/docker-compose/docker-compose.yml']);
     assert(files['operations/dev/.env-example']);
     assert(files['operations/dev/kubernetes/base/applications.yaml']);
@@ -123,6 +126,11 @@ test('generates operations target file sets', () => {
     assert(!files['operations/dev/kubernetes/environments/prod/kustomization.yaml']);
     assert(files['operations/dev/k3s/base/apisix.yaml']);
     assert(files['operations/dev/k3s/cluster/k3d-dev.yaml']);
+    assert(files['operations/dev/k3s/scripts/k3d-dev.sh']);
+    assert.match(files['operations/dev/k3s/scripts/k3d-dev.sh'], /CLUSTER_NAME="\$\{CLUSTER_NAME:-learning-platform-dev\}"/);
+    assert.match(files['operations/dev/k3s/scripts/k3d-dev.sh'], /PRE_APPLY_FILE="\$\{PRE_APPLY_FILE:-\}"/);
+    assert.match(files['operations/dev/k3s/scripts/k3d-dev.sh'], /kubectl -n "\$\{NAMESPACE\}" apply -f "\$\{PRE_APPLY_FILE\}"/);
+    assert.match(files['operations/dev/k3s/scripts/k3d-dev.sh'], /kubectl -n "\$\{NAMESPACE\}" rollout restart/);
     assert(files['operations/dev/harbor/README.md']);
     assert(files['operations/dev/harbor/.env-example']);
     assert(files['operations/dev/harbor/harbor.yml-example']);
@@ -207,6 +215,10 @@ test('derives image names and K3s registry configuration from optional registry 
     );
     assert.match(
         k3s['dev/k3s/cluster/registries.yaml'],
+        /"docker\.io":/
+    );
+    assert.match(
+        k3s['dev/k3s/cluster/registries.yaml'],
         /"http:\/\/registry\.internal:5000"/
     );
 });
@@ -229,23 +241,75 @@ test('loads operations registry configuration from .medol/medol.yml', () => {
     assert.equal(model.imagePrefix, 'registry.internal:5000/team');
 });
 
-test('does not infer platform runtime scheduling from application names', () => {
+test('loads local operations registry overrides from .medol/medol.local.yml', () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'operations-workspace-'));
+    fs.mkdirSync(path.join(workspace, '.medol'));
+    fs.writeFileSync(path.join(workspace, '.medol/medol.yml'), [
+        'operations:',
+        '  registry:',
+        '    host: registry.internal:5000',
+        '    namespace: committed',
+        '    insecure: true',
+        ''
+    ].join('\n'));
+    fs.writeFileSync(path.join(workspace, '.medol/medol.local.yml'), [
+        'operations:',
+        '  registry:',
+        '    namespace: local',
+        ''
+    ].join('\n'));
+
+    const operationsConfig = loadOperationsConfig(workspace, loadMedolWorkspace(workspace));
+    const model = buildOperationsModel(sampleModel, operationsConfig);
+
+    assert.deepEqual(loadMedolWorkspace(workspace).configPaths.map((file) => path.basename(file)), [
+        'medol.yml',
+        'medol.local.yml'
+    ]);
+    assert.equal(model.imagePrefix, 'registry.internal:5000/local');
+    assert.equal(model.registry.insecure, true);
+});
+
+test('pushes dependency mirrors under the registry root instead of the application namespace', () => {
+    const model = buildOperationsModel(sampleModel, {
+        operations: {
+            registry: {
+                host: 'registry.internal:5000',
+                namespace: 'team',
+                insecure: true
+            }
+        }
+    });
+    const script = generateOperationsFiles(model, { target: 'model', environment: 'dev' })['operations/dev/images.mjs'];
+
+    assert.match(script, /const dependencyImagePrefix = String/);
+    assert.match(script, /rancher\/mirrored-pause:3\.6/);
+    assert.match(script, /rancher\/local-path-provisioner:v0\.0\.31/);
+    assert.match(script, /rancher\/mirrored-library-busybox:1\.36\.1/);
+    assert.match(script, /rancher\/mirrored-coredns-coredns:1\.12\.3/);
+    assert.match(script, /rancher\/mirrored-metrics-server:v0\.8\.0/);
+    assert.match(script, /defaultDependencyImagePrefix\(imagePrefix\)/);
+    assert.doesNotMatch(script, /imagePrefix}\/dependencies/);
+    assert.match(script, /--image', infrastructureImages\(\)\.join\(','\)/);
+});
+
+test('does not infer custom scheduling from application names', () => {
     const generatedModel = buildOperationsModel({
-        domain: 'FederationLearningPlatform',
+        domain: 'LearningPlatform',
         deployments: [{
-            name: 'FederationLearningSupport',
-            title: 'Federation Learning Support',
+            name: 'LearningSupport',
+            title: 'Learning Support',
             contexts: [
                 { name: 'SupportContext', title: 'Support Context' },
                 { name: 'IdentityAccessManagement', title: 'Identity Access Management' }
             ]
         }, {
-            name: 'FederationLearningPlatform',
-            title: 'Federation Learning Platform',
+            name: 'LearningPlatform',
+            title: 'Learning Platform',
             contexts: [{ name: 'RuntimeProvisioning', title: 'Runtime Provisioning' }]
         }, {
-            name: 'FederationLearningRuntimeAgent',
-            title: 'Federation Learning Runtime Agent',
+            name: 'LearningWorker',
+            title: 'Learning Worker',
             contexts: [{ name: 'RuntimeAgentOperations', title: 'Runtime Agent Operations' }]
         }],
         contexts: []
@@ -253,16 +317,14 @@ test('does not infer platform runtime scheduling from application names', () => 
     const k3s = k3sFiles(generatedModel, { environmentName: 'staging' });
 
     assert(!k3s['staging/k3s/cluster/k3d-dev.yaml']);
-    assert.doesNotMatch(k3s['staging/k3s/base/kustomization.yaml'], /runtime-agent-scheduler-rbac.yaml/);
-    assert(!k3s['staging/k3s/base/runtime-agent-scheduler-rbac.yaml']);
-    assert.doesNotMatch(k3s['staging/k3s/base/applications.yaml'], /serviceAccountName: "federation-learning-platform-runtime-agent-scheduler"/);
+    assert.doesNotMatch(k3s['staging/k3s/base/applications.yaml'], /serviceAccountName:/);
     assert.doesNotMatch(k3s['staging/k3s/base/applications.yaml'], /mountPath: "\/workspace\/datasets"/);
     assert.doesNotMatch(k3s['staging/k3s/environments/staging/configmap.yaml'], /PLATFORM_RUNTIME_K3S_NAMESPACE/);
     assert.doesNotMatch(k3s['staging/k3s/environments/staging/configmap.yaml'], /RUNTIME_AGENT_LOCAL_RUNTIME_ENGINE_MODE/);
     assert.doesNotMatch(k3s['staging/k3s/README.md'], /Platform-Managed Runtime Agent Startup/);
-    assert.match(k3s['staging/k3s/environments/staging/configmap.yaml'], /name: "federation-learning-support-staging-config"[\s\S]*MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED: "true"/);
+    assert.match(k3s['staging/k3s/environments/staging/configmap.yaml'], /name: "learning-support-staging-config"[\s\S]*MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED: "true"/);
     assert.doesNotMatch(k3s['staging/k3s/environments/staging/configmap.yaml'], /MEDOL_SECURITY_ALLOWED_ORIGINS/);
-    assert.match(k3s['staging/k3s/environments/staging/secrets.example.yaml'], /name: "federation-learning-support-staging-secret"[\s\S]*MEDOL_SECURITY_ADMIN_BOOTSTRAP_SETUP_TOKEN/);
+    assert.match(k3s['staging/k3s/environments/staging/secrets.example.yaml'], /name: "learning-support-staging-secret"[\s\S]*MEDOL_SECURITY_ADMIN_BOOTSTRAP_SETUP_TOKEN/);
 });
 
 test('renders browser CORS origins for the dev K3s gateway', () => {

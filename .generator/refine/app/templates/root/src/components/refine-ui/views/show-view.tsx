@@ -29,6 +29,7 @@ export function ShowView({ children, className }: ShowViewProps) {
 type ShowViewHeaderProps = PropsWithChildren<{
   resource?: string;
   title?: string;
+  showEditButton?: boolean;
   wrapperClassName?: string;
   headerClassName?: string;
 }>;
@@ -36,6 +37,7 @@ type ShowViewHeaderProps = PropsWithChildren<{
 export const ShowViewHeader = ({
   resource: resourceFromProps,
   title: titleFromProps,
+  showEditButton = false,
   wrapperClassName,
   headerClassName,
 }: ShowViewHeaderProps) => {
@@ -91,11 +93,13 @@ export const ShowViewHeader = ({
             recordItemId={recordItemId}
             resource={resourceName}
           />
-          <EditButton
-            variant="outline"
-            recordItemId={recordItemId}
-            resource={resourceName}
-          />
+          {showEditButton && (
+            <EditButton
+              variant="outline"
+              recordItemId={recordItemId}
+              resource={resourceName}
+            />
+          )}
         </div>
       </div>
     </div>

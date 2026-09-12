@@ -459,6 +459,20 @@ function withPrefillFields(commands, resourceFields) {
             rowPrefillFields: command.prefillCandidateFields.filter((field) => resourceFieldNames.has(field.name)),
             prefillFields,
             hiddenPrefillFields: prefillFields.filter((field) => !formFieldNames.has(field.name)),
+            defaultValueEntries: uniqueFields([
+                ...prefillFields.map((field) => ({
+                    name: field.name,
+                    value: field.searchParamDefault
+                })),
+                ...(command.snapshotFields ?? []).map((field) => ({
+                    name: field.name,
+                    value: field.searchParamDefault
+                })),
+                ...(command.defaultValueFields ?? []).map((field) => ({
+                    name: field.name,
+                    value: field.defaultValue
+                }))
+            ]),
             hasSelectFields: command.fields.some((field) => field.select)
         };
     });

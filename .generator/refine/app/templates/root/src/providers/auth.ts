@@ -354,26 +354,8 @@ const authProvider: AuthProvider = {
   },
   check: async () => {
     try {
-      if (await getAccessToken() && cachedCurrentUser()) {
-        await fetchCurrentUser();
-
-        return {
-          authenticated: true,
-        };
-      }
-
-      if (authProviderMode() === "local") {
-        await fetchCurrentUser();
-
-        return {
-          authenticated: true,
-        };
-      }
-
-      const { data } = await supabaseClient.auth.getSession();
-      const { session } = data;
-
-      if (!session) {
+      const token = await getAccessToken();
+      if (!token) {
         return {
           authenticated: false,
           error: {
@@ -382,6 +364,12 @@ const authProvider: AuthProvider = {
           },
           logout: true,
           redirectTo: "/login",
+        };
+      }
+
+      if (cachedCurrentUser()) {
+        return {
+          authenticated: true,
         };
       }
 

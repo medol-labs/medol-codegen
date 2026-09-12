@@ -170,11 +170,8 @@ export const <%= command.pageComponent %> = () => {
   const [commandResult, setCommandResult] = useState<Record<string, unknown> | null>(null);
 <% } -%>
   const defaultValues = {
-<% command.prefillFields.forEach((field) => { -%>
-    <%= field.name %>: <%- field.searchParamDefault %>,
-<% }) -%>
-<% command.defaultValueFields.forEach((field) => { -%>
-    <%= field.name %>: <%- field.defaultValue %>,
+<% command.defaultValueEntries.forEach((field) => { -%>
+    <%= field.name %>: <%- field.value %>,
 <% }) -%>
   } as unknown as Partial<<%= command.inputTypeName %>>;
 
@@ -354,7 +351,9 @@ export const <%= command.pageComponent %> = () => {
 <% }) -%>
 <% const hiddenPrefillFieldNames = new Set(command.hiddenPrefillFields.map((field) => field.name)); -%>
 <% command.snapshotFields.filter((field) => !hiddenPrefillFieldNames.has(field.name)).forEach((field) => { -%>
-          <input type="hidden" {...form.register("<%= field.name %>" as never)} />
+          {defaultValues.<%= field.name %> !== undefined && defaultValues.<%= field.name %> !== null ? (
+            <input type="hidden" {...form.register("<%= field.name %>" as never)} />
+          ) : null}
 <% }) -%>
 <% command.fields.forEach((field) => { -%>
 <% if (field.object && field.list) { -%>

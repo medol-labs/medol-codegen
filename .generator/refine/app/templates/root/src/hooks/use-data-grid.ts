@@ -159,6 +159,7 @@ function useDataGrid<TData>({
   const cellMapRef = React.useRef<Map<string, HTMLDivElement>>(new Map());
   const footerRef = React.useRef<HTMLDivElement>(null);
   const focusGuardRef = React.useRef(false);
+  const outsideGridPointerDownRef = React.useRef(false);
 
   const propsRef = useAsRef({
     ...props,
@@ -3132,6 +3133,7 @@ function useDataGrid<TData>({
 
       const currentContainer = dataGridRef.current;
       if (!currentContainer) return;
+      if (outsideGridPointerDownRef.current) return;
 
       const currentState = store.getState();
 
@@ -3167,6 +3169,34 @@ function useDataGrid<TData>({
       container.removeEventListener("focusout", onFocusOut);
     };
   }, [store]);
+
+  React.useEffect(() => {
+    function clearOutsideGridPointerDown() {
+      outsideGridPointerDownRef.current = false;
+    }
+
+    function onPointerDown(event: PointerEvent) {
+      const currentContainer = dataGridRef.current;
+      const target = event.target;
+
+      if (!currentContainer || !(target instanceof Node)) {
+        clearOutsideGridPointerDown();
+        return;
+      }
+
+      outsideGridPointerDownRef.current =
+        !currentContainer.contains(target) && !getIsInPopover(target);
+
+      if (outsideGridPointerDownRef.current) {
+        window.setTimeout(clearOutsideGridPointerDown, 0);
+      }
+    }
+
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+    };
+  }, []);
 
   React.useEffect(() => {
     function onOutsideClick(event: MouseEvent) {
@@ -3206,6 +3236,34 @@ function useDataGrid<TData>({
       document.removeEventListener("mousedown", onOutsideClick);
     };
   }, [store, blurCell, onSelectionClear]);
+
+  React.useEffect(() => {
+    function onSelectionEnd() {
+      const currentState = store.getState();
+      if (!currentState.selectionState.isSelecting) return;
+
+      store.setState("selectionState", {
+        ...currentState.selectionState,
+        isSelecting: false,
+      });
+    }
+
+    function onVisibilityChange() {
+      if (document.visibilityState === "hidden") {
+        onSelectionEnd();
+      }
+    }
+
+    document.addEventListener("mouseup", onSelectionEnd);
+    window.addEventListener("blur", onSelectionEnd);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      document.removeEventListener("mouseup", onSelectionEnd);
+      window.removeEventListener("blur", onSelectionEnd);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [store]);
 
   React.useEffect(() => {
     function onSelectStart(event: Event) {

@@ -436,6 +436,7 @@ test('uses derived lookup command fields as hidden display snapshots for id sele
 
     assert.deepEqual(command?.fields.map((field) => field.name), ['productId']);
     assert.deepEqual(command?.snapshotFields.map((field) => field.name), ['selectedProductName']);
+    assert.deepEqual(command?.defaultValueEntries.map((field) => field.name), ['orderId', 'selectedProductName']);
     assert.equal(command?.fields[0]?.select?.resource, 'product_catalog');
     assert.equal(command?.fields[0]?.select?.optionValue, 'productId');
     assert.equal(command?.fields[0]?.select?.optionLabel, 'productName');

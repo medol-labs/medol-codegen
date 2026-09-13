@@ -65,6 +65,47 @@ test('builds operations model applications, infrastructure, gateway, and environ
     assert.equal(model.environments.find((environment) => environment.name === 'prod').applicationOverrides['federation-service'].exposePorts, false);
 });
 
+test('builds operations topology for multiple frontend applications', () => {
+    const model = buildOperationsModel({
+        ...sampleModel,
+        frontendApplications: [{
+            name: 'LearningConsole',
+            title: 'Learning Console',
+            contexts: [{
+                name: 'FederationContext',
+                backend: 'FederationService'
+            }]
+        }, {
+            name: 'ParticipantConsole',
+            title: 'Participant Console',
+            contexts: [{
+                name: 'DatasetContext',
+                backend: 'DatasetService'
+            }]
+        }]
+    });
+    const script = generateOperationsFiles(model, { target: 'model', environment: 'dev' })['operations/dev/images.mjs'];
+
+    assert.deepEqual(model.applications.map((application) => application.name), [
+        'learning-console',
+        'participant-console',
+        'federation-service',
+        'dataset-service'
+    ]);
+    assert.equal(model.applications.find((application) => application.name === 'learning-console').imageName, 'medol/learning-console');
+    assert.equal(model.applications.find((application) => application.name === 'participant-console').bundledWithBackend, 'dataset-service');
+    assert.deepEqual(
+        model.gateway.routes.filter((route) => route.upstreamId.includes('console')).map((route) => route.paths[0]),
+        ['/*', '/participant-console/*']
+    );
+    assert.match(script, /frontendApplications = /);
+    assert.match(script, /learning-console-images\.tar/);
+    assert.match(script, /participant-console-images\.tar/);
+    assert.match(script, /VITE_FRONTEND_APP=\$\{project\.application\.frontendApplicationName\}/);
+    assert.match(script, /"bundledWithBackend": "dataset-service"/);
+    assert.doesNotMatch(script, /"console": "console-images\.tar"/);
+});
+
 test('derives gateway paths from service naming conventions', () => {
     assert.equal(gatewayPathForApplication('federation-service', {}), '/api/federations');
     assert.equal(gatewayPathForApplication('dataset-service', {}), '/api/datasets');
@@ -220,6 +261,10 @@ test('derives image names and K3s registry configuration from optional registry 
     assert.match(
         k3s['dev/k3s/cluster/registries.yaml'],
         /"http:\/\/registry\.internal:5000"/
+    );
+    assert.match(
+        generateOperationsFiles(model, { target: 'model', environment: 'dev' })['operations/dev/images.mjs'],
+        /DOCKER_IMAGE_PREFIX \?\? 'registry\.internal:5000\/team'/
     );
 });
 

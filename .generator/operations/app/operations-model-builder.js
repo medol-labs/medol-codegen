@@ -22,11 +22,9 @@ function buildOperationsModel(source = {}, config = {}) {
     const imagePrefix = trimSlash(operationsConfig.imagePrefix ?? registry?.imagePrefix ?? DEFAULT_IMAGE_PREFIX);
     const imageTag = operationsConfig.imageTag ?? operationsConfig.tag ?? DEFAULT_IMAGE_TAG;
     const backendApplications = buildBackendApplications(source, operationsConfig, imagePrefix);
-    const frontend = operationsConfig.frontend?.enabled === false
-        ? []
-        : [buildFrontendApplication(systemName, operationsConfig, imagePrefix, backendApplications)];
+    const frontends = buildFrontendApplications(source, systemName, operationsConfig, imagePrefix, backendApplications);
     const infrastructure = buildInfrastructure(operationsConfig);
-    const applications = [...frontend, ...backendApplications];
+    const applications = [...frontends, ...backendApplications];
     const gateway = operationsConfig.gateway?.enabled === false
         ? undefined
         : buildGateway(applications, backendApplications, operationsConfig);
@@ -134,28 +132,65 @@ function buildBackendApplications(source, operationsConfig, imagePrefix) {
     });
 }
 
-function buildFrontendApplication(systemName, operationsConfig, imagePrefix, backendApplications) {
+function buildFrontendApplications(source, systemName, operationsConfig, imagePrefix, backendApplications) {
     const frontendConfig = operationsConfig.frontend ?? {};
-    const name = frontendConfig.name ?? 'console';
+    if (frontendConfig.enabled === false) {
+        return [];
+    }
+
+    const modeledApplications = source.frontendApplications ?? [];
+    if (modeledApplications.length === 0) {
+        return [buildFrontendApplication({
+            name: frontendConfig.name ?? 'console',
+            title: frontendConfig.title ?? 'Frontend Console',
+            contexts: []
+        }, systemName, operationsConfig, imagePrefix, backendApplications, 0, true)];
+    }
+
+    return modeledApplications.map((application, index) => buildFrontendApplication(
+        application,
+        systemName,
+        operationsConfig,
+        imagePrefix,
+        backendApplications,
+        index,
+        false
+    ));
+}
+
+function buildFrontendApplication(application, systemName, operationsConfig, imagePrefix, backendApplications, index, legacyConsole) {
+    const frontendConfig = operationsConfig.frontend ?? {};
+    const frontendConfigs = operationsConfig.frontends ?? frontendConfig.applications ?? {};
+    const modeledName = legacyConsole ? application.name : operationsKebab(application.name ?? application.title);
+    const name = operationsKebab(frontendConfigs[modeledName]?.name ?? modeledName) || `frontend-${index + 1}`;
+    const override = frontendConfigs[name] ?? frontendConfigs[application.name] ?? frontendConfigs[modeledName] ?? (legacyConsole ? frontendConfig : {});
+    const targetBackends = frontendBackendApplications(application, backendApplications);
+    const gatewayPath = override.gatewayPath ?? frontendGatewayPath(name, index, legacyConsole);
+
     return {
         kind: 'frontend',
         name,
-        title: frontendConfig.title ?? 'Frontend Console',
-        artifactName: frontendConfig.artifactName ?? `${systemName}-console`,
-        imageName: frontendConfig.imageName ?? `${imagePrefix}/${systemName}-console`,
-        servicePort: frontendConfig.servicePort ?? 80,
+        title: override.title ?? application.title ?? cleanTitle(application.name) ?? 'Frontend Console',
+        frontendApplicationName: legacyConsole ? undefined : application.name,
+        artifactName: override.artifactName ?? (legacyConsole ? `${systemName}-console` : name),
+        imageName: override.imageName ?? `${imagePrefix}/${legacyConsole ? `${systemName}-console` : name}`,
+        servicePort: override.servicePort ?? frontendConfig.servicePort ?? 80,
         exposeExternally: false,
+        gatewayPath,
+        bundledWithBackend: targetBackends.length === 1 ? targetBackends[0].name : undefined,
         environmentVariables: [
             { name: 'VITE_API_URL', value: frontendConfig.supabaseUrl ?? 'https://iwdfzvfqbtokqetmbmbp.supabase.co' },
             { name: 'VITE_SUPABASE_API_KEY', value: '${VITE_SUPABASE_API_KEY:-}' },
-            ...backendApplications.map((application) => ({
-                name: `VITE_${application.envVarPrefix}_API_URL`,
-                value: application.gatewayPath
+            ...(application.name && !legacyConsole ? [{ name: 'VITE_FRONTEND_APP', value: application.name }] : []),
+            ...targetBackends.map((backend) => ({
+                name: `VITE_${backend.envVarPrefix}_API_URL`,
+                value: backend.gatewayPath
             })),
-            ...(backendApplications[0]
-                ? [{ name: 'VITE_AXON_API_URL', value: backendApplications[0].gatewayPath }]
+            ...(targetBackends[0]
+                ? [{ name: 'VITE_AXON_API_URL', value: targetBackends[0].gatewayPath }]
                 : []),
-            ...(frontendConfig.environmentVariables ?? [])
+            ...(frontendConfig.environmentVariables ?? []),
+            ...(override.environmentVariables ?? [])
         ],
         dependencies: [],
         healthCheck: {
@@ -170,6 +205,38 @@ function buildFrontendApplication(systemName, operationsConfig, imagePrefix, bac
         },
         envVarPrefix: snakeCase(name).toUpperCase()
     };
+}
+
+function frontendBackendApplications(frontendApplication, backendApplications) {
+    const backendNames = new Set((frontendApplication.contexts ?? [])
+        .map((context) => context.backend)
+        .filter(Boolean)
+        .map(operationsKebab));
+    if (backendNames.size > 0) {
+        const selected = backendApplications.filter((application) => backendNames.has(application.name));
+        if (selected.length > 0) {
+            return selected;
+        }
+    }
+
+    const frontendContexts = new Set((frontendApplication.contexts ?? [])
+        .map((context) => context.name ?? context.title)
+        .filter(Boolean));
+    if (frontendContexts.size > 0) {
+        const selected = backendApplications.filter((application) =>
+            (application.contexts ?? []).some((context) => frontendContexts.has(context))
+        );
+        if (selected.length > 0) {
+            return selected;
+        }
+    }
+
+    return backendApplications;
+}
+
+function frontendGatewayPath(name, index, legacyConsole) {
+    if (legacyConsole || index === 0) return '/';
+    return `/${name}`;
 }
 
 function buildInfrastructure(operationsConfig) {
@@ -270,9 +337,9 @@ function buildGateway(applications, backendApplications, operationsConfig) {
         upstreams: [],
         plugins: gatewayConfig.plugins ?? []
     };
-    const frontend = applications.find((application) => application.kind === 'frontend');
+    const frontends = applications.filter((application) => application.kind === 'frontend');
 
-    if (frontend) {
+    frontends.forEach((frontend, index) => {
         gateway.upstreams.push({
             id: frontend.name,
             serviceName: frontend.name,
@@ -281,12 +348,22 @@ function buildGateway(applications, backendApplications, operationsConfig) {
         gateway.routes.push({
             id: `${frontend.name}-root`,
             name: `${frontend.title} Root`,
-            paths: ['/*'],
+            paths: [index === 0 || frontend.gatewayPath === '/' ? '/*' : `${frontend.gatewayPath}/*`],
             methods: [],
             upstreamId: frontend.name,
-            plugins: []
+            plugins: index === 0 || frontend.gatewayPath === '/'
+                ? []
+                : [{
+                    name: 'proxy-rewrite',
+                    configuration: {
+                        regex_uri: [
+                            `^${escapeRegex(frontend.gatewayPath)}/(.*)`,
+                            '/$1'
+                        ]
+                    }
+                }]
         });
-    }
+    });
 
     backendApplications.forEach((application) => {
         gateway.upstreams.push({

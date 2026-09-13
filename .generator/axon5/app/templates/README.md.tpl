@@ -166,6 +166,24 @@ docker compose up -d <%= appName %>
 <% } -%>
 ```
 
+<% if (deploymentFrontends && deploymentFrontends.length > 0) { -%>
+This deployment also owns frontend application(s) that only target this backend. Start the backend and bundled frontend services together with:
+
+```bash
+<% if (modulePrefix) { -%>
+cd ..
+docker compose -f <%= modulePrefix %>/docker-compose.yml --profile application up -d
+<% } else { -%>
+docker compose --profile application up -d
+<% } -%>
+```
+
+Bundled frontend services:
+<% deploymentFrontends.forEach((frontend) => { -%>
+- `<%= frontend.serviceName %>` on `${<%= frontend.portEnv %>:-<%= frontend.defaultPort %>}`, using `${<%= frontend.apiUrlEnv %>:-<%= frontend.defaultApiUrl %>}` for this backend API.
+<% }) -%>
+
+<% } -%>
 The UmaDB adapter implements Axon Framework's `EventStorageEngine` boundary over UmaDB's official `umadb.v1.DCB` gRPC service: events are stored with DCB tags, Axon event criteria are mapped to UmaDB queries, conditional append uses UmaDB's DCB conflict condition, and source/stream tokens use Axon's global next-position semantics. Axon processor checkpoints still use the generated `token_entry` table; UmaDB's optional `TrackingInfo` API is not used as an Axon token store.
 
 <% } -%>

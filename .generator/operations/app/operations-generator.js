@@ -126,6 +126,21 @@ function renderDeployReadme(model, environment) {
 
 function renderOperationsImageScript(model, environment) {
     const applicationNames = model.applications.map((application) => application.name);
+    const backendApplicationNames = model.applications
+        .filter((application) => application.kind === 'backend')
+        .map((application) => application.name);
+    const frontendApplications = model.applications
+        .filter((application) => application.kind === 'frontend')
+        .map((application) => ({
+            name: application.name,
+            artifactName: application.artifactName,
+            frontendApplicationName: application.frontendApplicationName,
+            bundledWithBackend: application.bundledWithBackend
+        }));
+    const frontendArchives = Object.fromEntries(frontendApplications.map((application) => [
+        application.name,
+        `${application.name}-images.tar`
+    ]));
     const infrastructureImages = [
         ...model.infrastructure
             .filter((component) => component.enabled !== false)
@@ -142,7 +157,7 @@ function renderOperationsImageScript(model, environment) {
             ]
             : [])
     ].filter(Boolean);
-    const defaultPrefix = model.registry ? 'medol' : (model.imagePrefix ?? 'medol');
+    const defaultPrefix = model.imagePrefix ?? 'medol';
     return `#!/usr/bin/env node
 
 import {copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync} from 'node:fs';
@@ -168,11 +183,16 @@ const skipDependencies = Boolean(args['skip-dependencies']);
 const serviceIncludes = serviceFilterValues('service', 'include-service', 'only-service');
 const serviceExcludes = serviceFilterValues('exclude-service', 'skip-service');
 const applicationNames = ${JSON.stringify(applicationNames, null, 4)};
-const backendModuleNames = applicationNames.filter((name) => name !== 'console');
+const backendModuleNames = ${JSON.stringify(backendApplicationNames, null, 4)};
+const frontendApplications = ${JSON.stringify(frontendApplications, null, 4)};
+const frontendArchives = ${JSON.stringify(frontendArchives, null, 4)};
 const projectRoots = resolveProjectRoots();
 const appArchives = {
     backend: join(outputRoot, 'images', 'backend-images.tar'),
-    console: join(outputRoot, 'images', 'console-images.tar')
+    ...Object.fromEntries(Object.entries(frontendArchives).map(([name, file]) => [
+        name,
+        join(outputRoot, 'images', file)
+    ]))
 };
 const dependencyArchive = join(outputRoot, 'images', 'dependency-images.tar');
 
@@ -321,7 +341,7 @@ function collectComposeFiles() {
     const composeRoot = join(outputRoot, 'compose');
     const projects = selectedProjects();
     const backendProject = projects.find((project) => project.key === 'backend');
-    const consoleProject = projects.find((project) => project.key === 'console');
+    const frontendProjects = projects.filter((project) => project.kind === 'frontend');
     if (backendProject && existsSync(join(backendProject.root, 'scripts/collect-deployment-compose-files.mjs'))) {
         runNode(backendProject.root, [
             'scripts/collect-deployment-compose-files.mjs',
@@ -332,7 +352,9 @@ function collectComposeFiles() {
     } else {
         copyKnownFiles(backendProject?.root, join(composeRoot, 'backend'), ['docker-compose.yml', '.env-example']);
     }
-    copyKnownFiles(consoleProject?.root, join(composeRoot, 'console'), ['docker-compose.yml', '.env-example']);
+    for (const frontendProject of frontendProjects) {
+        copyKnownFiles(frontendProject.root, join(composeRoot, frontendProject.key), ['docker-compose.yml', '.env-example']);
+    }
 }
 
 function copyKnownFiles(sourceRoot, targetRoot, files) {
@@ -396,20 +418,33 @@ function prepareOutput() {
 function selectedProjects() {
     validateServiceFilters();
     const selectedBackendModules = backendModuleNames.filter((moduleName) => serviceMatches([moduleName]));
+    const selectedFrontends = frontendApplications.filter((application) => !skipConsole && serviceMatches(frontendServiceAliases(application)));
+    const missingFrontends = selectedFrontends.filter((application) => !projectRoots.frontends[application.name]);
+    if (missingFrontends.length > 0) {
+        fail(\`Missing frontend project root(s): \${missingFrontends.map((application) => application.name).join(', ')}. Generate each frontend application directory or pass --<frontend-service>-root.\`);
+    }
     return [
         projectRoots.backend && !skipBackend && selectedBackendModules.length > 0
             ? {key: 'backend', root: projectRoots.backend, modules: selectedBackendModules}
             : undefined,
-        projectRoots.console && !skipConsole && serviceMatches(consoleServiceAliases())
-            ? {key: 'console', root: projectRoots.console}
-            : undefined
+        ...selectedFrontends
+            .map((application) => projectRoots.frontends[application.name]
+                ? {
+                    key: application.name,
+                    kind: 'frontend',
+                    root: projectRoots.frontends[application.name],
+                    application
+                }
+                : undefined)
     ].filter(Boolean);
 }
 
 function selectedApplicationNames() {
     return [
         ...backendModuleNames.filter((moduleName) => serviceMatches([moduleName])),
-        ...(projectRoots.console && !skipConsole && serviceMatches(consoleServiceAliases()) ? ['console'] : [])
+        ...frontendApplications
+            .filter((application) => projectRoots.frontends[application.name] && !skipConsole && serviceMatches(frontendServiceAliases(application)))
+            .map((application) => application.name)
     ];
 }
 
@@ -417,14 +452,41 @@ function projectImageArgs(project) {
     if (project.key === 'backend' && project.modules?.length > 0) {
         return ['--module', project.modules.join(',')];
     }
+    if (project.kind === 'frontend') {
+        return [
+            '--image',
+            project.application.name,
+            ...(project.application.frontendApplicationName
+                ? ['--build-arg', \`VITE_FRONTEND_APP=\${project.application.frontendApplicationName}\`]
+                : [])
+        ];
+    }
     return [];
 }
 
 function resolveProjectRoots() {
+    const frontends = Object.fromEntries(frontendApplications.map((application, index) => [
+        application.name,
+        resolveFrontendProjectRoot(application, index)
+    ]));
     return {
         backend: explicitRoot('backend-root', 'BACKEND_ROOT') ?? findProjectRoot(['backend'], isBackendProject),
-        console: explicitRoot('console-root', 'CONSOLE_ROOT') ?? findProjectRoot(['console', 'frontend'], isConsoleProject)
+        frontends
     };
+}
+
+function resolveFrontendProjectRoot(application, index) {
+    const explicit = explicitRoot(\`\${application.name}-root\`, \`\${envName(application.name)}_ROOT\`)
+        ?? (index === 0 ? explicitRoot('console-root', 'CONSOLE_ROOT') : undefined);
+    if (explicit) return explicit;
+    const preferred = [
+        application.name,
+        application.artifactName,
+        ...(index === 0 ? ['console', 'frontend'] : [])
+    ].filter(Boolean);
+    return index === 0
+        ? findProjectRoot(preferred, isConsoleProject)
+        : findNamedProjectRoot(preferred, isConsoleProject);
 }
 
 function explicitRoot(argName, envName) {
@@ -443,6 +505,14 @@ function findProjectRoot(preferredNames, predicate) {
         if (!entry.isDirectory() || entry.name.startsWith('.') || ['node_modules', 'operations', 'volumes', 'tmp'].includes(entry.name)) continue;
         const root = join(monorepoRoot, entry.name);
         if (predicate(root)) return root;
+    }
+    return undefined;
+}
+
+function findNamedProjectRoot(preferredNames, predicate) {
+    for (const name of preferredNames) {
+        const root = resolve(monorepoRoot, name);
+        if (existsSync(root) && predicate(root)) return root;
     }
     return undefined;
 }
@@ -491,13 +561,13 @@ function serviceMatches(aliases) {
 function validateServiceFilters() {
     const allAliases = [
         ...backendModuleNames,
-        ...consoleServiceAliases()
+        ...frontendApplications.flatMap(frontendServiceAliases)
     ].map(normalizeServiceName);
     const unknownIncludes = serviceIncludes.filter((value) => !allAliases.includes(normalizeServiceName(value)));
     if (unknownIncludes.length > 0) {
         fail(\`Unknown service filter(s): \${unknownIncludes.join(', ')}. Available: \${[
             ...backendModuleNames,
-            'console'
+            ...frontendApplications.map((application) => application.name)
         ].join(', ')}\`);
     }
     const unknownExcludes = serviceExcludes.filter((value) => !allAliases.includes(normalizeServiceName(value)));
@@ -506,8 +576,21 @@ function validateServiceFilters() {
     }
 }
 
-function consoleServiceAliases() {
-    return unique(['console', 'frontend', projectRoots.console ? basename(projectRoots.console) : undefined]);
+function frontendServiceAliases(application) {
+    const root = projectRoots.frontends[application.name];
+    return unique([
+        application.name,
+        application.artifactName,
+        application.frontendApplicationName,
+        application.bundledWithBackend,
+        'frontend',
+        application.name === 'console' ? 'console' : undefined,
+        root ? basename(root) : undefined
+    ]);
+}
+
+function envName(value) {
+    return String(value ?? '').trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_');
 }
 
 function normalizeServiceName(value) {
@@ -644,7 +727,8 @@ Options:
   --archive <file>                Package archive. Defaults to <output>.tar.gz.
   --root <dir>                    Monorepo root. Defaults to ../.. from this operations environment.
   --backend-root <dir>            Override backend project root.
-  --console-root <dir>            Override frontend project root.
+  --console-root <dir>            Override the first frontend project root for legacy workspaces.
+  --<frontend-service>-root <dir> Override one frontend project root, for example --participant-console-root ./participant-console.
   --service <name[,name]>         Only process selected application services. Can be repeated.
   --exclude-service <name[,name]> Skip selected application services. Can be repeated.
   --skip-service <name[,name]>    Alias for --exclude-service.

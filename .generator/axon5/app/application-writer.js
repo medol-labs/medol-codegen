@@ -20,6 +20,10 @@ function lowerCamel(value) {
     return safeIdentifier(name.charAt(0).toLowerCase() + name.slice(1));
 }
 
+function envPrefix(value) {
+    return kebab(value).toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+}
+
 const applicationWriterMethods = {
     _isMonoMode() {
         return !process.env.CODEGEN_DEPLOYMENT && (this.model.deployments ?? []).length > 1;
@@ -48,6 +52,7 @@ const applicationWriterMethods = {
             dbName: safeDatabaseName(appName),
             modulePrefix: '',
             hasInfra: true,
+            deploymentFrontends: [],
             imageTarName: this._imageTarName()
         });
         this.fs.copy(this.templatePath('gitignore'), this.destinationPath('.gitignore'));
@@ -132,6 +137,7 @@ const applicationWriterMethods = {
             dbPort: runtime.dbPort,
             umadbPort: runtime.umadbPort,
             dbName: runtime.dbName,
+            deploymentFrontends: runtime.deploymentFrontends,
             imageTarName: this._imageTarName()
         });
         this.fs.copyTpl(this.templatePath('ApplicationTest.kt.tpl'), this._rootTestKotlinPath('ApplicationTest.kt'), {
@@ -311,18 +317,54 @@ const applicationWriterMethods = {
 
     _runtimeConfig(appName) {
         const index = this.currentDeployment ? this.currentDeploymentIndex : 0;
+        const appPort = 8080 + index;
         return {
             appName,
-            appPort: 8080 + index,
+            appPort,
             dbPort: 5432 + index,
             umadbPort: 50051 + index,
             dbName: safeDatabaseName(appName),
             composeFile: 'docker-compose.yml',
             envFile: '.env',
             dockerComposeEnabled: 'true',
+            deploymentFrontends: this._deploymentFrontends(appName, appPort),
             externalSystems: this._externalSystemConfigs(),
             integrationClients: this._integrationClientConfigs()
         };
+    },
+
+    _deploymentFrontends(appName, appPort) {
+        if (!this.currentDeployment) return [];
+        const currentDeploymentName = kebab(this.currentDeployment.name);
+        const frontendApplications = this.fullModel?.frontendApplications ?? this.model.frontendApplications ?? [];
+        let offset = 0;
+
+        return frontendApplications
+            .map((application) => {
+                const backendNames = Array.from(new Set((application.contexts ?? [])
+                    .map((context) => context.backend)
+                    .filter(Boolean)
+                    .map(kebab)));
+                if (backendNames.length !== 1 || backendNames[0] !== currentDeploymentName) return undefined;
+
+                const serviceName = kebab(application.name ?? application.title) || `${appName}-console`;
+                const prefix = envPrefix(serviceName);
+                const backendPrefix = envPrefix(appName);
+                const defaultPort = 5173 + this.currentDeploymentIndex + offset;
+                offset += 1;
+
+                return {
+                    applicationName: application.name,
+                    serviceName,
+                    imageEnv: `${prefix}_IMAGE`,
+                    portEnv: `${prefix}_PORT`,
+                    apiUrlEnv: `${prefix}_API_URL`,
+                    backendApiUrlEnv: `VITE_${backendPrefix}_API_URL`,
+                    defaultPort,
+                    defaultApiUrl: `http://localhost:${appPort}`
+                };
+            })
+            .filter(Boolean);
     },
 
     _externalSystemConfigs() {

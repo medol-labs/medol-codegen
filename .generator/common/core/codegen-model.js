@@ -17,6 +17,7 @@ function fromConfig(config = {}) {
         ...(config.domain ? { domain: config.domain } : {}),
         ...(config.domains ? { domains: config.domains } : {}),
         ...(config.deployments ? { deployments: config.deployments } : {}),
+        ...(config.frontendApplications ? { frontendApplications: config.frontendApplications } : {}),
         ...(config.i18n ? { i18n: config.i18n } : {}),
         ...(config.translations ? { translations: config.translations } : {}),
         ...(config.locales ? { locales: config.locales } : {}),
@@ -49,6 +50,7 @@ function fromCodegenModel(model = {}) {
         ...(model.domain ? { domain: model.domain } : {}),
         ...(model.domains ? { domains: model.domains } : {}),
         ...(model.deployments ? { deployments: model.deployments } : {}),
+        ...(model.frontendApplications ? { frontendApplications: model.frontendApplications } : {}),
         ...(model.i18n ? { i18n: model.i18n } : {}),
         ...(model.translations ? { translations: model.translations } : {}),
         ...(model.locales ? { locales: model.locales } : {}),
@@ -83,6 +85,7 @@ function toGeneratorConfig(model, source = {}) {
         ...(model.domain ? { domain: model.domain } : {}),
         ...(model.domains ? { domains: model.domains } : {}),
         ...(model.deployments ? { deployments: model.deployments } : {}),
+        ...(model.frontendApplications ? { frontendApplications: model.frontendApplications } : {}),
         context: primaryContextName(model),
         contexts: model.contexts,
         codeGen: {

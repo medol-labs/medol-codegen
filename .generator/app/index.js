@@ -43,9 +43,11 @@ module.exports = class extends Generator {
     async generators() {
         const generatorPath = require.resolve(`../${this.answers.generator}/app`);
         const GeneratorClass = require(generatorPath);
-        const outputRoot = this.opts.outputRoot
-            ?? this.opts.output
-            ?? generatorOutputRoot(this.workspace, this.answers.generator, '.');
+        const explicitOutputRoot = this.opts.outputRoot ?? this.opts.output;
+        const outputRoot = explicitOutputRoot
+            ?? (this.answers.generator === 'refine'
+                ? undefined
+                : generatorOutputRoot(this.workspace, this.answers.generator, '.'));
 
         await this.composeWith({
             Generator: GeneratorClass.default ?? GeneratorClass,

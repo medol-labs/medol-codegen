@@ -91,6 +91,92 @@ test('links producer create commands to catalog read models across aggregate rou
     assert.deepEqual(productCatalog?.commands.map((command) => command.title), ['Register Product']);
 });
 
+test('projects frontend resources by frontend application without reusing backend deployment granularity', () => {
+    const model = {
+        domain: 'Demo',
+        frontendApplications: [{
+            name: 'ParticipantConsole',
+            title: 'Participant Console',
+            contexts: [
+                {name: 'RuntimeAgentOperations', backend: 'RuntimeAgentBackend'},
+                {name: 'IdentityAccessManagement', backend: 'RuntimeAgentBackend'}
+            ]
+        }],
+        contexts: [
+            {name: 'FederationManagement', title: 'Federation Management'},
+            {name: 'RuntimeAgentOperations', title: 'Runtime Agent Operations'},
+            {name: 'IdentityAccessManagement', title: 'Identity Access Management'}
+        ],
+        aggregates: [],
+        transitions: [],
+        deployments: [{
+            name: 'PlatformBackend',
+            title: 'Platform Backend',
+            contexts: ['FederationManagement', 'IdentityAccessManagement']
+        }, {
+            name: 'RuntimeAgentBackend',
+            title: 'Runtime Agent Backend',
+            contexts: ['RuntimeAgentOperations', 'IdentityAccessManagement']
+        }],
+        slices: [{
+            id: 'slice-federation-catalog',
+            name: 'FederationCatalogs',
+            context: 'FederationManagement',
+            chapter: 'Federation Management',
+            title: 'Federation Catalogs',
+            commands: [],
+            events: [],
+            readmodels: [{
+                id: 'readmodel-federation-catalog',
+                title: 'Federation Catalog',
+                listElement: true,
+                fields: [{name: 'federationId', type: 'UUID', idAttribute: true}]
+            }]
+        }, {
+            id: 'slice-runtime-agent-catalog',
+            name: 'RuntimeAgentCatalogs',
+            context: 'RuntimeAgentOperations',
+            chapter: 'Runtime Agent Operations',
+            title: 'Runtime Agent Catalogs',
+            commands: [],
+            events: [],
+            readmodels: [{
+                id: 'readmodel-runtime-agent-catalog',
+                title: 'Runtime Agent Catalog',
+                listElement: true,
+                fields: [{name: 'runtimeAgentId', type: 'UUID', idAttribute: true}]
+            }]
+        }, {
+            id: 'slice-role-catalog',
+            name: 'RoleCatalogs',
+            context: 'IdentityAccessManagement',
+            chapter: 'Identity Access Management',
+            title: 'Role Catalogs',
+            commands: [],
+            events: [],
+            readmodels: [{
+                id: 'readmodel-role-catalog',
+                title: 'Role Catalog',
+                listElement: true,
+                fields: [{name: 'roleId', type: 'UUID', idAttribute: true}]
+            }]
+        }]
+    };
+
+    const frontend = buildFrontendModel(model, undefined, {frontendApp: 'ParticipantConsole'});
+
+    assert.equal(frontend.appName, 'Participant Console');
+    assert.deepEqual(frontend.resources.map((resource) => resource.name), ['role_catalog', 'runtime_agent_catalog']);
+    assert.deepEqual(frontend.resources.map((resource) => resource.dataProviderName), ['runtime-agent-backend', 'runtime-agent-backend']);
+    assert.deepEqual(
+        frontend.backendModules.map((module) => ({name: module.name, resources: module.resourceRoutes})),
+        [
+            {name: 'platform-backend', resources: []},
+            {name: 'runtime-agent-backend', resources: ['role-catalog', 'runtime-agent-catalog']}
+        ]
+    );
+});
+
 test('keeps command result fields out of form fields', () => {
     const model = {
         domain: 'Demo',

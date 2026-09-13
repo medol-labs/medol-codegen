@@ -38,6 +38,11 @@ UMADB_REQUEST_TIMEOUT=PT10S
 
 APP_IMAGE=
 APP_PORT=<%= appPort %>
+<% deploymentFrontends.forEach((frontend) => { -%>
+<%= frontend.imageEnv %>=
+<%= frontend.portEnv %>=<%= frontend.defaultPort %>
+<%= frontend.apiUrlEnv %>=<%= frontend.defaultApiUrl %>
+<% }) -%>
 <% externalSystems.forEach((external) => { -%>
 <%= external.endpointEnv %>=
 <% }) -%>

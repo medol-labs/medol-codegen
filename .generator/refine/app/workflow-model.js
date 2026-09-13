@@ -26,7 +26,15 @@ const {
 const {backendModuleForContext} = require('./backend-modules');
 const {aggregateName} = require('./resource-naming');
 
-function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, backendModules, transitions = []) {
+function buildWorkflowModel(
+    slices,
+    aggregates,
+    contexts,
+    selectedCommands,
+    backendModules,
+    transitions = [],
+    backendModuleForSlice = (slice) => backendModuleForContext(slice.context ?? slice.chapter, backendModules)
+) {
     const selectableReadModels = new Map();
     const selectableReadModelsByFieldSource = new Map();
     let dictionaryProviderSelect = null;
@@ -87,7 +95,7 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
             context: slice.context ?? slice.chapter,
             screenKeys: screenKeysForSlice(slice),
             aggregate: aggregateName(readModel, { ...slice, title: readModel.slice ?? slice.title }, aggregates, contexts),
-            deployment: backendModuleForContext(slice.context ?? slice.chapter, backendModules)
+            deployment: backendModuleForSlice(slice)
         }));
 
     readModelInfos
@@ -97,7 +105,7 @@ function buildWorkflowModel(slices, aggregates, contexts, selectedCommands, back
                 return;
             }
 
-            const deployment = backendModuleForContext(slice.context ?? slice.chapter, backendModules);
+            const deployment = backendModuleForSlice(slice);
             const optionLabel = optionLabelField(readModel);
             const baseSelectModel = {
                 resource: snake(cleanTitle(readModel.title)),

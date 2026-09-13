@@ -99,6 +99,34 @@ services:
       <%= client.endpointEnv %>: ${<%= client.endpointEnv %>:-}
 <% }) -%>
 
+<% deploymentFrontends.forEach((frontend) => { -%>
+  <%= frontend.serviceName %>:
+    image: ${<%= frontend.imageEnv %>:-medol/<%= frontend.serviceName %>:0.0.1-SNAPSHOT}
+    platform: ${DOCKER_PLATFORM:-}
+    restart: unless-stopped
+    profiles:
+      - application
+      - frontend
+    depends_on:
+      <%= appName %>:
+        condition: service_started
+    ports:
+      - "${<%= frontend.portEnv %>:-<%= frontend.defaultPort %>}:80"
+    environment:
+      VITE_AUTH_PROVIDER: ${VITE_AUTH_PROVIDER:-local}
+      VITE_ACCESS_CONTROL_MODE: ${VITE_ACCESS_CONTROL_MODE:-permissive}
+      VITE_AUTH_API_URL: ${<%= frontend.apiUrlEnv %>:-<%= frontend.defaultApiUrl %>}
+      VITE_AXON_API_URL: ${<%= frontend.apiUrlEnv %>:-<%= frontend.defaultApiUrl %>}
+      <%= frontend.backendApiUrlEnv %>: ${<%= frontend.apiUrlEnv %>:-<%= frontend.defaultApiUrl %>}
+      VITE_FRONTEND_APP: <%= frontend.applicationName %>
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+<% }) -%>
+
 volumes:
   postgres_data:
   axon_server_data:

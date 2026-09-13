@@ -12,6 +12,7 @@ const {generatorOutputRoot, loadMedolWorkspace} = require("../../common/core/med
 const {
     buildFrontendModel,
     buildDomainModel,
+    buildFrontendApplicationChoices,
     buildCommandChoices,
     normalizeSelectedCommands
 } = require('./model-builder');
@@ -42,7 +43,43 @@ function toKebab(value) {
         .toLowerCase() || 'medol-console';
 }
 
-module.exports = class extends Generator {
+function normalizeFrontendApplicationName(value) {
+    return `${value ?? ''}`.replace(/[^a-zA-Z0-9]+/g, '').toLowerCase();
+}
+
+function frontendApplicationFor(model, frontendApp) {
+    if (!frontendApp || `${frontendApp}` === '__all__') {
+        return undefined;
+    }
+    const normalized = normalizeFrontendApplicationName(frontendApp);
+    return (model.frontendApplications ?? []).find((application) => {
+        return [application.name, application.title]
+            .filter(Boolean)
+            .some((value) => normalizeFrontendApplicationName(value) === normalized);
+    });
+}
+
+function defaultFrontendOutputRoot(model, frontendApp) {
+    const application = frontendApplicationFor(model, frontendApp);
+    if (!application) {
+        return undefined;
+    }
+    return toKebab(application.name ?? application.title);
+}
+
+function frontendApplicationsForSelection(model, frontendApp) {
+    const applications = (model.frontendApplications ?? []).filter((application) => application?.name);
+    if (`${frontendApp ?? ''}` === '__all__' && applications.length > 0) {
+        return applications.map((application) => application.name);
+    }
+    const application = frontendApplicationFor(model, frontendApp);
+    if (application?.name) {
+        return [application.name];
+    }
+    return [undefined];
+}
+
+const RefineGenerator = class extends Generator {
 
     constructor(args, opts) {
         super(args, opts);
@@ -54,17 +91,22 @@ module.exports = class extends Generator {
         this.argument('appname', { type: String, required: false });
 
         this.workspace = loadMedolWorkspace(this.env.cwd, this.opts);
-        const outputRoot = this.opts.outputRoot ?? this.opts.output ?? generatorOutputRoot(this.workspace, 'refine', '.');
-        if (outputRoot && outputRoot !== '.') {
-            this.destinationRoot(this.destinationPath(outputRoot));
-        }
         const loaded = loadGeneratorModel(this.env.cwd, this.opts);
         config = loaded.config;
         codegenModel = loaded.codegenModel;
+
+        const outputRoot = this._resolveOutputRoot();
+        if (outputRoot && outputRoot !== '.') {
+            this.destinationRoot(this.destinationPath(outputRoot));
+        }
     }
 
     async prompting() {
         const prompts = [];
+        const frontendApplicationChoices = buildFrontendApplicationChoices(codegenModel);
+        const configuredFrontendApp = this.opts.frontendApp
+            ?? this.opts.frontendApplication
+            ?? process.env.CODEGEN_FRONTEND_APP;
         const commandChoices = buildCommandChoices(codegenModel);
 
         if (!this.opts.generatorType) {
@@ -74,6 +116,20 @@ module.exports = class extends Generator {
                 message: 'What frontend code should be generated?',
                 choices: ['Skeleton', 'all', 'resources', 'router', 'pages'],
                 default: 'Skeleton'
+            });
+        }
+
+        if (!configuredFrontendApp && frontendApplicationChoices.length > 0) {
+            prompts.push({
+                type: 'list',
+                name: 'frontendApp',
+                message: 'Which frontend application should be generated?',
+                choices: [
+                    { name: 'All frontend applications', value: '__all__' },
+                    ...frontendApplicationChoices
+                ],
+                default: '__all__',
+                when: () => frontendApplicationChoices.length > 1
             });
         }
 
@@ -97,8 +153,11 @@ module.exports = class extends Generator {
             force: this.opts.force ?? true,
             commands: this.opts.commands,
             allCommands: this.opts.allCommands,
+            frontendApp: configuredFrontendApp ?? (frontendApplicationChoices.length === 1 ? frontendApplicationChoices[0].value : undefined),
             ...(await this.prompt(prompts))
         };
+
+        this._applyFrontendDestinationRoot(this.answers.frontendApp);
     }
 
     writing() {
@@ -107,10 +166,18 @@ module.exports = class extends Generator {
             return;
         }
 
+        const frontendApps = frontendApplicationsForSelection(codegenModel, this.answers.frontendApp);
+        this._assertCanWriteFrontendApplications(frontendApps);
+        frontendApps.forEach((frontendApp) => {
+            this._withFrontendDestinationRoot(frontendApp, () => this._writeFrontendApplication(frontendApp));
+        });
+    }
+
+    _writeFrontendApplication(frontendApp) {
         if (this.answers.generatorType === 'Skeleton') {
-            this._writeSkeleton();
-            const model = buildFrontendModel(codegenModel);
-            this._writeDomainModel(buildDomainModel(codegenModel));
+            this._writeSkeleton(frontendApp);
+            const model = buildFrontendModel(codegenModel, undefined, { frontendApp });
+            this._writeDomainModel(buildDomainModel(model.frontendSource));
             this._writeI18n(model.i18n);
             return;
         }
@@ -118,9 +185,9 @@ module.exports = class extends Generator {
         const selectedCommandKeys = this.answers.allCommands
             ? undefined
             : normalizeSelectedCommands(this.answers.commands);
-        const model = buildFrontendModel(codegenModel, selectedCommandKeys);
+        const model = buildFrontendModel(codegenModel, selectedCommandKeys, { frontendApp });
         this._writeFrameworkComponents();
-        this._writeDomainModel(buildDomainModel(codegenModel));
+        this._writeDomainModel(buildDomainModel(model.frontendSource));
         this._writeI18n(model.i18n);
 
         if (this.answers.generatorType === 'all' || this.answers.generatorType === 'resources') {
@@ -329,14 +396,16 @@ module.exports = class extends Generator {
         );
     }
 
-    _writeSkeleton() {
-        const appName = codegenModel?.domain ?? 'frontend-foundation';
-        const model = buildFrontendModel(codegenModel);
+    _writeSkeleton(frontendApp) {
+        const model = buildFrontendModel(codegenModel, undefined, { frontendApp });
+        const appName = model.frontendApplication?.name ?? codegenModel?.domain ?? 'frontend-foundation';
+        const appTitle = model.frontendApplication?.title ?? toDisplayName(appName);
+        const imageName = toKebab(appName);
         const skeletonModel = {
             appName,
-            appTitle: toDisplayName(appName),
-            imageName: `${toKebab(appName)}-console`,
-            imageTarName: `${toKebab(appName)}-console-images.tar`,
+            appTitle,
+            imageName,
+            imageTarName: `${imageName}-images.tar`,
             backendModules: model.backendModules,
             authBackendModule: model.authBackendModule
         };
@@ -363,8 +432,63 @@ module.exports = class extends Generator {
         this._writeAgentSkills();
     }
 
+    _resolveOutputRoot(frontendApp) {
+        const explicit = this.opts.outputRoot ?? this.opts.output;
+        if (explicit) return explicit;
+
+        const configuredFrontendApp = frontendApp
+            ?? this.opts.frontendApp
+            ?? this.opts.frontendApplication
+            ?? process.env.CODEGEN_FRONTEND_APP;
+        const frontendOutput = this._defaultFrontendOutputRoot(configuredFrontendApp);
+        if (frontendOutput) return frontendOutput;
+
+        return generatorOutputRoot(this.workspace, 'refine', '.');
+    }
+
+    _applyFrontendDestinationRoot(frontendApp) {
+        if (this.opts.outputRoot || this.opts.output) {
+            return;
+        }
+        const outputRoot = this._resolveOutputRoot(frontendApp);
+        if (outputRoot && outputRoot !== '.') {
+            this.destinationRoot(path.resolve(this.workspace.root, outputRoot));
+        }
+    }
+
+    _withFrontendDestinationRoot(frontendApp, write) {
+        const previousRoot = this.destinationRoot();
+        try {
+            this._applyFrontendDestinationRoot(frontendApp);
+            write();
+        } finally {
+            this.destinationRoot(previousRoot);
+        }
+    }
+
+    _assertCanWriteFrontendApplications(frontendApps) {
+        if (frontendApps.length > 1 && (this.opts.outputRoot || this.opts.output)) {
+            throw new Error('Cannot generate all frontend applications into one explicit output directory. Omit --output or select one --frontend-app.');
+        }
+    }
+
+    _defaultFrontendOutputRoot(frontendApp) {
+        return defaultFrontendOutputRoot(codegenModel, frontendApp);
+    }
+
+    _frontendApplication(frontendApp) {
+        return frontendApplicationFor(codegenModel, frontendApp);
+    }
+
     _writeAgentSkills() {
         const agentTemplates = path.resolve(__dirname, '../../common/agent-templates');
         this.fs.copy(agentTemplates, this.destinationPath('.agent'));
     }
+};
+
+module.exports = RefineGenerator;
+module.exports._test = {
+    defaultFrontendOutputRoot,
+    frontendApplicationsForSelection,
+    frontendApplicationFor
 };

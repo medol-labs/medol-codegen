@@ -373,7 +373,10 @@ function normalizeElements(elements = [], type, slice, sliceAggregate, valueType
             fields: normalizeFields(element.fields ?? [], valueTypes),
             resultFields: normalizeFields(element.resultFields ?? [], valueTypes),
             dependencies: normalizeDependencies(element.dependencies ?? []),
-            startsLifecycle: element.startsLifecycle ?? element.createsAggregate ?? false
+            startsLifecycle: element.startsLifecycle ?? element.createsAggregate ?? false,
+            ...(type === 'READMODEL' && element.sync ? { sync: true } : {}),
+            ...(type === 'READMODEL' && element.syncSource ? { syncSource: element.syncSource } : {}),
+            ...(type === 'READMODEL' && element.syncFilters ? { syncFilters: element.syncFilters } : {})
         };
     });
 }

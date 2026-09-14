@@ -100,3 +100,103 @@ test('maps Text read model fields to PostgreSQL text columns', () => {
         '    @Column(columnDefinition = "text")\n'
     );
 });
+
+test('writes shared sync read model support with switchable adapters and checkpoints', () => {
+    const writes = new Map();
+    const writer = syncWriter(writes);
+
+    readModelWriterMethods._writeSyncReadModelSupport.call(writer);
+    readModelWriterMethods._writeSyncReadModelSupport.call(writer);
+
+    assert.equal([...writes.keys()].filter((path) => path.endsWith('SyncReadModelScheduler.kt')).length, 1);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelAdapter.kt'), /interface SyncReadModelAdapter/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelAdapter.kt'), /fun supports\(mode: String\): Boolean/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelAdapter.kt'), /fun syncOnce\(target: SyncReadModelTarget, checkpoint: SyncReadModelCheckpoint\?\): SyncReadModelResult/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelTarget.kt'), /val queryParameters: \(SyncReadModelContext\) -> Map<String, String>/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelProperties.kt'), /var parameters: Map<String, String> = emptyMap\(\)/);
+    assert.match(writes.get('shared/shared/application/sync/HttpPullSyncReadModelAdapter.kt'), /mode\.equals\("pull-http", ignoreCase = true\)/);
+    assert.match(writes.get('shared/shared/application/sync/HttpPullSyncReadModelAdapter.kt'), /target\.queryParameters\(context\)\.forEach/);
+    assert.match(writes.get('shared/shared/application/sync/HttpPullSyncReadModelAdapter.kt'), /queryParam\("updatedAfter", it\)/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelScheduler.kt'), /adapters\.firstOrNull \{ it\.supports\(properties\.mode\) \}/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelScheduler.kt'), /adapter\.syncOnce\(target, checkpoint\)/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelCheckpoint.kt'), /medol_sync_read_model_checkpoint/);
+});
+
+test('writes sync read model target registration with field aliases and local syncedAt', () => {
+    const writes = new Map();
+    const writer = syncWriter(writes);
+    const readmodel = {
+        name: 'AgentFeatureSchemaCatalog',
+        title: 'Agent Feature Schema Catalog',
+        sync: true,
+        syncSource: 'DatasetGovernance.FeatureSchemaCatalog',
+        syncFilters: [{target: 'organizationId', source: 'sync.organizationId'}],
+        fields: [
+            {name: 'featureSchemaId', type: 'UUID', idAttribute: true, source: {kind: 'direct', from: ['featureSchemaId']}},
+            {name: 'featureDomain', type: 'String', display: true, source: {kind: 'direct', from: ['featureDomain']}},
+            {name: 'featureSchemaVersion', type: 'String', source: {kind: 'direct', from: ['version']}},
+            {name: 'syncedAt', type: 'DateTime'}
+        ]
+    };
+
+    readModelWriterMethods._writeSyncReadModelRegistration.call(
+        writer,
+        'tech.medo.runtimeagent.agentfeatureschemacatalog',
+        'runtimeagent',
+        'AgentFeatureSchemaCatalog',
+        readmodel,
+        'AgentFeatureSchemaCatalog',
+        [readmodel.fields[0]]
+    );
+
+    const registration = writes.get('kotlin/runtimeagent/AgentFeatureSchemaCatalog/AgentFeatureSchemaCatalogSyncRegistration.kt');
+    assert.match(registration, /source = "DatasetGovernance\.FeatureSchemaCatalog"/);
+    assert.match(registration, /sourcePath = "\/sync\/read-models\/dataset-governance\/feature-schema-catalog"/);
+    assert.match(registration, /"organizationId" to context\.requiredParameter\("organizationId", targetName\)/);
+    assert.match(registration, /"featureSchemaVersion" to "version"/);
+    assert.match(registration, /val targetName = "AgentFeatureSchemaCatalog"/);
+    assert.match(registration, /val id = SyncValueConverters\.required\(SyncValueConverters\.uuid\(row\["featureSchemaId"\]\), targetName, "featureSchemaId"\)/);
+    assert.match(registration, /projection\.featureSchemaVersion = SyncValueConverters\.required\(SyncValueConverters\.string\(row\["version"\]\), targetName, "featureSchemaVersion"\)/);
+    assert.match(registration, /projection\.syncedAt = syncedAt/);
+    assert.match(registration, /repository\.save\(projection\)/);
+});
+
+test('does not write sync registration for read models without sync source or a single id', () => {
+    const writes = new Map();
+    const writer = syncWriter(writes);
+    const readmodel = {
+        name: 'LocalCatalog',
+        title: 'Local Catalog',
+        sync: true,
+        fields: [{name: 'localId', type: 'UUID', idAttribute: true}]
+    };
+
+    readModelWriterMethods._writeSyncReadModelRegistration.call(
+        writer,
+        'tech.medo.local',
+        'local',
+        'LocalCatalog',
+        readmodel,
+        'LocalCatalog',
+        [readmodel.fields[0]]
+    );
+
+    assert.equal(writes.size, 0);
+});
+
+function syncWriter(writes) {
+    return {
+        model: {rootPackage: 'tech.medo'},
+        fs: {
+            write(path, content) {
+                writes.set(path, content);
+            }
+        },
+        _sharedKernelKotlinPath(relative) {
+            return `shared/${relative}`;
+        },
+        _kotlinPath(relative) {
+            return `kotlin/${relative}`;
+        }
+    };
+}

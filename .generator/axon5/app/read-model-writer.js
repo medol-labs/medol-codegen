@@ -410,7 +410,369 @@ ${entityFields}
             this._writeReadModelJpaRepository(packageName, context, slicePackage, slice, readmodel, name, idFields, hasJsonJpaFields);
             this._writeReadModelResource(packageName, context, slicePackage, slice, readmodel, name, idFields);
             this._writeReadModelProjector(packageName, context, slicePackage, slice, readmodel, name, idFields);
+            if (readmodel.sync) {
+                this._writeSyncReadModelSupport();
+                this._writeSyncReadModelRegistration(packageName, context, slicePackage, readmodel, name, idFields);
+            }
         }
+    },
+
+    _writeSyncReadModelSupport() {
+        if (this._syncReadModelSupportWritten) {
+            return;
+        }
+        this._syncReadModelSupportWritten = true;
+        const basePath = 'shared/application/sync';
+        const basePackage = `${this.model.rootPackage}.shared.application.sync`;
+        this.fs.write(this._sharedKernelKotlinPath(`${basePath}/SyncReadModelProperties.kt`), `package ${basePackage}
+
+import org.springframework.boot.context.properties.ConfigurationProperties
+
+@ConfigurationProperties("medol.sync")
+data class SyncReadModelProperties(
+    var enabled: Boolean = true,
+    var mode: String = "pull-http",
+    var platformBaseUrl: String = "",
+    var pageSize: Int = 200,
+    var fixedDelayMs: Long = 30000,
+    var parameters: Map<String, String> = emptyMap()
+)
+`);
+        this.fs.write(this._sharedKernelKotlinPath(`${basePath}/SyncReadModelTarget.kt`), `package ${basePackage}
+
+import java.time.LocalDateTime
+
+data class SyncReadModelTarget(
+    val name: String,
+    val source: String,
+    val sourceContext: String,
+    val sourceReadModel: String,
+    val sourcePath: String,
+    val fieldMappings: Map<String, String>,
+    val queryParameters: (SyncReadModelContext) -> Map<String, String> = { emptyMap() },
+    val upsert: (Map<String, Any?>, LocalDateTime) -> Unit
+)
+
+data class SyncReadModelContext(
+    val properties: SyncReadModelProperties,
+    val checkpoint: SyncReadModelCheckpoint?
+) {
+    fun requiredParameter(name: String, target: String): String =
+        properties.parameters[name]
+            ?: throw IllegalArgumentException("Sync target $target requires medol.sync.parameters.$name")
+}
+
+data class SyncReadModelResult(
+    val target: String,
+    val itemCount: Int,
+    val nextCursor: String? = null
+)
+`);
+        this.fs.write(this._sharedKernelKotlinPath(`${basePath}/SyncReadModelAdapter.kt`), `package ${basePackage}
+
+interface SyncReadModelAdapter {
+    fun supports(mode: String): Boolean
+    fun syncOnce(target: SyncReadModelTarget, checkpoint: SyncReadModelCheckpoint?): SyncReadModelResult
+}
+`);
+        this.fs.write(this._sharedKernelKotlinPath(`${basePath}/SyncReadModelCheckpoint.kt`), `package ${basePackage}
+
+import jakarta.persistence.Entity
+import jakarta.persistence.Id
+import jakarta.persistence.Table
+import org.springframework.data.jpa.repository.JpaRepository
+import java.time.LocalDateTime
+
+@Entity
+@Table(name = "medol_sync_read_model_checkpoint")
+class SyncReadModelCheckpoint {
+    @Id
+    var target: String = ""
+    var source: String = ""
+    var lastSuccessfulSyncedAt: LocalDateTime? = null
+    var lastAttemptedAt: LocalDateTime? = null
+    var lastStatus: String = "NEVER_SYNCED"
+    var lastError: String? = null
+    var syncedItemCount: Int = 0
+}
+
+interface SyncReadModelCheckpointRepository : JpaRepository<SyncReadModelCheckpoint, String>
+`);
+        this.fs.write(this._sharedKernelKotlinPath(`${basePath}/SyncReadModelRegistry.kt`), `package ${basePackage}
+
+import org.springframework.stereotype.Component
+
+@Component
+class SyncReadModelRegistry(targets: List<SyncReadModelTarget>) {
+    val targets: List<SyncReadModelTarget> = targets.sortedBy { it.name }
+}
+`);
+        this.fs.write(this._sharedKernelKotlinPath(`${basePath}/SyncValueConverters.kt`), `package ${basePackage}
+
+import java.math.BigDecimal
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.OffsetDateTime
+import java.util.UUID
+
+object SyncValueConverters {
+    fun required(value: String?, target: String, field: String): String =
+        value ?: throw IllegalArgumentException("Sync target $target requires field $field")
+
+    fun required(value: Int?, target: String, field: String): Int =
+        value ?: throw IllegalArgumentException("Sync target $target requires field $field")
+
+    fun required(value: Long?, target: String, field: String): Long =
+        value ?: throw IllegalArgumentException("Sync target $target requires field $field")
+
+    fun required(value: Boolean?, target: String, field: String): Boolean =
+        value ?: throw IllegalArgumentException("Sync target $target requires field $field")
+
+    fun required(value: BigDecimal?, target: String, field: String): BigDecimal =
+        value ?: throw IllegalArgumentException("Sync target $target requires field $field")
+
+    fun required(value: UUID?, target: String, field: String): UUID =
+        value ?: throw IllegalArgumentException("Sync target $target requires field $field")
+
+    fun required(value: LocalDate?, target: String, field: String): LocalDate =
+        value ?: throw IllegalArgumentException("Sync target $target requires field $field")
+
+    fun required(value: LocalDateTime?, target: String, field: String): LocalDateTime =
+        value ?: throw IllegalArgumentException("Sync target $target requires field $field")
+
+    fun string(value: Any?): String? = value?.toString()
+
+    fun int(value: Any?): Int? = when (value) {
+        is Int -> value
+        is Number -> value.toInt()
+        is String -> value.takeIf { it.isNotBlank() }?.toInt()
+        else -> null
+    }
+
+    fun long(value: Any?): Long? = when (value) {
+        is Long -> value
+        is Number -> value.toLong()
+        is String -> value.takeIf { it.isNotBlank() }?.toLong()
+        else -> null
+    }
+
+    fun decimal(value: Any?): BigDecimal? = when (value) {
+        is BigDecimal -> value
+        is Number -> BigDecimal.valueOf(value.toDouble())
+        is String -> value.takeIf { it.isNotBlank() }?.let(::BigDecimal)
+        else -> null
+    }
+
+    fun boolean(value: Any?): Boolean? = when (value) {
+        is Boolean -> value
+        is String -> value.takeIf { it.isNotBlank() }?.toBooleanStrictOrNull()
+        else -> null
+    }
+
+    fun uuid(value: Any?): UUID? = when (value) {
+        is UUID -> value
+        is String -> value.takeIf { it.isNotBlank() }?.let(UUID::fromString)
+        else -> null
+    }
+
+    fun localDate(value: Any?): LocalDate? = when (value) {
+        is LocalDate -> value
+        is String -> value.takeIf { it.isNotBlank() }?.let(LocalDate::parse)
+        else -> null
+    }
+
+    fun localDateTime(value: Any?): LocalDateTime? = when (value) {
+        is LocalDateTime -> value
+        is OffsetDateTime -> value.toLocalDateTime()
+        is String -> value.takeIf { it.isNotBlank() }?.let {
+            runCatching { LocalDateTime.parse(it) }.getOrElse { _ -> OffsetDateTime.parse(it).toLocalDateTime() }
+        }
+        else -> null
+    }
+
+    fun stringList(value: Any?): List<String> = when (value) {
+        is Iterable<*> -> value.mapNotNull { it?.toString() }
+        is Array<*> -> value.mapNotNull { it?.toString() }
+        is String -> if (value.isBlank()) emptyList() else value.split(",").map { it.trim() }.filter { it.isNotBlank() }
+        else -> emptyList()
+    }
+}
+`);
+        this.fs.write(this._sharedKernelKotlinPath(`${basePath}/HttpPullSyncReadModelAdapter.kt`), `package ${basePackage}
+
+import com.fasterxml.jackson.core.type.TypeReference
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
+import org.springframework.stereotype.Component
+import org.springframework.web.client.RestClient
+import org.springframework.web.util.UriComponentsBuilder
+
+@Component
+class HttpPullSyncReadModelAdapter(
+    private val properties: SyncReadModelProperties,
+    restClientBuilder: RestClient.Builder,
+    private val objectMapper: ObjectMapper
+) : SyncReadModelAdapter {
+    private val restClient: RestClient = restClientBuilder.build()
+    private val mapType = object : TypeReference<Map<String, Any?>>() {}
+
+    override fun supports(mode: String): Boolean =
+        mode.equals("pull-http", ignoreCase = true)
+
+    override fun syncOnce(target: SyncReadModelTarget, checkpoint: SyncReadModelCheckpoint?): SyncReadModelResult {
+        if (properties.platformBaseUrl.isBlank()) {
+            return SyncReadModelResult(target.name, 0)
+        }
+
+        var cursor: String? = null
+        var count = 0
+        val syncedAt = java.time.LocalDateTime.now()
+
+        do {
+            val uriBuilder = UriComponentsBuilder
+                .fromHttpUrl(properties.platformBaseUrl)
+                .path(target.sourcePath)
+                .queryParam("size", properties.pageSize)
+            val context = SyncReadModelContext(properties, checkpoint)
+            target.queryParameters(context).forEach { (name, value) -> uriBuilder.queryParam(name, value) }
+            checkpoint?.lastSuccessfulSyncedAt?.let { uriBuilder.queryParam("updatedAfter", it) }
+            cursor?.let { uriBuilder.queryParam("cursor", it) }
+
+            val response = restClient.get()
+                .uri(uriBuilder.toUriString())
+                .retrieve()
+                .body(JsonNode::class.java)
+
+            val items = response.itemsNode()
+            items.forEach { item ->
+                target.upsert(objectMapper.convertValue(item, mapType), syncedAt)
+                count += 1
+            }
+            cursor = response?.get("nextCursor")?.takeIf { !it.isNull }?.asText()
+        } while (!cursor.isNullOrBlank())
+
+        return SyncReadModelResult(target.name, count, cursor)
+    }
+
+    private fun JsonNode?.itemsNode(): Iterable<JsonNode> {
+        if (this == null || this.isNull) return emptyList()
+        val items = this.get("items") ?: this.get("content") ?: this
+        return if (items.isArray) items.toList() else emptyList()
+    }
+}
+`);
+        this.fs.write(this._sharedKernelKotlinPath(`${basePath}/SyncReadModelScheduler.kt`), `package ${basePackage}
+
+import org.slf4j.LoggerFactory
+import org.springframework.scheduling.annotation.Scheduled
+import org.springframework.stereotype.Component
+import java.time.LocalDateTime
+
+@Component
+class SyncReadModelScheduler(
+    private val properties: SyncReadModelProperties,
+    private val registry: SyncReadModelRegistry,
+    private val adapters: List<SyncReadModelAdapter>,
+    private val checkpoints: SyncReadModelCheckpointRepository
+) {
+    private val log = LoggerFactory.getLogger(javaClass)
+
+    @Scheduled(fixedDelayString = "\\\${medol.sync.fixed-delay-ms:30000}")
+    fun syncAll() {
+        if (!properties.enabled || registry.targets.isEmpty()) return
+        val adapter = adapters.firstOrNull { it.supports(properties.mode) }
+        if (adapter == null) {
+            log.warn("No sync read model adapter supports mode={}", properties.mode)
+            return
+        }
+
+        registry.targets.forEach { target ->
+            val checkpoint = checkpoints.findById(target.name).orElseGet {
+                SyncReadModelCheckpoint().also {
+                    it.target = target.name
+                    it.source = target.source
+                }
+            }
+            checkpoint.lastAttemptedAt = LocalDateTime.now()
+            try {
+                val result = adapter.syncOnce(target, checkpoint)
+                checkpoint.lastSuccessfulSyncedAt = LocalDateTime.now()
+                checkpoint.lastStatus = "SYNCED"
+                checkpoint.lastError = null
+                checkpoint.syncedItemCount = result.itemCount
+            } catch (ex: Exception) {
+                checkpoint.lastStatus = "FAILED"
+                checkpoint.lastError = ex.message
+                log.warn("Sync read model target={} failed", target.name, ex)
+            }
+            checkpoints.save(checkpoint)
+        }
+    }
+}
+`);
+    },
+
+    _writeSyncReadModelRegistration(packageName, context, slicePackage, readmodel, name, idFields) {
+        const id = idFields[0];
+        if (!id || idFields.length !== 1 || !readmodel.syncSource) {
+            return;
+        }
+        const sourceParts = String(readmodel.syncSource).split('.').filter(Boolean);
+        const sourceContext = sourceParts.length > 1 ? sourceParts.slice(0, -1).join('.') : '';
+        const sourceReadModel = sourceParts.at(-1) ?? readmodel.syncSource;
+        const beanName = `${lowerFirst(name)}SyncTarget`;
+        const targetName = readmodel.name ?? readmodel.title;
+        const idExpression = syncValueExpression(id, `row["${syncSourceFieldName(id)}"]`, 'targetName');
+        const assignments = (readmodel.fields ?? [])
+            .filter((field) => field.name !== id.name)
+            .map((field) => syncProjectionAssignment(field))
+            .filter(Boolean)
+            .join('\n');
+        const fieldMappings = (readmodel.fields ?? [])
+            .map((field) => [field.name, syncSourceFieldName(field)])
+            .filter(([, source]) => source)
+            .map(([target, source]) => `            "${target}" to "${source}"`)
+            .join(',\n');
+        const queryParameters = syncQueryParameters(readmodel);
+        const sourcePath = `/sync/read-models/${kebab(sourceContext)}/${kebab(sourceReadModel)}`;
+
+        this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${name}SyncRegistration.kt`), `package ${packageName}
+
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
+import ${this.model.rootPackage}.shared.application.sync.SyncReadModelTarget
+import ${this.model.rootPackage}.shared.application.sync.SyncValueConverters
+
+@Configuration
+class ${name}SyncRegistration {
+    @Bean
+    fun ${beanName}(repository: ${name}Repository): SyncReadModelTarget {
+        val targetName = "${targetName}"
+        return SyncReadModelTarget(
+            name = targetName,
+            source = "${readmodel.syncSource}",
+            sourceContext = "${sourceContext}",
+            sourceReadModel = "${sourceReadModel}",
+            sourcePath = "${sourcePath}",
+            fieldMappings = mapOf(
+${fieldMappings}
+            ),
+            queryParameters = { context ->
+                mapOf(
+${queryParameters}
+                )
+            },
+            upsert = { row, syncedAt ->
+                val id = ${idExpression}
+                val projection = repository.findProjectionById(id) ?: ${name}Projection()
+                projection.${id.name} = id
+${assignments}
+                repository.save(projection)
+            }
+        )
+    }
+}
+`);
     },
 
     _writeReadModelJpaRepository(readModelPackageName, context, slicePackage, slice, readmodel, name, idFields, hasJsonJpaFields = false) {
@@ -1130,6 +1492,83 @@ function isStringStatusField(field) {
     return field.type === 'String'
         && field.cardinality !== 'Multiple'
         && /Status$/.test(field.name ?? '');
+}
+
+function lowerFirst(value) {
+    const text = pascal(value);
+    return text ? `${text.slice(0, 1).toLowerCase()}${text.slice(1)}` : 'syncTarget';
+}
+
+function syncSourceFieldName(field) {
+    const source = field.source?.from?.[0];
+    if (!source) {
+        return undefined;
+    }
+    return String(source).split('.').filter(Boolean).at(-1);
+}
+
+function syncProjectionAssignment(field) {
+    if (!field.source && field.name === 'syncedAt' && field.type === 'DateTime') {
+        return `                projection.${field.name} = syncedAt`;
+    }
+    const source = syncSourceFieldName(field);
+    if (!source) {
+        return undefined;
+    }
+    return `                projection.${field.name} = ${syncValueExpression(field, `row["${source}"]`, 'targetName')}`;
+}
+
+function syncQueryParameters(readmodel) {
+    return (readmodel.syncFilters ?? [])
+        .map((filter) => {
+            const target = String(filter.target ?? '').split('.').filter(Boolean).at(-1);
+            const source = String(filter.source ?? '');
+            const sourceParts = source.split('.').filter(Boolean);
+            if (!target || sourceParts[0] !== 'sync' || !sourceParts[1]) {
+                return undefined;
+            }
+            const parameter = sourceParts.slice(1).join('.');
+            return `                    "${target}" to context.requiredParameter("${parameter}", targetName)`;
+        })
+        .filter(Boolean)
+        .join(',\n');
+}
+
+function syncValueExpression(field, valueExpression, targetExpression) {
+    const converted = syncOptionalValueExpression(field, valueExpression);
+    if (field.optional || field.cardinality === 'Multiple') {
+        return converted;
+    }
+    return `SyncValueConverters.required(${converted}, ${targetExpression}, "${field.name}")`;
+}
+
+function syncOptionalValueExpression(field, valueExpression) {
+    if (field.cardinality === 'Multiple') {
+        if (field.type === 'String') {
+            return `SyncValueConverters.stringList(${valueExpression})`;
+        }
+        return `emptyList()`;
+    }
+
+    switch (field.type) {
+        case 'UUID':
+            return `SyncValueConverters.uuid(${valueExpression})`;
+        case 'Int':
+            return `SyncValueConverters.int(${valueExpression})`;
+        case 'Long':
+            return `SyncValueConverters.long(${valueExpression})`;
+        case 'Decimal':
+        case 'BigDecimal':
+            return `SyncValueConverters.decimal(${valueExpression})`;
+        case 'Boolean':
+            return `SyncValueConverters.boolean(${valueExpression})`;
+        case 'Date':
+            return `SyncValueConverters.localDate(${valueExpression})`;
+        case 'DateTime':
+            return `SyncValueConverters.localDateTime(${valueExpression})`;
+        default:
+            return `SyncValueConverters.string(${valueExpression})`;
+    }
 }
 
 module.exports = {readModelWriterMethods};

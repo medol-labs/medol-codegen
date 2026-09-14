@@ -402,7 +402,11 @@ function commandSnapshotFields(fields, workflow) {
             ...field,
             snapshotSelect: workflow.selectForSnapshotField(field)
         }))
-        .filter((field) => field.snapshotSelect?.snapshot?.keyField);
+        .filter((field) => field.snapshotSelect?.snapshot?.keyField || isDerivedSourceField(field));
+}
+
+function isDerivedSourceField(field) {
+    return field?.source?.kind === 'derived';
 }
 
 function contextRouteFor(slice, fallbackChapter) {

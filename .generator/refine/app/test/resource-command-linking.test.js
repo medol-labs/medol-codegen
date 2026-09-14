@@ -729,6 +729,277 @@ test('uses derived lookup command fields as hidden display snapshots for id sele
     }]);
 });
 
+test('keeps derived fields out of editable command fields without a selectable projection', () => {
+    const model = {
+        domain: 'Demo',
+        contexts: [{name: 'AgentOperations', title: 'Agent Operations'}],
+        aggregates: [],
+        transitions: [],
+        deployments: [{
+            name: 'Agent',
+            title: 'Agent',
+            contexts: ['AgentOperations']
+        }],
+        frontendApplications: [{
+            name: 'AgentConsole',
+            title: 'Agent Console',
+            contexts: [{name: 'AgentOperations', backend: 'Agent'}]
+        }],
+        slices: [{
+            id: 'slice-declare-dataset',
+            context: 'AgentOperations',
+            chapter: 'Agent Operations',
+            title: 'Declare Dataset',
+            commands: [{
+                id: 'command-declare-dataset',
+                title: 'Declare Dataset',
+                startsLifecycle: true,
+                concept: 'Dataset',
+                fields: [
+                    {name: 'datasetId', type: 'UUID', idAttribute: true, technicalAttribute: true},
+                    {name: 'featureSchemaId', type: 'UUID'},
+                    {
+                        name: 'featureDomain',
+                        type: 'String',
+                        optional: true,
+                        source: {
+                            kind: 'derived',
+                            from: ['PlatformFeatureSchemaCatalog.featureDomain'],
+                            lookup: {
+                                key: 'featureSchemaId',
+                                cacheProjection: 'PlatformFeatureSchemaCatalog',
+                                sourceField: 'featureDomain',
+                                targetField: 'featureDomain',
+                                missingValuePolicy: 'keep'
+                            }
+                        }
+                    }
+                ],
+                dependencies: [{
+                    id: 'event-dataset-declared',
+                    direction: 'OUTBOUND',
+                    title: 'Dataset Declared',
+                    elementType: 'EVENT'
+                }]
+            }],
+            events: [{
+                id: 'event-dataset-declared',
+                title: 'Dataset Declared',
+                fields: [
+                    {name: 'datasetId', type: 'UUID', idAttribute: true, technicalAttribute: true},
+                    {name: 'featureSchemaId', type: 'UUID'},
+                    {name: 'featureDomain', type: 'String', optional: true}
+                ],
+                dependencies: [{
+                    id: 'command-declare-dataset',
+                    direction: 'INBOUND',
+                    title: 'Declare Dataset',
+                    elementType: 'COMMAND'
+                }, {
+                    id: 'readmodel-dataset-capability',
+                    direction: 'OUTBOUND',
+                    title: 'Dataset Capability',
+                    elementType: 'READMODEL'
+                }]
+            }],
+            readmodels: []
+        }, {
+            id: 'slice-dataset-capability',
+            context: 'AgentOperations',
+            chapter: 'Agent Operations',
+            title: 'Dataset Capability',
+            commands: [],
+            events: [],
+            readmodels: [{
+                id: 'readmodel-dataset-capability',
+                title: 'Dataset Capability',
+                listElement: true,
+                fields: [
+                    {name: 'datasetId', type: 'UUID', idAttribute: true},
+                    {name: 'datasetName', type: 'String', display: true}
+                ],
+                dependencies: [{
+                    id: 'event-dataset-declared',
+                    direction: 'INBOUND',
+                    title: 'Dataset Declared',
+                    elementType: 'EVENT'
+                }]
+            }]
+        }]
+    };
+
+    const frontend = buildFrontendModel(model, undefined, {frontendApp: 'AgentConsole'});
+    const datasetCapability = frontend.resources.find((resource) => resource.name === 'dataset_capability');
+    const command = datasetCapability?.commands.find((item) => item.name === 'declareDataset');
+
+    assert.deepEqual(command?.fields.map((field) => field.name), ['featureSchemaId']);
+    assert.deepEqual(command?.snapshotFields.map((field) => field.name), ['featureDomain']);
+    assert.deepEqual(command?.defaultValueEntries.map((field) => field.name), ['datasetId', 'featureDomain']);
+});
+
+test('uses sync read models as local selectors for shadow-side commands', () => {
+    const model = {
+        domain: 'Demo',
+        contexts: [{name: 'AgentOperations', title: 'Agent Operations'}],
+        aggregates: [],
+        transitions: [],
+        deployments: [{
+            name: 'Agent',
+            title: 'Agent',
+            contexts: ['AgentOperations']
+        }],
+        frontendApplications: [{
+            name: 'AgentConsole',
+            title: 'Agent Console',
+            contexts: [{name: 'AgentOperations', backend: 'Agent'}]
+        }],
+        slices: [{
+            id: 'slice-declare-dataset',
+            context: 'AgentOperations',
+            chapter: 'Agent Operations',
+            title: 'Declare Dataset',
+            commands: [{
+                id: 'command-declare-dataset',
+                title: 'Declare Dataset',
+                startsLifecycle: true,
+                concept: 'Dataset',
+                fields: [
+                    {name: 'datasetId', type: 'UUID', idAttribute: true, technicalAttribute: true},
+                    {
+                        name: 'organizationId',
+                        type: 'UUID',
+                        source: {kind: 'direct', from: ['AgentOrganizationDirectory.organizationId']}
+                    },
+                    {
+                        name: 'organizationName',
+                        type: 'String',
+                        optional: true,
+                        source: {
+                            kind: 'derived',
+                            from: ['AgentOrganizationDirectory.organizationName'],
+                            lookup: {
+                                key: 'organizationId',
+                                cacheProjection: 'AgentOrganizationDirectory',
+                                sourceField: 'organizationName',
+                                targetField: 'organizationName',
+                                missingValuePolicy: 'keep'
+                            }
+                        }
+                    },
+                    {
+                        name: 'featureSchemaId',
+                        type: 'UUID',
+                        source: {kind: 'direct', from: ['AgentFeatureSchemaCatalog.featureSchemaId']}
+                    },
+                    {
+                        name: 'featureSchemaVersion',
+                        type: 'String',
+                        optional: true,
+                        source: {
+                            kind: 'derived',
+                            from: ['AgentFeatureSchemaCatalog.featureSchemaVersion'],
+                            lookup: {
+                                key: 'featureSchemaId',
+                                cacheProjection: 'AgentFeatureSchemaCatalog',
+                                sourceField: 'featureSchemaVersion',
+                                targetField: 'featureSchemaVersion',
+                                missingValuePolicy: 'keep'
+                            }
+                        }
+                    }
+                ],
+                dependencies: [{
+                    id: 'event-dataset-declared',
+                    direction: 'OUTBOUND',
+                    title: 'Dataset Declared',
+                    elementType: 'EVENT'
+                }]
+            }],
+            events: [{
+                id: 'event-dataset-declared',
+                title: 'Dataset Declared',
+                fields: [
+                    {name: 'datasetId', type: 'UUID', idAttribute: true, technicalAttribute: true},
+                    {name: 'organizationId', type: 'UUID'},
+                    {name: 'organizationName', type: 'String', optional: true},
+                    {name: 'featureSchemaId', type: 'UUID'},
+                    {name: 'featureSchemaVersion', type: 'String', optional: true}
+                ],
+                dependencies: [{
+                    id: 'command-declare-dataset',
+                    direction: 'INBOUND',
+                    title: 'Declare Dataset',
+                    elementType: 'COMMAND'
+                }, {
+                    id: 'readmodel-dataset-capability',
+                    direction: 'OUTBOUND',
+                    title: 'Dataset Capability',
+                    elementType: 'READMODEL'
+                }]
+            }],
+            readmodels: []
+        }, {
+            id: 'slice-agent-directories',
+            context: 'AgentOperations',
+            chapter: 'Agent Operations',
+            title: 'Agent Directories',
+            commands: [],
+            events: [],
+            readmodels: [{
+                id: 'readmodel-agent-organization-directory',
+                title: 'Agent Organization Directory',
+                listElement: true,
+                sync: true,
+                syncSource: 'OrganizationManagement.OrganizationDirectory',
+                fields: [
+                    {name: 'organizationId', type: 'UUID', idAttribute: true},
+                    {name: 'organizationName', type: 'String', display: true}
+                ],
+                dependencies: []
+            }, {
+                id: 'readmodel-agent-feature-schema-catalog',
+                title: 'Agent Feature Schema Catalog',
+                listElement: true,
+                sync: true,
+                syncSource: 'DatasetGovernance.FeatureSchemaCatalog',
+                fields: [
+                    {name: 'featureSchemaId', type: 'UUID', idAttribute: true},
+                    {name: 'featureDomain', type: 'String', display: true},
+                    {name: 'featureSchemaVersion', type: 'String'}
+                ],
+                dependencies: []
+            }, {
+                id: 'readmodel-dataset-capability',
+                title: 'Dataset Capability',
+                listElement: true,
+                fields: [
+                    {name: 'datasetId', type: 'UUID', idAttribute: true},
+                    {name: 'datasetName', type: 'String', display: true}
+                ],
+                dependencies: [{
+                    id: 'event-dataset-declared',
+                    direction: 'INBOUND',
+                    title: 'Dataset Declared',
+                    elementType: 'EVENT'
+                }]
+            }]
+        }]
+    };
+
+    const frontend = buildFrontendModel(model, undefined, {frontendApp: 'AgentConsole'});
+    const datasetCapability = frontend.resources.find((resource) => resource.name === 'dataset_capability');
+    const command = datasetCapability?.commands.find((item) => item.name === 'declareDataset');
+
+    assert.deepEqual(command?.fields.map((field) => field.name), ['organizationId', 'featureSchemaId']);
+    assert.equal(command?.fields[0]?.select?.resource, 'agent_organization_directory');
+    assert.equal(command?.fields[0]?.select?.optionValue, 'organizationId');
+    assert.equal(command?.fields[0]?.select?.optionLabel, 'organizationName');
+    assert.equal(command?.fields[1]?.select?.resource, 'agent_feature_schema_catalog');
+    assert.equal(command?.fields[1]?.select?.optionValue, 'featureSchemaId');
+    assert.equal(command?.fields[1]?.select?.optionLabel, 'featureDomain');
+    assert.deepEqual(command?.snapshotFields.map((field) => field.name), ['organizationName', 'featureSchemaVersion']);
+});
+
 test('prefers command owner catalog over relation projection catalog for row actions', () => {
     const model = {
         domain: 'Demo',

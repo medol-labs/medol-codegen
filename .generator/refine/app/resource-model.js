@@ -277,8 +277,12 @@ function withResourceComponent(command, resourceComponent) {
 function toCommand(command, resourceRoute, resourceComponent, readModel, allEvents, workflow, commandSlice, fallbackChapter) {
     const title = cleanTitle(command.title);
     const component = pascal(title);
-    const rawFields = command.fields ?? [];
-    const normalizedFields = normalizeFields(command.fields).filter((field) => !field.generated);
+    const selectionFields = workflow.selectionFieldsForCommand(command);
+    const rawFields = uniqueFields([
+        ...(command.fields ?? []),
+        ...selectionFields
+    ]);
+    const normalizedFields = normalizeFields(rawFields).filter((field) => !field.generated);
     const snapshotFields = commandSnapshotFields(normalizedFields, workflow);
     const snapshotFieldNames = new Set(snapshotFields.map((field) => field.name));
     const snapshotsByKeyField = snapshotFields.reduce((result, field) => {
@@ -372,7 +376,7 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
         matchingFields: normalizedFields,
         prefillCandidateFields: [
             ...formFields,
-            ...normalizedFields.filter((field) => !isCommandFormField(field) && hasSourceMapping(field))
+            ...normalizedFields.filter((field) => !isCommandFormField(field) && (hasSourceMapping(field) || field.selectionPrefill))
         ],
         workflowPrefillFields: normalizedFields.filter((field) => workflowFields.prefill.has(field.name)),
         defaultValueFields: formFields

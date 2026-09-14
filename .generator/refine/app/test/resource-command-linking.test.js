@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
+const {buildDomainModel} = require('../domain-model');
 const {buildFrontendModel} = require('../model-builder');
 
 test('links producer create commands to catalog read models across aggregate routes', () => {
@@ -175,6 +176,7 @@ test('projects frontend resources by frontend application without reusing backen
             {name: 'runtime-agent-backend', resources: ['role-catalog', 'runtime-agent-catalog']}
         ]
     );
+    assert.equal(frontend.authBackendModule.name, 'runtime-agent-backend');
 });
 
 test('keeps command result fields out of form fields', () => {
@@ -266,6 +268,199 @@ test('keeps command result fields out of form fields', () => {
 
     assert.deepEqual(command?.fields.map((field) => field.name), ['expiresAfterDays']);
     assert.deepEqual(command?.resultFields.map((field) => field.name), ['accessCode']);
+});
+
+test('places lifecycle create command on the catalog named by its modeled screen', () => {
+    const model = {
+        domain: 'Demo',
+        contexts: [{name: 'DatasetGovernance', title: 'Dataset Governance'}],
+        aggregates: [],
+        transitions: [],
+        deployments: [{
+            name: 'PlatformBackend',
+            title: 'Platform Backend',
+            contexts: ['DatasetGovernance']
+        }],
+        slices: [{
+            id: 'slice-define-feature-schema',
+            name: 'DefineFeatureSchema',
+            context: 'DatasetGovernance',
+            chapter: 'Dataset Governance',
+            title: 'Define Feature Schema',
+            screens: [{
+                name: 'FeatureSchemaCatalogScreen',
+                title: 'Feature Schema Catalog Screen'
+            }],
+            commands: [{
+                id: 'command-define-feature-schema',
+                title: 'Define Feature Schema',
+                concept: 'FeatureSchema',
+                startsLifecycle: true,
+                fields: [{name: 'featureSchemaId', type: 'UUID', idAttribute: true, technicalAttribute: true, generated: true}],
+                dependencies: [{
+                    id: 'event-feature-schema-defined',
+                    direction: 'OUTBOUND',
+                    title: 'Feature Schema Defined',
+                    elementType: 'EVENT'
+                }]
+            }],
+            events: [{
+                id: 'event-feature-schema-defined',
+                title: 'Feature Schema Defined',
+                fields: [{name: 'featureSchemaId', type: 'UUID', idAttribute: true, technicalAttribute: true}]
+            }],
+            readmodels: []
+        }, {
+            id: 'slice-current-recommended-feature-schema-catalog',
+            name: 'CurrentRecommendedFeatureSchemaCatalog',
+            context: 'DatasetGovernance',
+            chapter: 'Dataset Governance',
+            title: 'Current Recommended Feature Schema Catalog',
+            commands: [],
+            events: [],
+            readmodels: [{
+                id: 'readmodel-current-recommended-feature-schema-catalog',
+                title: 'Current Recommended Feature Schema Catalog',
+                listElement: true,
+                fields: [{name: 'featureDomain', type: 'String', idAttribute: true}]
+            }]
+        }, {
+            id: 'slice-feature-schema-catalog',
+            name: 'FeatureSchemaCatalog',
+            context: 'DatasetGovernance',
+            chapter: 'Dataset Governance',
+            title: 'Feature Schema Catalog',
+            commands: [],
+            events: [],
+            readmodels: [{
+                id: 'readmodel-feature-schema-catalog',
+                title: 'Feature Schema Catalog',
+                listElement: true,
+                fields: [{name: 'featureSchemaId', type: 'UUID', idAttribute: true}]
+            }]
+        }]
+    };
+
+    const frontend = buildFrontendModel(model);
+    const featureSchemaCatalog = frontend.resources.find((resource) => resource.route === 'feature-schema-catalog');
+    const currentRecommendedCatalog = frontend.resources.find((resource) => resource.route === 'current-recommended-feature-schema-catalog');
+
+    assert.equal(featureSchemaCatalog?.createCommand?.name, 'defineFeatureSchema');
+    assert.equal(currentRecommendedCatalog?.createCommand, undefined);
+});
+
+test('prefills concept selection fields for row commands addressed by technical ids', () => {
+    const model = {
+        domain: 'Demo',
+        contexts: [{name: 'DatasetGovernance', title: 'Dataset Governance'}],
+        aggregates: [],
+        transitions: [],
+        deployments: [{
+            name: 'PlatformBackend',
+            title: 'Platform Backend',
+            contexts: ['DatasetGovernance']
+        }],
+        slices: [{
+            id: 'slice-define-feature-schema',
+            name: 'DefineFeatureSchema',
+            context: 'DatasetGovernance',
+            title: 'Define Feature Schema',
+            concepts: ['FeatureSchema'],
+            startsLifecycle: true,
+            tags: [{name: 'featureDomain'}, {name: 'version'}],
+            commands: [{
+                id: 'command-define-feature-schema',
+                name: 'DefineFeatureSchema',
+                title: 'Define Feature Schema',
+                concept: 'FeatureSchema',
+                startsLifecycle: true,
+                fields: [
+                    {name: 'featureSchemaId', type: 'UUID', idAttribute: true, technicalAttribute: true, generated: true},
+                    {name: 'featureDomain', type: 'String'},
+                    {name: 'version', type: 'String'}
+                ],
+                dependencies: [{
+                    id: 'event-feature-schema-defined',
+                    direction: 'OUTBOUND',
+                    title: 'Feature Schema Defined',
+                    elementType: 'EVENT'
+                }]
+            }],
+            events: [{
+                id: 'event-feature-schema-defined',
+                title: 'Feature Schema Defined',
+                fields: [
+                    {name: 'featureSchemaId', type: 'UUID', idAttribute: true},
+                    {name: 'featureDomain', type: 'String'},
+                    {name: 'version', type: 'String'}
+                ]
+            }],
+            readmodels: []
+        }, {
+            id: 'slice-publish-feature-schema',
+            name: 'PublishFeatureSchema',
+            context: 'DatasetGovernance',
+            title: 'Publish Feature Schema',
+            concepts: ['FeatureSchema'],
+            commands: [{
+                id: 'command-publish-feature-schema',
+                name: 'PublishFeatureSchema',
+                title: 'Publish Feature Schema',
+                concept: 'FeatureSchema',
+                fields: [
+                    {name: 'featureSchemaId', type: 'UUID', idAttribute: true, technicalAttribute: true},
+                    {name: 'publishNote', type: 'String', optional: true}
+                ],
+                dependencies: [{
+                    id: 'event-feature-schema-published',
+                    direction: 'OUTBOUND',
+                    title: 'Feature Schema Published',
+                    elementType: 'EVENT'
+                }]
+            }],
+            events: [{
+                id: 'event-feature-schema-published',
+                title: 'Feature Schema Published',
+                dependencies: [{
+                    id: 'command-publish-feature-schema',
+                    direction: 'INBOUND',
+                    title: 'Publish Feature Schema',
+                    elementType: 'COMMAND'
+                }],
+                fields: [{name: 'featureSchemaId', type: 'UUID', idAttribute: true}]
+            }],
+            readmodels: []
+        }, {
+            id: 'slice-feature-schema-catalog',
+            name: 'FeatureSchemaCatalog',
+            context: 'DatasetGovernance',
+            title: 'Feature Schema Catalog',
+            concepts: ['FeatureSchema'],
+            commands: [],
+            events: [],
+            readmodels: [{
+                id: 'readmodel-feature-schema-catalog',
+                title: 'Feature Schema Catalog',
+                listElement: true,
+                fields: [
+                    {name: 'featureSchemaId', type: 'UUID', idAttribute: true},
+                    {name: 'featureDomain', type: 'String'},
+                    {name: 'version', type: 'String'}
+                ]
+            }]
+        }]
+    };
+
+    const frontend = buildFrontendModel(model);
+    const featureSchemaCatalog = frontend.resources.find((resource) => resource.route === 'feature-schema-catalog');
+    const publish = featureSchemaCatalog?.itemCommands.find((command) => command.name === 'publishFeatureSchema');
+
+    assert.deepEqual(publish?.rowPrefillFields.map((field) => field.name), ['featureDomain', 'version']);
+    assert.deepEqual(publish?.hiddenPrefillFields.map((field) => field.name), ['featureDomain', 'version', 'featureSchemaId']);
+
+    const domain = buildDomainModel(frontend.frontendSource);
+    const command = domain.commands.find((item) => item.name === 'PublishFeatureSchema');
+    assert.deepEqual(command?.fields.map((field) => field.name), ['featureSchemaId', 'publishNote', 'featureDomain', 'version']);
 });
 
 test('links non-lifecycle producer commands as row actions and supports explicit catalog field selects', () => {

@@ -266,28 +266,15 @@ const applicationWriterMethods = {
         this.fs.copy(this.templatePath('infra/src/main/proto'), this.destinationPath(`${UMA_DB_EVENT_STORAGE_MODULE}/src/main/proto`));
     },
 
-    _iamDeploymentName() {
-        return this._iamDeploymentNameFromModel();
-    },
-
-    _iamDeploymentNameFromModel() {
+    _shouldWriteIamIntoCurrentModule() {
         const hasIamContext = (this.fullModel?.contexts ?? this.model.contexts ?? [])
             .some((context) => context.name === IAM_CONTEXT);
-        if (!hasIamContext) return '';
-        const deployments = this.fullModel?.deployments ?? this.model.deployments ?? [];
-        const deployment = deployments.find((candidate) =>
-            (candidate.contexts ?? []).some((context) => context.name === IAM_CONTEXT)
-        );
-        return deployment?.name ?? '';
-    },
-
-    _shouldWriteIamIntoCurrentModule() {
-        const target = this._iamDeploymentName();
-        if (!target) return false;
-        if (!this.currentDeployment) return (this.model.deployments ?? []).length === 0;
-        const normalizedTarget = kebab(target);
-        return target === this.currentDeployment.name ||
-            normalizedTarget === this._deploymentModuleName(this.currentDeployment);
+        if (!hasIamContext) return false;
+        if (!this.currentDeployment) {
+            return (this.model.deployments ?? []).length === 0
+                || (this.model.contexts ?? []).some((context) => context.name === IAM_CONTEXT);
+        }
+        return (this.currentDeployment.contexts ?? []).some((context) => context.name === IAM_CONTEXT);
     },
 
     _writeIamArtifacts({modulePath, migrationFileName}) {

@@ -12,6 +12,7 @@ const {
     pascal
 } = require('./model-utils');
 const {buildAutomationCommandKeys, isAutomationCommand, commandKey} = require('./workflow-model');
+const {commandFieldsWithSelection} = require('./selection-fields');
 
 function buildDomainModel(source) {
     source = withResolvedValueTypes(source);
@@ -22,16 +23,16 @@ function buildDomainModel(source) {
         tsBaseType: tsValueType(valueType),
         schema: zodValueTypeExpression(valueType)
     }));
-    const commands = uniqueCommands(slices.flatMap((slice) => slice.commands ?? []))
-        .filter((command) => command?.title)
-        .filter((command) => !isAutomationCommand(command, automationCommandKeys))
-        .map((command) => {
+    const commands = uniqueCommandsWithSlices(slices.flatMap((slice) => (slice.commands ?? []).map((command) => ({command, slice}))))
+        .filter(({command}) => command?.title)
+        .filter(({command}) => !isAutomationCommand(command, automationCommandKeys))
+        .map(({command, slice}) => {
             const component = pascal(cleanTitle(command.title));
             return {
                 name: component,
                 schemaName: `${component}CommandSchema`,
                 inputTypeName: `${component}CommandInput`,
-                fields: normalizeFields(command.fields)
+                fields: normalizeFields(commandFieldsWithSelection(command, slice, slices))
                     .filter((field) => !field.portOutput)
                     .map((field) => ({
                         ...field,
@@ -91,6 +92,16 @@ function uniqueCommands(commands) {
     commands.filter(Boolean).forEach((command) => {
         if (!byName.has(command.name)) {
             byName.set(command.name, command);
+        }
+    });
+    return Array.from(byName.values());
+}
+
+function uniqueCommandsWithSlices(items) {
+    const byName = new Map();
+    items.filter((item) => item?.command).forEach((item) => {
+        if (!byName.has(item.command.name)) {
+            byName.set(item.command.name, item);
         }
     });
     return Array.from(byName.values());

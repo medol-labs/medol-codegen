@@ -352,6 +352,7 @@ function normalizeFields(fields = []) {
             readOnly: !!field.readOnly,
             technicalAttribute: !!field.technicalAttribute,
             portOutput: !!field.portOutput,
+            selectionPrefill: !!field.selectionPrefill,
             idAttribute: !!field.idAttribute,
             display: !!field.display,
             uploadFile: !!field.uploadFile,

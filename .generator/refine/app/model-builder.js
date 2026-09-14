@@ -42,7 +42,7 @@ function buildFrontendModel(source, selectedCommandKeys, options = {}) {
     const chapters = withChapterI18n(uniqueChapters(resources.map((resource) => resource.chapter).filter(Boolean)));
     const i18n = buildI18nModel(frontendSource, chapters, resources);
     const fileUploadCapability = buildFileUploadCapability(slices, allAggregates, allContexts, backendModules, backendModuleForSlice);
-    const authBackendModule = buildAuthBackendModule(modules);
+    const authBackendModule = buildAuthBackendModule(modules, frontendApplication);
 
     return {
         appName: frontendApplication?.title ?? source.domain ?? 'Event Sourcing App',
@@ -181,7 +181,14 @@ function normalizeName(value) {
     return `${value ?? ''}`.replace(/[^a-zA-Z0-9]+/g, '').toLowerCase();
 }
 
-function buildAuthBackendModule(backendModules) {
+function buildAuthBackendModule(backendModules, frontendApplication) {
+    const iamContext = (frontendApplication?.contexts ?? [])
+        .find((context) => contextNameOf(context) === 'IdentityAccessManagement' && context.backend);
+    const frontendIamBackend = iamContext?.backend
+        ? backendModuleByName(iamContext.backend, backendModules)
+        : undefined;
+    if (frontendIamBackend) return frontendIamBackend;
+
     return backendModules.find((module) => (module.contexts ?? []).includes('IdentityAccessManagement'))
         ?? backendModules[0]
         ?? {

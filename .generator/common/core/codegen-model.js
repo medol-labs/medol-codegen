@@ -307,6 +307,8 @@ function normalizeSlices(config, aggregates, contexts, actors, valueTypes) {
             title: cleanTitle(slice.title ?? slice.name ?? `Slice ${index + 1}`),
             chapter: slice.chapter ?? context,
             context,
+            tags: slice.tags ?? [],
+            startsLifecycle: !!slice.startsLifecycle,
             concepts: slice.concepts ?? [],
             aggregate,
             commands: normalizeElements(slice.commands, 'COMMAND', slice, aggregate, valueTypes),

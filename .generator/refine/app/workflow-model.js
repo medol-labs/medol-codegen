@@ -93,7 +93,10 @@ function buildWorkflowModel(
             readModel,
             slice,
             context: slice.context ?? slice.chapter,
-            screenKeys: screenKeysForSlice(slice),
+            screenKeys: unique([
+                ...screenKeysForSlice(slice),
+                ...screenKeysForReadModel(readModel)
+            ]),
             aggregate: aggregateName(readModel, { ...slice, title: readModel.slice ?? slice.title }, aggregates, contexts),
             deployment: backendModuleForSlice(slice)
         }));
@@ -241,6 +244,14 @@ function buildWorkflowModel(
         historyPrefillForField(command, ownerReadModel, field, ownerFields) {
             return historyPrefillForField(readModelInfos, command, ownerReadModel, field, ownerFields);
         },
+        selectionFieldsForCommand(command) {
+            const slice = this.commandSliceFor(command);
+            if (!slice) {
+                return [];
+            }
+            const {commandSelectionFields} = require('./selection-fields');
+            return commandSelectionFields(command, slice, slices);
+        },
         dictionaryValueSelect(dictionaryCode) {
             if (!dictionaryProviderSelect || !dictionaryProviderSelect.dictionaryCodeField || !dictionaryCode) {
                 return null;
@@ -335,6 +346,19 @@ function screenKeysForSlice(slice) {
         .flatMap((screen) => [screen?.name, screen?.title])
         .filter(Boolean)
         .map((value) => cleanTitle(value).replace(/\s+/g, '').toLowerCase()));
+}
+
+function screenKeysForReadModel(readModel) {
+    return unique([
+        readModel?.name,
+        readModel?.title
+    ]
+        .filter(Boolean)
+        .flatMap((value) => {
+            const compact = cleanTitle(value).replace(/\s+/g, '');
+            return [compact, `${compact}Screen`];
+        })
+        .map((value) => value.toLowerCase()));
 }
 
 function transitionForCommand(command, transitionsByCommandId) {

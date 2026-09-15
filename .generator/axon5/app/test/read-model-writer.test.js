@@ -117,14 +117,37 @@ test('writes shared sync read model support with switchable adapters and checkpo
     assert.match(writes.get('shared/shared/application/sync/HttpPullSyncReadModelAdapter.kt'), /mode\.equals\("pull-http", ignoreCase = true\)/);
     assert.match(writes.get('shared/shared/application/sync/HttpPullSyncReadModelAdapter.kt'), /target\.queryParameters\(context\)\.forEach/);
     assert.match(writes.get('shared/shared/application/sync/HttpPullSyncReadModelAdapter.kt'), /queryParam\("updatedAfter", it\)/);
+    assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /mode\.equals\("outbox-delta", ignoreCase = true\)/);
+    assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /afterSequence/);
+    assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /bootstrapCompleted/);
+    assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /target\.sourcePath/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /medol_sync_read_model_outbox/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /uk_sync_read_model_outbox_event/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /idx_sync_read_model_outbox_source_sequence/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /existsBySourceContextAndSourceReadModelAndReadModelKeyAndEventIdAndOperation/);
+    assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /requires medol\.sync\.source-base-url/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelScheduler.kt'), /adapters\.firstOrNull \{ it\.supports\(properties\.mode\) \}/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelScheduler.kt'), /adapter\.syncOnce\(target, checkpoint\)/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelCheckpoint.kt'), /medol_sync_read_model_checkpoint/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelCheckpoint.kt'), /lastSequence/);
 });
 
 test('writes sync read model target registration with field aliases and local syncedAt', () => {
     const writes = new Map();
     const writer = syncWriter(writes);
+    writer.fullModel = {
+        slices: [{
+            context: 'DatasetGovernance',
+            readmodels: [{
+                name: 'FeatureSchemaCatalog',
+                fields: [
+                    {name: 'featureSchemaId', type: 'UUID'},
+                    {name: 'featureDomain', type: 'String'},
+                    {name: 'version', type: 'String'}
+                ]
+            }]
+        }]
+    };
     const readmodel = {
         name: 'AgentFeatureSchemaCatalog',
         title: 'Agent Feature Schema Catalog',
@@ -133,8 +156,9 @@ test('writes sync read model target registration with field aliases and local sy
         syncFilters: [{target: 'organizationId', source: 'sync.organizationId'}],
         fields: [
             {name: 'featureSchemaId', type: 'UUID', idAttribute: true, source: {kind: 'direct', from: ['featureSchemaId']}},
-            {name: 'featureDomain', type: 'String', display: true, source: {kind: 'direct', from: ['featureDomain']}},
+            {name: 'featureDomain', type: 'String', display: true},
             {name: 'featureSchemaVersion', type: 'String', source: {kind: 'direct', from: ['version']}},
+            {name: 'localDisplayOrder', type: 'Integer'},
             {name: 'syncedAt', type: 'DateTime'}
         ]
     };
@@ -153,9 +177,12 @@ test('writes sync read model target registration with field aliases and local sy
     assert.match(registration, /source = "DatasetGovernance\.FeatureSchemaCatalog"/);
     assert.match(registration, /sourcePath = "\/sync\/read-models\/dataset-governance\/feature-schema-catalog"/);
     assert.match(registration, /"organizationId" to context\.requiredParameter\("organizationId", targetName\)/);
+    assert.match(registration, /"featureDomain" to "featureDomain"/);
     assert.match(registration, /"featureSchemaVersion" to "version"/);
+    assert.doesNotMatch(registration, /localDisplayOrder/);
     assert.match(registration, /val targetName = "AgentFeatureSchemaCatalog"/);
     assert.match(registration, /val id = SyncValueConverters\.required\(SyncValueConverters\.uuid\(row\["featureSchemaId"\]\), targetName, "featureSchemaId"\)/);
+    assert.match(registration, /projection\.featureDomain = SyncValueConverters\.required\(SyncValueConverters\.string\(row\["featureDomain"\]\), targetName, "featureDomain"\)/);
     assert.match(registration, /projection\.featureSchemaVersion = SyncValueConverters\.required\(SyncValueConverters\.string\(row\["version"\]\), targetName, "featureSchemaVersion"\)/);
     assert.match(registration, /projection\.syncedAt = syncedAt/);
     assert.match(registration, /repository\.save\(projection\)/);
@@ -200,7 +227,11 @@ test('writes sync read model source resource for referenced source read models',
     );
     assert.match(sourceResource, /@RequestMapping\("\/sync\/read-models\/dataset-governance\/feature-schema-catalog"\)/);
     assert.match(sourceResource, /repository\.findAll\(PageRequest\.of\(0, size\.coerceIn\(1, 1000\)\)\)/);
-    assert.match(sourceResource, /"items" to page\.content/);
+    assert.match(sourceResource, /payload\[name\]\?\.toString\(\) != value/);
+    assert.match(sourceResource, /@GetMapping\("\/deltas"\)/);
+    assert.match(sourceResource, /SyncReadModelOutboxRepository/);
+    assert.match(sourceResource, /afterSequence/);
+    assert.match(sourceResource, /"items" to items/);
 });
 
 test('does not write sync registration for read models without sync source or a single id', () => {

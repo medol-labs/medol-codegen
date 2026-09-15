@@ -432,7 +432,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties
 @ConfigurationProperties("medol.sync")
 data class SyncReadModelProperties(
     var enabled: Boolean = true,
-    var mode: String = "pull-http",
+    var mode: String = "outbox-delta",
     var sourceBaseUrl: String = "",
     var pageSize: Int = 200,
     var fixedDelayMs: Long = 30000,
@@ -449,6 +449,7 @@ data class SyncReadModelTarget(
     val sourceContext: String,
     val sourceReadModel: String,
     val sourcePath: String,
+    val deltaPath: String = "$sourcePath/deltas",
     val fieldMappings: Map<String, String>,
     val queryParameters: (SyncReadModelContext) -> Map<String, String> = { emptyMap() },
     val upsert: (Map<String, Any?>, LocalDateTime) -> Unit
@@ -466,7 +467,8 @@ data class SyncReadModelContext(
 data class SyncReadModelResult(
     val target: String,
     val itemCount: Int,
-    val nextCursor: String? = null
+    val nextCursor: String? = null,
+    val nextSequence: Long? = null
 )
 `);
         this.fs.write(this._sharedKernelKotlinPath(`${basePath}/SyncReadModelAdapter.kt`), `package ${basePackage}
@@ -495,9 +497,133 @@ class SyncReadModelCheckpoint {
     var lastStatus: String = "NEVER_SYNCED"
     var lastError: String? = null
     var syncedItemCount: Int = 0
+    var lastCursor: String? = null
+    var lastSequence: Long = 0
+    var bootstrapCompleted: Boolean = false
 }
 
 interface SyncReadModelCheckpointRepository : JpaRepository<SyncReadModelCheckpoint, String>
+`);
+        this.fs.write(this._sharedKernelKotlinPath(`${basePath}/SyncReadModelOutbox.kt`), `package ${basePackage}
+
+import com.fasterxml.jackson.databind.ObjectMapper
+import jakarta.persistence.Column
+import jakarta.persistence.Entity
+import jakarta.persistence.GeneratedValue
+import jakarta.persistence.GenerationType
+import jakarta.persistence.Id
+import jakarta.persistence.Index
+import jakarta.persistence.Lob
+import jakarta.persistence.Table
+import jakarta.persistence.UniqueConstraint
+import org.axonframework.messaging.eventhandling.EventMessage
+import org.springframework.data.domain.Pageable
+import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.stereotype.Component
+import java.time.LocalDateTime
+import java.time.ZoneOffset
+
+@Entity
+@Table(
+    name = "medol_sync_read_model_outbox",
+    uniqueConstraints = [
+        UniqueConstraint(
+            name = "uk_sync_read_model_outbox_event",
+            columnNames = ["source_context", "source_read_model", "read_model_key", "event_id", "operation"]
+        )
+    ],
+    indexes = [
+        Index(
+            name = "idx_sync_read_model_outbox_source_sequence",
+            columnList = "source_context, source_read_model, sequence"
+        )
+    ]
+)
+class SyncReadModelOutbox {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    var sequence: Long? = null
+
+    @Column(name = "source_context")
+    var sourceContext: String = ""
+
+    @Column(name = "source_read_model")
+    var sourceReadModel: String = ""
+
+    @Column(name = "read_model_key")
+    var readModelKey: String = ""
+    var operation: String = "UPSERT"
+
+    @Column(name = "event_id")
+    var eventId: String = ""
+
+    @Column(name = "event_type")
+    var eventType: String = ""
+
+    @Column(name = "occurred_at")
+    var occurredAt: LocalDateTime? = null
+
+    @Column(name = "created_at")
+    var createdAt: LocalDateTime = LocalDateTime.now()
+
+    @Lob
+    @Column(columnDefinition = "text")
+    var payloadJson: String = "{}"
+}
+
+interface SyncReadModelOutboxRepository : JpaRepository<SyncReadModelOutbox, Long> {
+    fun findBySourceContextAndSourceReadModelAndSequenceGreaterThanOrderBySequenceAsc(
+        sourceContext: String,
+        sourceReadModel: String,
+        sequence: Long,
+        pageable: Pageable
+    ): List<SyncReadModelOutbox>
+
+    fun existsBySourceContextAndSourceReadModelAndReadModelKeyAndEventIdAndOperation(
+        sourceContext: String,
+        sourceReadModel: String,
+        readModelKey: String,
+        eventId: String,
+        operation: String
+    ): Boolean
+}
+
+@Component
+class SyncReadModelOutboxAppender(
+    private val repository: SyncReadModelOutboxRepository,
+    private val objectMapper: ObjectMapper
+) {
+    fun append(
+        sourceContext: String,
+        sourceReadModel: String,
+        readModelKey: String,
+        operation: String,
+        payload: Any,
+        message: EventMessage
+    ) {
+        val eventId = message.identifier()
+        if (repository.existsBySourceContextAndSourceReadModelAndReadModelKeyAndEventIdAndOperation(
+                sourceContext,
+                sourceReadModel,
+                readModelKey,
+                eventId,
+                operation
+            )
+        ) {
+            return
+        }
+        repository.save(SyncReadModelOutbox().also {
+            it.sourceContext = sourceContext
+            it.sourceReadModel = sourceReadModel
+            it.readModelKey = readModelKey
+            it.operation = operation
+            it.eventId = eventId
+            it.eventType = message.type().toString()
+            it.occurredAt = LocalDateTime.ofInstant(message.timestamp(), ZoneOffset.UTC)
+            it.payloadJson = objectMapper.writeValueAsString(payload)
+        })
+    }
+}
 `);
         this.fs.write(this._sharedKernelKotlinPath(`${basePath}/SyncReadModelRegistry.kt`), `package ${basePackage}
 
@@ -622,7 +748,7 @@ class HttpPullSyncReadModelAdapter(
 
     override fun syncOnce(target: SyncReadModelTarget, checkpoint: SyncReadModelCheckpoint?): SyncReadModelResult {
         if (properties.sourceBaseUrl.isBlank()) {
-            return SyncReadModelResult(target.name, 0)
+            throw IllegalStateException("Sync target \${target.name} requires medol.sync.source-base-url")
         }
 
         var cursor: String? = null
@@ -662,11 +788,97 @@ class HttpPullSyncReadModelAdapter(
     }
 }
 `);
+        this.fs.write(this._sharedKernelKotlinPath(`${basePath}/OutboxDeltaSyncReadModelAdapter.kt`), `package ${basePackage}
+
+import com.fasterxml.jackson.core.type.TypeReference
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
+import org.springframework.stereotype.Component
+import org.springframework.web.client.RestClient
+import org.springframework.web.util.UriComponentsBuilder
+import java.time.LocalDateTime
+
+@Component
+class OutboxDeltaSyncReadModelAdapter(
+    private val properties: SyncReadModelProperties,
+    restClientBuilder: RestClient.Builder,
+    private val objectMapper: ObjectMapper
+) : SyncReadModelAdapter {
+    private val restClient: RestClient = restClientBuilder.build()
+    private val mapType = object : TypeReference<Map<String, Any?>>() {}
+
+    override fun supports(mode: String): Boolean =
+        mode.equals("outbox-delta", ignoreCase = true)
+
+    override fun syncOnce(target: SyncReadModelTarget, checkpoint: SyncReadModelCheckpoint?): SyncReadModelResult {
+        if (properties.sourceBaseUrl.isBlank()) {
+            throw IllegalStateException("Sync target \${target.name} requires medol.sync.source-base-url")
+        }
+
+        var count = 0
+        val context = SyncReadModelContext(properties, checkpoint)
+        if (checkpoint?.bootstrapCompleted != true) {
+            val snapshotUriBuilder = UriComponentsBuilder
+                .fromHttpUrl(properties.sourceBaseUrl)
+                .path(target.sourcePath)
+                .queryParam("size", properties.pageSize)
+            target.queryParameters(context).forEach { (name, value) -> snapshotUriBuilder.queryParam(name, value) }
+
+            val snapshotResponse = restClient.get()
+                .uri(snapshotUriBuilder.toUriString())
+                .retrieve()
+                .body(JsonNode::class.java)
+
+            val snapshotSyncedAt = LocalDateTime.now()
+            snapshotResponse.itemsNode().forEach { item ->
+                target.upsert(objectMapper.convertValue(item, mapType), snapshotSyncedAt)
+                count += 1
+            }
+        }
+
+        val afterSequence = checkpoint?.lastSequence ?: 0
+        val uriBuilder = UriComponentsBuilder
+            .fromHttpUrl(properties.sourceBaseUrl)
+            .path(target.deltaPath)
+            .queryParam("afterSequence", afterSequence)
+            .queryParam("size", properties.pageSize)
+
+        target.queryParameters(context).forEach { (name, value) -> uriBuilder.queryParam(name, value) }
+
+        val response = restClient.get()
+            .uri(uriBuilder.toUriString())
+            .retrieve()
+            .body(JsonNode::class.java)
+
+        val syncedAt = LocalDateTime.now()
+        response.itemsNode().forEach { item ->
+            val operation = item.get("operation")?.asText() ?: "UPSERT"
+            if (operation.equals("UPSERT", ignoreCase = true)) {
+                val payload = item.get("payload") ?: item
+                target.upsert(objectMapper.convertValue(payload, mapType), syncedAt)
+                count += 1
+            }
+        }
+
+        val nextSequence = response?.get("nextSequence")?.takeIf { !it.isNull }?.asLong()
+            ?: checkpoint?.lastSequence
+        return SyncReadModelResult(target.name, count, nextSequence = nextSequence)
+    }
+
+    private fun JsonNode?.itemsNode(): Iterable<JsonNode> {
+        if (this == null || this.isNull) return emptyList()
+        val items = this.get("items") ?: this.get("content") ?: this
+        return if (items.isArray) items.toList() else emptyList()
+    }
+}
+`);
         this.fs.write(this._sharedKernelKotlinPath(`${basePath}/SyncReadModelScheduler.kt`), `package ${basePackage}
 
 import org.slf4j.LoggerFactory
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.support.TransactionTemplate
 import java.time.LocalDateTime
 
 @Component
@@ -674,9 +886,11 @@ class SyncReadModelScheduler(
     private val properties: SyncReadModelProperties,
     private val registry: SyncReadModelRegistry,
     private val adapters: List<SyncReadModelAdapter>,
-    private val checkpoints: SyncReadModelCheckpointRepository
+    private val checkpoints: SyncReadModelCheckpointRepository,
+    transactionManager: PlatformTransactionManager
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
+    private val transactions = TransactionTemplate(transactionManager)
 
     @Scheduled(fixedDelayString = "\\\${medol.sync.fixed-delay-ms:30000}")
     fun syncAll() {
@@ -688,26 +902,35 @@ class SyncReadModelScheduler(
         }
 
         registry.targets.forEach { target ->
-            val checkpoint = checkpoints.findById(target.name).orElseGet {
-                SyncReadModelCheckpoint().also {
-                    it.target = target.name
-                    it.source = target.source
-                }
+            transactions.executeWithoutResult {
+                syncTarget(adapter, target)
             }
-            checkpoint.lastAttemptedAt = LocalDateTime.now()
-            try {
-                val result = adapter.syncOnce(target, checkpoint)
-                checkpoint.lastSuccessfulSyncedAt = LocalDateTime.now()
-                checkpoint.lastStatus = "SYNCED"
-                checkpoint.lastError = null
-                checkpoint.syncedItemCount = result.itemCount
-            } catch (ex: Exception) {
-                checkpoint.lastStatus = "FAILED"
-                checkpoint.lastError = ex.message
-                log.warn("Sync read model target={} failed", target.name, ex)
-            }
-            checkpoints.save(checkpoint)
         }
+    }
+
+    private fun syncTarget(adapter: SyncReadModelAdapter, target: SyncReadModelTarget) {
+        val checkpoint = checkpoints.findById(target.name).orElseGet {
+            SyncReadModelCheckpoint().also {
+                it.target = target.name
+                it.source = target.source
+            }
+        }
+        checkpoint.lastAttemptedAt = LocalDateTime.now()
+        try {
+            val result = adapter.syncOnce(target, checkpoint)
+            checkpoint.lastSuccessfulSyncedAt = LocalDateTime.now()
+            checkpoint.lastStatus = "SYNCED"
+            checkpoint.lastError = null
+            checkpoint.syncedItemCount = result.itemCount
+            checkpoint.lastCursor = result.nextCursor ?: checkpoint.lastCursor
+            checkpoint.lastSequence = result.nextSequence ?: checkpoint.lastSequence
+            checkpoint.bootstrapCompleted = true
+        } catch (ex: Exception) {
+            checkpoint.lastStatus = "FAILED"
+            checkpoint.lastError = ex.message
+            log.warn("Sync read model target={} failed", target.name, ex)
+        }
+        checkpoints.save(checkpoint)
     }
 }
 `);
@@ -723,14 +946,19 @@ class SyncReadModelScheduler(
         const sourceReadModel = sourceParts.at(-1) ?? readmodel.syncSource;
         const beanName = `${lowerFirst(name)}SyncTarget`;
         const targetName = readmodel.name ?? readmodel.title;
-        const idExpression = syncValueExpression(id, `row["${syncSourceFieldName(id)}"]`, 'targetName');
+        const sourceReadModelDefinition = this._findSyncSourceReadModel(readmodel.syncSource);
+        const idSource = syncSourceFieldName(id, sourceReadModelDefinition);
+        if (!idSource) {
+            return;
+        }
+        const idExpression = syncValueExpression(id, `row["${idSource}"]`, 'targetName');
         const assignments = (readmodel.fields ?? [])
             .filter((field) => field.name !== id.name)
-            .map((field) => syncProjectionAssignment(field))
+            .map((field) => syncProjectionAssignment(field, sourceReadModelDefinition))
             .filter(Boolean)
             .join('\n');
         const fieldMappings = (readmodel.fields ?? [])
-            .map((field) => [field.name, syncSourceFieldName(field)])
+            .map((field) => [field.name, syncSourceFieldName(field, sourceReadModelDefinition)])
             .filter(([, source]) => source)
             .map(([target, source]) => `            "${target}" to "${source}"`)
             .join(',\n');
@@ -774,6 +1002,34 @@ ${assignments}
     }
 }
 `);
+    },
+
+    _findSyncSourceReadModel(syncSource) {
+        const parts = String(syncSource ?? '').split('.').filter(Boolean);
+        const sourceReadModel = parts.at(-1);
+        const sourceContext = parts.length > 1 ? parts.slice(0, -1).join('.') : undefined;
+        if (!sourceReadModel) {
+            return undefined;
+        }
+        const model = this.fullModel ?? this.model;
+        for (const slice of model?.slices ?? []) {
+            const match = (slice.readmodels ?? []).find((candidate) =>
+                (candidate.name === sourceReadModel || candidate.title === sourceReadModel)
+                && (!sourceContext || slice.context === sourceContext || slice.boundedContext === sourceContext)
+            );
+            if (match) {
+                return match;
+            }
+        }
+        for (const slice of model?.slices ?? []) {
+            const match = (slice.readmodels ?? []).find((candidate) =>
+                candidate.name === sourceReadModel || candidate.title === sourceReadModel
+            );
+            if (match) {
+                return match;
+            }
+        }
+        return undefined;
     },
 
     _writeReadModelJpaRepository(readModelPackageName, context, slicePackage, slice, readmodel, name, idFields, hasJsonJpaFields = false) {
@@ -1077,7 +1333,10 @@ ${idFields.length === 1 ? `
         const fullModel = this.fullModel ?? this.model;
         return (fullModel.slices ?? []).some((candidateSlice) =>
             (candidateSlice.readmodels ?? []).some((candidateReadModel) =>
-                candidateReadModel.sync && sourceNames.includes(candidateReadModel.syncSource)
+                candidateReadModel.sync && (
+                    sourceNames.includes(candidateReadModel.syncSource)
+                    || currentReadModelNames.includes(String(candidateReadModel.syncSource ?? '').split('.').filter(Boolean).at(-1))
+                )
             )
         );
     },
@@ -1085,7 +1344,9 @@ ${idFields.length === 1 ? `
     _writeSyncReadModelSourceResource(packageName, context, slicePackage, slice, readmodel, name) {
         const repositoryName = `${name}Repository`;
         const resourceName = `${name}SyncReadModelResource`;
-        const sourceContext = slice.context ?? slice.boundedContext ?? context;
+        const sourceAlias = this._syncSourceAliasForReadModel(slice, readmodel);
+        const sourceContext = sourceAlias?.context ?? slice.context ?? slice.boundedContext ?? context;
+        const sourceReadModel = sourceAlias?.readModel ?? readmodel.name ?? readmodel.title;
         const sourcePath = `/sync/read-models/${kebab(sourceContext)}/${kebab(readmodel.name ?? readmodel.title)}`;
         const readModelPermission = permissionCode(readmodel.name ?? readmodel.title);
 
@@ -1098,24 +1359,115 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import com.fasterxml.jackson.core.type.TypeReference
+import com.fasterxml.jackson.databind.ObjectMapper
+import ${this.model.rootPackage}.shared.application.sync.SyncReadModelOutboxRepository
 
 @CrossOrigin
 @RestController
 @RequestMapping("${sourcePath}")
-class ${resourceName}(private val repository: ${repositoryName}) {
+class ${resourceName}(
+    private val repository: ${repositoryName},
+    private val outboxRepository: SyncReadModelOutboxRepository,
+    private val objectMapper: ObjectMapper
+) {
+    private val mapType = object : TypeReference<Map<String, Any?>>() {}
+
     @PreAuthorize("hasAuthority('*:*') or hasAuthority('${readModelPermission}:list') or hasAuthority('${readModelPermission}:read')")
     @GetMapping
     fun findAllForSync(
-        @RequestParam(defaultValue = "200") size: Int
+        @RequestParam(defaultValue = "200") size: Int,
+        @RequestParam parameters: Map<String, String>
     ): Map<String, Any?> {
+        val reserved = setOf("afterSequence", "size", "cursor")
+        val filters = parameters.filterKeys { it !in reserved }
         val page = repository.findAll(PageRequest.of(0, size.coerceIn(1, 1000)))
+        val items = page.content.mapNotNull { item ->
+            val payload = objectMapper.convertValue(item, mapType)
+            if (filters.any { (name, value) -> payload[name]?.toString() != value }) {
+                null
+            } else {
+                payload
+            }
+        }
         return mapOf(
-            "items" to page.content,
+            "items" to items,
             "nextCursor" to null
+        )
+    }
+
+    @PreAuthorize("hasAuthority('*:*') or hasAuthority('${readModelPermission}:list') or hasAuthority('${readModelPermission}:read')")
+    @GetMapping("/deltas")
+    fun findDeltasForSync(
+        @RequestParam(defaultValue = "0") afterSequence: Long,
+        @RequestParam(defaultValue = "200") size: Int,
+        @RequestParam parameters: Map<String, String>
+    ): Map<String, Any?> {
+        val reserved = setOf("afterSequence", "size", "cursor")
+        val filters = parameters.filterKeys { it !in reserved }
+        val rows = outboxRepository
+            .findBySourceContextAndSourceReadModelAndSequenceGreaterThanOrderBySequenceAsc(
+                "${sourceContext}",
+                "${sourceReadModel}",
+                afterSequence,
+                PageRequest.of(0, size.coerceIn(1, 1000))
+            )
+        val items = rows.mapNotNull { row ->
+            val payload = objectMapper.readValue(row.payloadJson, mapType)
+            if (filters.any { (name, value) -> payload[name]?.toString() != value }) {
+                null
+            } else {
+                mapOf(
+                    "sequence" to row.sequence,
+                    "operation" to row.operation,
+                    "sourceContext" to row.sourceContext,
+                    "sourceReadModel" to row.sourceReadModel,
+                    "readModelKey" to row.readModelKey,
+                    "eventId" to row.eventId,
+                    "eventType" to row.eventType,
+                    "occurredAt" to row.occurredAt,
+                    "payload" to payload
+                )
+            }
+        }
+        return mapOf(
+            "items" to items,
+            "nextSequence" to (rows.lastOrNull()?.sequence ?: afterSequence)
         )
     }
 }
 `);
+    },
+
+    _syncSourceAliasForReadModel(slice, readmodel) {
+        const currentContext = slice.context ?? slice.boundedContext ?? '';
+        const currentReadModelNames = [
+            readmodel.name,
+            readmodel.title
+        ].filter(Boolean);
+        const fullModel = this.fullModel ?? this.model;
+        const exact = (fullModel.slices ?? [])
+            .flatMap((candidateSlice) => candidateSlice.readmodels ?? [])
+            .find((candidateReadModel) =>
+                candidateReadModel.sync
+                && currentReadModelNames
+                    .map((readModelName) => `${currentContext}.${readModelName}`)
+                    .includes(candidateReadModel.syncSource)
+            );
+        const fallback = exact ?? (fullModel.slices ?? [])
+            .flatMap((candidateSlice) => candidateSlice.readmodels ?? [])
+            .find((candidateReadModel) =>
+                candidateReadModel.sync
+                && currentReadModelNames.includes(String(candidateReadModel.syncSource ?? '').split('.').filter(Boolean).at(-1))
+            );
+        const parts = String(fallback?.syncSource ?? '').split('.').filter(Boolean);
+        if (parts.length === 0) {
+            return undefined;
+        }
+        return {
+            context: parts.length > 1 ? parts.slice(0, -1).join('.') : currentContext,
+            readModel: parts.at(-1)
+        };
     },
 
     _writeReadModelProjector(packageName, context, slicePackage, slice, readmodel, name, idFields) {
@@ -1133,14 +1485,21 @@ class ${resourceName}(private val repository: ${repositoryName}) {
         const keyName = `${name}Key`;
         const metadataFields = readModelMetadataFields(readmodel);
         const includeMetadata = metadataFields.length > 0;
+        const syncSource = this._isSyncReadModelSource(slice, readmodel);
         const includeEventTime = events.some((event) =>
             this._readModelConventionalAssignments(readmodel, event, new Set()).some((assignment) => assignment.usesEventTime)
         );
-        const includeEventMessage = includeMetadata || includeEventTime;
+        const includeEventMessage = includeMetadata || includeEventTime || syncSource;
         const metadataAssignments = readModelMetadataAssignments(metadataFields, '            ');
         const eventMessageParameter = includeEventMessage
             ? `,\n        message: EventMessage`
             : '';
+        const sourceAlias = this._syncSourceAliasForReadModel(slice, readmodel);
+        const sourceContext = sourceAlias?.context ?? slice.context ?? slice.boundedContext ?? context;
+        const sourceReadModel = sourceAlias?.readModel ?? readmodel.name ?? readmodel.title;
+        const handlerAnnotations = syncSource
+            ? `    @Transactional\n    @EventHandler`
+            : `    @EventHandler`;
         const eventImports = events
             .map((event) => `import ${this._eventPackage(event, slice)}.${_eventTitle(event.title)}`)
             .join('\n');
@@ -1178,6 +1537,16 @@ class ${resourceName}(private val repository: ${repositoryName}) {
                 .join('\n');
             const saveAssignments = [assignments, metadataAssignments].filter(Boolean).join('\n');
             const availableIds = idFields.filter((field) => eventFields.has(field.name));
+            const appendOutbox = (keyExpression, indent = '        ') => syncSource
+                ? `${indent}outbox.append(
+${indent}    sourceContext = "${sourceContext}",
+${indent}    sourceReadModel = "${sourceReadModel}",
+${indent}    readModelKey = ${keyExpression}.toString(),
+${indent}    operation = "UPSERT",
+${indent}    payload = entity.toReadModel(),
+${indent}    message = message
+${indent})`
+                : '';
 
             if (availableIds.length === idFields.length) {
                 const rawKeyExpression = idFields.length > 1
@@ -1193,7 +1562,7 @@ class ${resourceName}(private val repository: ${repositoryName}) {
                 const initializeIds = idFields
                     .map((field) => `                this.${field.name} = ${singleKeyEventField?.optional && field.name === idFields[0].name ? 'key' : readModelStorageExpression(field, `event.${field.name}`)}`)
                     .join('\n');
-                return `    @EventHandler
+                return `${handlerAnnotations}
     fun on(
         event: ${_eventTitle(event.title)}${eventMessageParameter}
     ) {
@@ -1203,6 +1572,7 @@ ${initializeIds}
         }
 ${saveAssignments || '        // No read-model fields are present on this event.'}
         repository.save(entity)
+${appendOutbox(keyExpression)}
     }`;
             }
 
@@ -1214,7 +1584,10 @@ ${saveAssignments || '        // No read-model fields are present on this event.
                     ? `        val lookupValue = ${rawLookupExpression} ?: return\n`
                     : '';
                 const lookupExpression = lookupEventField?.optional ? 'lookupValue' : rawLookupExpression;
-                return `    @EventHandler
+                const readModelKey = idFields
+                    .map((field) => `entity.${field.name}`)
+                    .join(' + ":" + ');
+                return `${handlerAnnotations}
     fun on(
         event: ${_eventTitle(event.title)}${eventMessageParameter}
     ) {
@@ -1222,6 +1595,7 @@ ${lookupGuard}
         repository.findProjectionsBy${pascal(lookupField.name)}(${lookupExpression}).forEach { entity ->
 ${saveAssignments || '            // No read-model fields are present on this event.'}
             repository.save(entity)
+${appendOutbox(readModelKey, '            ')}
         }
     }`;
             }
@@ -1237,6 +1611,7 @@ ${saveAssignments || '            // No read-model fields are present on this ev
 import org.axonframework.messaging.eventhandling.annotation.EventHandler
 import org.axonframework.messaging.core.annotation.Namespace
 ${includeEventMessage ? 'import org.axonframework.messaging.eventhandling.EventMessage\n' : ''}import org.springframework.stereotype.Component
+${syncSource ? 'import org.springframework.transaction.annotation.Transactional\n' : ''}${syncSource ? `import ${this.model.rootPackage}.shared.application.sync.SyncReadModelOutboxAppender\n` : ''}
 ${includeMetadata ? `import ${this.model.rootPackage}.shared.application.metadata.ProjectionMetadata\n` : ''}
 ${eventImports}
 ${stateImports}
@@ -1244,7 +1619,9 @@ ${includeEventTime ? 'import java.time.LocalDateTime\nimport java.time.ZoneOffse
 
 @Namespace("${readModelProcessingGroup(readmodel)}")
 @Component
-class ${name}Projector(private val repository: ${repositoryName}) {
+class ${name}Projector(
+    private val repository: ${repositoryName}${syncSource ? ',\n    private val outbox: SyncReadModelOutboxAppender' : ''}
+) {
 ${handlers}
 ${includeEventTime ? `
     private fun eventTime(message: EventMessage): LocalDateTime =
@@ -1556,19 +1933,23 @@ function lowerFirst(value) {
     return text ? `${text.slice(0, 1).toLowerCase()}${text.slice(1)}` : 'syncTarget';
 }
 
-function syncSourceFieldName(field) {
+function syncSourceFieldName(field, sourceReadModel) {
     const source = field.source?.from?.[0];
-    if (!source) {
+    if (source) {
+        return String(source).split('.').filter(Boolean).at(-1);
+    }
+    if (field.name === 'syncedAt' && field.type === 'DateTime') {
         return undefined;
     }
-    return String(source).split('.').filter(Boolean).at(-1);
+    const sourceFields = sourceReadModel?.fields ?? [];
+    return sourceFields.some((candidate) => candidate.name === field.name) ? field.name : undefined;
 }
 
-function syncProjectionAssignment(field) {
+function syncProjectionAssignment(field, sourceReadModel) {
     if (!field.source && field.name === 'syncedAt' && field.type === 'DateTime') {
         return `                projection.${field.name} = syncedAt`;
     }
-    const source = syncSourceFieldName(field);
+    const source = syncSourceFieldName(field, sourceReadModel);
     if (!source) {
         return undefined;
     }

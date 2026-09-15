@@ -17,6 +17,7 @@ const {
     safeIdentifier,
     uniqueBy
 } = require('./model-helpers');
+const {automationProcessingGroup, integrationProcessingGroup} = require('./axon-processing');
 const {contextPackage} = require('../../common/util/value-types');
 const {_commandTitle, _eventTitle, _readmodelTitle, _sliceTitle} = require('../../common/util/naming');
 
@@ -218,13 +219,13 @@ const processorWriterMethods = {
         const eventImport = `${this.model.rootPackage}.${contextPackage(eventRef.slice.context)}.events.${eventClass}`;
 
         if (isLocalCommand) {
-            this._writeLocalCommandProcessor(packageName, context, slicePackage, processorClass, eventImport, commandRef, eventRef, processor);
+            this._writeLocalCommandProcessor(packageName, context, slicePackage, processorClass, eventImport, commandRef, eventRef, processor, slice);
         } else {
             const targetDeployment = deploymentForContext(this, commandRef.slice.context);
             if (!targetDeployment) return;
             const clientClass = this._integrationClientClass(targetDeployment.name);
             this._writeIntegrationClient(targetDeployment);
-            this._writeRemoteCommandProcessor(packageName, context, slicePackage, processorClass, eventImport, clientClass, commandRef, eventRef);
+            this._writeRemoteCommandProcessor(packageName, context, slicePackage, processorClass, eventImport, clientClass, commandRef, eventRef, slice);
         }
     },
 
@@ -290,7 +291,7 @@ class ${processorClass}(
 `);
     },
 
-    _writeLocalCommandProcessor(packageName, context, slicePackage, processorClass, eventImport, commandRef, eventRef, processor) {
+    _writeLocalCommandProcessor(packageName, context, slicePackage, processorClass, eventImport, commandRef, eventRef, processor, slice) {
         const command = commandRef.command;
         const selection = selectionFor(commandRef.slice, this.model);
         const commandClass = _commandTitle(command.title);
@@ -327,8 +328,10 @@ ${commandSend.replace(/^        /gm, '            ')}
 ${imports}
 import org.axonframework.messaging.commandhandling.gateway.CommandGateway
 import org.axonframework.messaging.eventhandling.annotation.EventHandler
+import org.axonframework.messaging.core.annotation.Namespace
 import org.springframework.stereotype.Component
 
+@Namespace("${automationProcessingGroup(slice)}")
 @Component
 class ${processorClass}(private val commandGateway: CommandGateway) {
     @EventHandler
@@ -338,7 +341,7 @@ ${body}
 `);
     },
 
-    _writeRemoteCommandProcessor(packageName, context, slicePackage, processorClass, eventImport, clientClass, commandRef, eventRef) {
+    _writeRemoteCommandProcessor(packageName, context, slicePackage, processorClass, eventImport, clientClass, commandRef, eventRef, slice) {
         const requestClass = commandRequestClass(commandRef.command);
         const selection = selectionFor(commandRef.slice, this.model);
         const eventSelection = selectionFor(eventRef.slice, this.model);
@@ -352,8 +355,10 @@ import ${eventImport}
 import ${this.model.rootPackage}.integration.${clientClass}
 import ${this.model.rootPackage}.integration.${requestClass}
 import org.axonframework.messaging.eventhandling.annotation.EventHandler
+import org.axonframework.messaging.core.annotation.Namespace
 import org.springframework.stereotype.Component
 
+@Namespace("${integrationProcessingGroup(slice)}")
 @Component
 class ${processorClass}(private val client: ${clientClass}) {
     @EventHandler

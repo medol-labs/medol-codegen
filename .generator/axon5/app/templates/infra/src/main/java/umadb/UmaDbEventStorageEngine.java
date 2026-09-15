@@ -39,8 +39,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -122,10 +125,13 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
     public MessageStream<EventMessage> stream(StreamingCondition condition) {
         var after = new AtomicLong(condition.position().position().orElse(-1L) - 1);
         var subscription = new AtomicReference<UmaDbClient.Subscription>();
+        var queue = new LinkedBlockingQueue<UmaDbClient.SequencedStoredEvent>();
+        var closed = new AtomicBoolean(false);
+        var streamError = new AtomicReference<RuntimeException>();
         return new ContinuousMessageStream<>(
-                () -> nextSubscribedBatch(after, condition, subscription),
+                () -> nextQueuedBatch(after, condition, queue, streamError),
                 UmaDbEventStorageEngine::trackedEntry,
-                (stream, callback) -> registerCallback(stream, subscription, callback)
+                (stream, callback) -> registerCallback(after, condition, subscription, queue, closed, streamError, callback)
         );
     }
 
@@ -192,44 +198,127 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
         );
     }
 
-    private List<UmaDbClient.SequencedStoredEvent> nextSubscribedBatch(
+    private List<UmaDbClient.SequencedStoredEvent> nextQueuedBatch(
             AtomicLong after,
             StreamingCondition condition,
-            AtomicReference<UmaDbClient.Subscription> subscription
+            BlockingQueue<UmaDbClient.SequencedStoredEvent> queue,
+            AtomicReference<RuntimeException> streamError
+    ) {
+        var error = streamError.get();
+        if (error != null) {
+            throw error;
+        }
+        var events = new java.util.ArrayList<UmaDbClient.SequencedStoredEvent>(properties.batchSize());
+        queue.drainTo(events, properties.batchSize());
+        var unseenEvents = events.stream()
+                .filter(event -> event.position() > after.get())
+                .filter(event -> matches(event, condition))
+                .toList();
+        advanceAfter(after, unseenEvents);
+        return unseenEvents;
+    }
+
+    private void runSubscriptionReader(
+            AtomicLong after,
+            StreamingCondition condition,
+            AtomicReference<UmaDbClient.Subscription> subscription,
+            BlockingQueue<UmaDbClient.SequencedStoredEvent> queue,
+            AtomicBoolean closed,
+            AtomicReference<RuntimeException> streamError,
+            Runnable callback
+    ) {
+        while (!closed.get()) {
+            try {
+                var activeSubscription = subscription.updateAndGet(current ->
+                        current == null ? openSubscription(after.get(), condition) : current
+                );
+                var events = activeSubscription.nextBatch().events();
+                if (events.isEmpty()) {
+                    handleEmptySubscribedBatch(after, condition, subscription, queue, closed, callback);
+                    continue;
+                }
+                queue.addAll(events);
+                callback.run();
+            } catch (CompletionException ex) {
+                if (!handleSubscriptionFailure(after, condition, subscription, queue, closed, streamError, callback, ex)) {
+                    return;
+                }
+            } catch (RuntimeException ex) {
+                if (!handleSubscriptionFailure(after, condition, subscription, queue, closed, streamError, callback, ex)) {
+                    return;
+                }
+            }
+        }
+    }
+
+    private boolean handleSubscriptionFailure(
+            AtomicLong after,
+            StreamingCondition condition,
+            AtomicReference<UmaDbClient.Subscription> subscription,
+            BlockingQueue<UmaDbClient.SequencedStoredEvent> queue,
+            AtomicBoolean closed,
+            AtomicReference<RuntimeException> streamError,
+            Runnable callback,
+            RuntimeException ex
+    ) {
+        if (closed.get()) {
+            return false;
+        }
+        if (isDeadlineExceeded(ex)) {
+            closeSubscription(subscription);
+            var catchUpEvents = readCatchUpOrSignalError(after, condition, streamError, callback);
+            if (!catchUpEvents.isEmpty()) {
+                queue.addAll(catchUpEvents);
+                callback.run();
+            }
+            return streamError.get() == null;
+        }
+        streamError.compareAndSet(null, ex);
+        callback.run();
+        return false;
+    }
+
+    private List<UmaDbClient.SequencedStoredEvent> readCatchUpOrSignalError(
+            AtomicLong after,
+            StreamingCondition condition,
+            AtomicReference<RuntimeException> streamError,
+            Runnable callback
     ) {
         try {
-            var activeSubscription = subscription.updateAndGet(current ->
-                    current == null ? openSubscription(after.get(), condition) : current
-            );
-            var events = activeSubscription.nextBatch().events();
-            advanceAfter(after, events);
-            var catchUpEvents = readCatchUp(after, condition);
-            if (events.isEmpty()) {
-                return catchUpEvents.stream()
-                        .filter(event -> matches(event, condition))
-                        .toList();
-            }
-            var combined = new java.util.ArrayList<UmaDbClient.SequencedStoredEvent>(events);
-            combined.addAll(catchUpEvents);
-            return combined.stream()
-                    .filter(event -> matches(event, condition))
-                    .toList();
-        } catch (CompletionException ex) {
-            if (isDeadlineExceeded(ex)) {
-                closeSubscription(subscription);
-                return readCatchUp(after, condition).stream()
-                        .filter(event -> matches(event, condition))
-                        .toList();
-            }
-            throw ex;
-        } catch (RuntimeException ex) {
-            if (isDeadlineExceeded(ex)) {
-                closeSubscription(subscription);
-                return readCatchUp(after, condition).stream()
-                        .filter(event -> matches(event, condition))
-                        .toList();
-            }
-            throw ex;
+            return readCatchUp(after, condition);
+        } catch (RuntimeException catchUpFailure) {
+            streamError.compareAndSet(null, catchUpFailure);
+            callback.run();
+            return List.of();
+        }
+    }
+
+    private void handleEmptySubscribedBatch(
+            AtomicLong after,
+            StreamingCondition condition,
+            AtomicReference<UmaDbClient.Subscription> subscription,
+            BlockingQueue<UmaDbClient.SequencedStoredEvent> queue,
+            AtomicBoolean closed,
+            Runnable callback
+    ) {
+        closeSubscription(subscription);
+        if (closed.get()) {
+            return;
+        }
+        var catchUpEvents = readCatchUp(after, condition);
+        if (!catchUpEvents.isEmpty()) {
+            queue.addAll(catchUpEvents);
+            callback.run();
+        } else {
+            sleepBeforeReopeningSubscription();
+        }
+    }
+
+    private static void sleepBeforeReopeningSubscription() {
+        try {
+            Thread.sleep(25L);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -241,9 +330,7 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
                 queryItems(condition)
         );
         logger.debug("Reading UmaDB stream catch-up. start={}, batchSize={}, queryItems={}", request.start(), request.batchSize(), request.queryItems());
-        var events = client.read(request).join().events();
-        advanceAfter(after, events);
-        return events;
+        return client.read(request).join().events();
     }
 
     private UmaDbClient.Subscription openSubscription(long after, StreamingCondition condition) {
@@ -395,14 +482,26 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
         return new SimpleEntry<>(toEventMessage(event.event()), trackedContext(event));
     }
 
-    private static Registration registerCallback(
-            ContinuousMessageStream<?> ignored,
+    private Registration registerCallback(
+            AtomicLong after,
+            StreamingCondition condition,
             AtomicReference<UmaDbClient.Subscription> subscription,
+            BlockingQueue<UmaDbClient.SequencedStoredEvent> queue,
+            AtomicBoolean closed,
+            AtomicReference<RuntimeException> streamError,
             Runnable callback
     ) {
+        var reader = new Thread(
+                () -> runSubscriptionReader(after, condition, subscription, queue, closed, streamError, callback),
+                "umadb-event-stream-reader"
+        );
+        reader.setDaemon(true);
+        reader.start();
         callback.run();
         return () -> {
+            closed.set(true);
             closeSubscription(subscription);
+            reader.interrupt();
             return true;
         };
     }

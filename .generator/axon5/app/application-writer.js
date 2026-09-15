@@ -9,6 +9,13 @@ const {pascal, kebab, safeDatabaseName, safeIdentifier, filterModelByDeployment}
 const {manualInfrastructurePortPathForCommand} = require('./infrastructure-port-writer');
 const {writeMetadataSupport} = require('./metadata-support');
 const {actorSecurityModel, iamSecurityContract} = require('./security-model');
+const {
+    AUDIT_TRAIL_PROCESSING_GROUP,
+    automationProcessingGroup,
+    beanNameForProcessingGroup,
+    integrationProcessingGroup,
+    readModelProcessingGroup
+} = require('./axon-processing');
 
 const SHARED_KERNEL_MODULE = 'shared-kernel';
 const UMA_DB_EVENT_STORAGE_MODULE = 'axon-event-storage-umadb';
@@ -22,6 +29,12 @@ function lowerCamel(value) {
 
 function envPrefix(value) {
     return kebab(value).toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+}
+
+function processorDependency(processor, direction, elementType) {
+    return (processor.dependencies ?? []).find((candidate) =>
+        candidate.direction === direction && candidate.elementType === elementType
+    );
 }
 
 const applicationWriterMethods = {
@@ -127,6 +140,7 @@ const applicationWriterMethods = {
             rootPackage: this.model.rootPackage,
             applicationClass
         });
+        this._writeEventProcessorConfiguration();
         this.fs.copyTpl(this.templatePath('README.md.tpl'), this._destPath('README.md'), {
             appName,
             domain: this.model.domain,
@@ -185,6 +199,53 @@ const applicationWriterMethods = {
         if (!this.modulePrefix) {
             this._writeAgentSkills();
         }
+    },
+
+    _writeEventProcessorConfiguration() {
+        const namespaces = this._eventProcessorNamespaces();
+        const usedBeanNames = new Set();
+        const beanMethods = namespaces
+            .map((namespace) => {
+                const beanName = beanNameForProcessingGroup(namespace, usedBeanNames);
+                return `    @Bean
+    fun ${beanName}(): EventProcessorDefinition =
+        EventProcessorDefinition.pooledStreamingMatching("${namespace}").notCustomized()`;
+            })
+            .join('\n\n');
+
+        this.fs.write(this._rootKotlinPath('shared/infrastructure/configuration/AxonEventProcessorConfiguration.kt'), `package ${this.model.rootPackage}.shared.infrastructure.configuration
+
+import org.axonframework.extension.spring.config.EventProcessorDefinition
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
+
+@Configuration
+class AxonEventProcessorConfiguration {
+${beanMethods}
+}
+`);
+    },
+
+    _eventProcessorNamespaces() {
+        const namespaces = new Set([AUDIT_TRAIL_PROCESSING_GROUP]);
+        for (const slice of this.model.slices ?? []) {
+            for (const readmodel of slice.readmodels ?? []) {
+                namespaces.add(readModelProcessingGroup(readmodel));
+            }
+            for (const processor of slice.processors ?? []) {
+                if (processor.metadata?.onKind === 'todo') {
+                    continue;
+                }
+                const inbound = processorDependency(processor, 'INBOUND', 'EVENT');
+                const outbound = processorDependency(processor, 'OUTBOUND', 'COMMAND');
+                if (!inbound || !outbound) {
+                    continue;
+                }
+                namespaces.add(automationProcessingGroup(slice));
+                namespaces.add(integrationProcessingGroup(slice));
+            }
+        }
+        return [...namespaces].sort();
     },
 
     _writeMetadataSupport() {

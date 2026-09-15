@@ -80,6 +80,7 @@ const {
     escapeKotlin,
     filterModelByDeployment
 } = require('./model-helpers');
+const {readModelProcessingGroup} = require('./axon-processing');
 const {contextPackage} = require('../../common/util/value-types');
 const {_commandTitle, _eventTitle, _readmodelTitle, _sliceTitle} = require('../../common/util/naming');
 
@@ -1180,12 +1181,14 @@ ${saveAssignments || '            // No read-model fields are present on this ev
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${name}Projector.kt`), `package ${packageName}
 
 import org.axonframework.messaging.eventhandling.annotation.EventHandler
+import org.axonframework.messaging.core.annotation.Namespace
 ${includeEventMessage ? 'import org.axonframework.messaging.eventhandling.EventMessage\n' : ''}import org.springframework.stereotype.Component
 ${includeMetadata ? `import ${this.model.rootPackage}.shared.application.metadata.ProjectionMetadata\n` : ''}
 ${eventImports}
 ${stateImports}
 ${includeEventTime ? 'import java.time.LocalDateTime\nimport java.time.ZoneOffset\n' : ''}
 
+@Namespace("${readModelProcessingGroup(readmodel)}")
 @Component
 class ${name}Projector(private val repository: ${repositoryName}) {
 ${handlers}

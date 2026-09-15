@@ -3,6 +3,8 @@
  * Licensed under the MIT License.
  */
 
+const {AUDIT_TRAIL_PROCESSING_GROUP} = require('./axon-processing');
+
 function writeMetadataSupport(generator) {
         generator.fs.write(generator._sharedKernelKotlinPath('shared/application/metadata/MetadataKeys.kt'), `package ${generator.model.rootPackage}.shared.application.metadata
 
@@ -274,8 +276,10 @@ interface AuditLogRepository : JpaRepository<AuditLogEntry, Long> {
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.axonframework.messaging.eventhandling.EventMessage
 import org.axonframework.messaging.eventhandling.annotation.EventHandler
+import org.axonframework.messaging.core.annotation.Namespace
 import org.springframework.stereotype.Component
 
+@Namespace("${AUDIT_TRAIL_PROCESSING_GROUP}")
 @Component
 class AuditTrailProjection(
     private val repository: AuditLogRepository,

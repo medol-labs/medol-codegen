@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -172,7 +173,7 @@ class UmaDbEventStorageEngineTest {
     }
 
     @Test
-    void streamUsesUmaDbSubscribeAndReadsCatchUpAfterSubscribedBatch() {
+    void streamUsesUmaDbSubscribeAndWakesWhenSubscribedBatchArrives() {
         var client = new RecordingUmaDbClient();
         client.events.add(new UmaDbClient.SequencedStoredEvent(
                 10,
@@ -183,26 +184,58 @@ class UmaDbEventStorageEngineTest {
                 EventCriteria.havingTags(Tag.of("Order", "order-1"))
         ));
 
-        var entry = stream.next().orElseThrow();
+        var callbackCount = new AtomicInteger();
+        stream.setCallback(callbackCount::incrementAndGet);
+        var entry = awaitNext(stream);
 
         assertEquals(3L, client.subscribeRequest.after());
-        assertEquals(11L, client.readRequest.start());
+        assertTrue(callbackCount.get() > 0);
         assertEquals("streamed", entry.message().identifier());
         assertEquals(11L, TrackingToken.fromContext(entry).orElseThrow().position().orElseThrow());
     }
 
     @Test
-    void streamReadsCatchUpWhenUmaDbSubscribeDeadlineExpires() {
+    void streamReadsCatchUpAndWakesWhenUmaDbSubscribeDeadlineExpires() {
         var client = new RecordingUmaDbClient();
+        client.events.add(new UmaDbClient.SequencedStoredEvent(
+                10,
+                stored("catch-up", "OrderCreated", Map.of(), "Order", "order-1")
+        ));
         client.subscribeFailure = new StatusRuntimeException(Status.DEADLINE_EXCEEDED);
         var stream = engine(client).stream(StreamingCondition.conditionFor(
                 new GlobalSequenceTrackingToken(4),
                 EventCriteria.havingTags(Tag.of("Order", "order-1"))
         ));
 
-        assertTrue(stream.next().isEmpty());
+        var entry = awaitNext(stream);
+
         assertEquals(3L, client.subscribeRequest.after());
         assertEquals(4L, client.readRequest.start());
+        assertEquals("catch-up", entry.message().identifier());
+    }
+
+    @Test
+    void streamWakesAfterEventArrivesLater() {
+        var client = new RecordingUmaDbClient();
+        client.subscriptionCompletesWhenEmpty = true;
+        var stream = engine(client).stream(StreamingCondition.conditionFor(
+                new GlobalSequenceTrackingToken(4),
+                EventCriteria.havingTags(Tag.of("Order", "order-1"))
+        ));
+
+        var callbackCount = new AtomicInteger();
+        stream.setCallback(callbackCount::incrementAndGet);
+        assertTrue(stream.next().isEmpty());
+        client.events.add(new UmaDbClient.SequencedStoredEvent(
+                10,
+                stored("later", "OrderCreated", Map.of(), "Order", "order-1")
+        ));
+
+        var entry = awaitNext(stream);
+
+        assertTrue(callbackCount.get() > 0);
+        assertTrue(client.subscriptionOpenCount > 1);
+        assertEquals("later", entry.message().identifier());
     }
 
     @Test
@@ -274,6 +307,25 @@ class UmaDbEventStorageEngineTest {
         return fail("Expected CompletionException");
     }
 
+    private static org.axonframework.messaging.core.MessageStream.Entry<EventMessage> awaitNext(
+            org.axonframework.messaging.core.MessageStream<EventMessage> stream
+    ) {
+        var deadline = System.currentTimeMillis() + 2_000L;
+        while (System.currentTimeMillis() < deadline) {
+            var next = stream.next();
+            if (next.isPresent()) {
+                return next.get();
+            }
+            try {
+                Thread.sleep(25L);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        return fail("Expected next event from UmaDB stream");
+    }
+
     private record TestTaggedEventMessage(
             EventMessage event,
             Set<Tag> tags
@@ -292,6 +344,8 @@ class UmaDbEventStorageEngineTest {
         private RuntimeException appendFailure;
         private RuntimeException readFailure;
         private RuntimeException subscribeFailure;
+        private boolean subscriptionCompletesWhenEmpty;
+        private int subscriptionOpenCount;
 
         @Override
         public CompletableFuture<AppendResult> append(AppendRequest request) {
@@ -317,6 +371,7 @@ class UmaDbEventStorageEngineTest {
 
         @Override
         public Subscription openSubscription(SubscribeRequest request) {
+            subscriptionOpenCount++;
             subscribeRequest = request;
             if (subscribeFailure != null) {
                 throw subscribeFailure;
@@ -367,6 +422,9 @@ class UmaDbEventStorageEngineTest {
             @Override
             public ReadResult nextBatch() {
                 var selected = selectAfter(after, request.batchSize(), request.queryItems());
+                if (selected.isEmpty() && subscriptionCompletesWhenEmpty) {
+                    return new ReadResult(List.of());
+                }
                 selected.stream()
                         .mapToLong(UmaDbClient.SequencedStoredEvent::position)
                         .max()

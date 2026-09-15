@@ -121,6 +121,8 @@ test('writes shared sync read model support with switchable adapters and checkpo
     assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /afterSequence/);
     assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /bootstrapCompleted/);
     assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /target\.sourcePath/);
+    assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /nextCursor/);
+    assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /highWatermarkSequence/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /medol_sync_read_model_outbox/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /uk_sync_read_model_outbox_event/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /idx_sync_read_model_outbox_source_sequence/);
@@ -226,8 +228,11 @@ test('writes sync read model source resource for referenced source read models',
         'kotlin/datasetgovernance/FeatureSchemaCatalog/FeatureSchemaCatalogReadModelSyncReadModelResource.kt'
     );
     assert.match(sourceResource, /@RequestMapping\("\/sync\/read-models\/dataset-governance\/feature-schema-catalog"\)/);
-    assert.match(sourceResource, /repository\.findAll\(PageRequest\.of\(0, size\.coerceIn\(1, 1000\)\)\)/);
+    assert.match(sourceResource, /@RequestParam\(required = false\) cursor: String\?/);
+    assert.match(sourceResource, /repository\.findAll\(PageRequest\.of\(pageNumber, size\.coerceIn\(1, 1000\)\)\)/);
     assert.match(sourceResource, /payload\[name\]\?\.toString\(\) != value/);
+    assert.match(sourceResource, /highWatermarkSequence/);
+    assert.match(sourceResource, /page\.hasNext\(\)/);
     assert.match(sourceResource, /@GetMapping\("\/deltas"\)/);
     assert.match(sourceResource, /SyncReadModelOutboxRepository/);
     assert.match(sourceResource, /afterSequence/);

@@ -99,13 +99,15 @@ function renderDeployReadme(model, environment) {
         '',
         '```bash',
         'node operations/<environment>/images.mjs list',
-        'node operations/<environment>/images.mjs all --platform linux/amd64',
+        'node operations/<environment>/images.mjs all',
         'node operations/<environment>/images.mjs build --exclude-service <service>',
         'node operations/<environment>/images.mjs build --service <backend-module>',
         'node operations/<environment>/images.mjs push --prefix registry.example.com/team',
         'node operations/<environment>/images.mjs push-dependencies --prefix registry.example.com/team',
         'node operations/<environment>/images.mjs import',
         '```',
+        '',
+        'Application image builds use the native Docker platform by default. Pass `--platform linux/amd64` or `--platform linux/arm64` only when you intentionally need a fixed target architecture; cross-architecture frontend builds can be much slower.',
         '',
         'Use `--service` to process only selected application services, or `--exclude-service` / `--skip-service` to skip selected services during development.',
         '',
@@ -169,7 +171,8 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const args = parseArgs(process.argv.slice(2));
 const command = args._[0] ?? 'help';
 const monorepoRoot = resolve(scriptDir, args.root ?? process.env.MONOREPO_ROOT ?? '../..');
-const platform = String(args.platform ?? process.env.DOCKER_DEFAULT_PLATFORM ?? 'linux/amd64');
+const platform = String(args.platform ?? process.env.DOCKER_DEFAULT_PLATFORM ?? '').trim();
+const dependencyPlatform = platform || hostDockerPlatform();
 const imagePrefix = String(args.prefix ?? process.env.DOCKER_IMAGE_PREFIX ?? '${defaultPrefix}').replace(/\\/+$/g, '');
 const dependencyImagePrefix = String(args['dependency-prefix'] ?? process.env.DEPENDENCY_IMAGE_PREFIX ?? defaultDependencyImagePrefix(imagePrefix)).replace(/\\/+$/g, '');
 const imageVersion = String(args.version ?? process.env.IMAGE_VERSION ?? '${model.imageTag ?? '0.0.1-SNAPSHOT'}');
@@ -180,6 +183,7 @@ const clean = args.clean !== false && args.clean !== 'false';
 const skipBackend = Boolean(args['skip-backend']);
 const skipConsole = Boolean(args['skip-console']);
 const skipDependencies = Boolean(args['skip-dependencies']);
+const fastBuild = !flagEnabled(args['no-fast-build'], process.env.OPERATIONS_NO_FAST_BUILD ?? process.env.OPERATIONS_FULL_IMAGE_BUILD);
 const serviceIncludes = serviceFilterValues('service', 'include-service', 'only-service');
 const serviceExcludes = serviceFilterValues('exclude-service', 'skip-service');
 const applicationNames = ${JSON.stringify(applicationNames, null, 4)};
@@ -258,13 +262,13 @@ function buildImages() {
         runNode(project.root, [
             'scripts/image-bundle.mjs',
             'build',
-            '--platform',
-            platform,
+            ...platformArgs(),
             '--prefix',
             imagePrefix,
             '--version',
             imageVersion,
-            ...projectImageArgs(project)
+            ...projectImageArgs(project),
+            ...projectBuildOptimizationArgs(project)
         ]);
     }
 }
@@ -274,8 +278,7 @@ function exportImages() {
         runNode(project.root, [
             'scripts/image-bundle.mjs',
             'export',
-            '--platform',
-            platform,
+            ...platformArgs(),
             '--prefix',
             imagePrefix,
             '--version',
@@ -299,8 +302,7 @@ function pushImages() {
         runNode(project.root, [
             'scripts/image-bundle.mjs',
             'push',
-            '--platform',
-            platform,
+            ...platformArgs(),
             '--prefix',
             imagePrefix,
             '--version',
@@ -312,12 +314,12 @@ function pushImages() {
 
 function pullDependencyImages() {
     if (skipDependencies || !projectRoots.backend) return;
-    runNode(projectRoots.backend, ['scripts/dependency-images.mjs', 'pull', '--platform', platform, '--image', infrastructureImages().join(',')]);
+    runNode(projectRoots.backend, ['scripts/dependency-images.mjs', 'pull', '--platform', dependencyPlatform, '--image', infrastructureImages().join(',')]);
 }
 
 function exportDependencyImages() {
     if (skipDependencies || !projectRoots.backend) return;
-    runNode(projectRoots.backend, ['scripts/dependency-images.mjs', 'export', '--platform', platform, '--output', dependencyArchive, '--image', infrastructureImages().join(',')]);
+    runNode(projectRoots.backend, ['scripts/dependency-images.mjs', 'export', '--platform', dependencyPlatform, '--output', dependencyArchive, '--image', infrastructureImages().join(',')]);
 }
 
 function importDependencyImages() {
@@ -374,7 +376,8 @@ function writeManifest() {
     const manifest = {
         generatedAt: new Date().toISOString(),
         environment: '${environment}',
-        platform,
+        platform: platform || 'native',
+        dependencyPlatform,
         imagePrefix,
         dependencyImagePrefix,
         imageVersion,
@@ -464,6 +467,15 @@ function projectImageArgs(project) {
     return [];
 }
 
+function projectBuildOptimizationArgs(project) {
+    if (!fastBuild || project.key !== 'backend') return [];
+    return ['--skip-install', '--offline'];
+}
+
+function platformArgs(value = platform) {
+    return value ? ['--platform', value] : [];
+}
+
 function resolveProjectRoots() {
     const frontends = Object.fromEntries(frontendApplications.map((application, index) => [
         application.name,
@@ -528,7 +540,9 @@ function isConsoleProject(root) {
 function printPlan() {
     console.log('[operations-images] monorepo:', monorepoRoot);
     console.log('[operations-images] environment:', '${environment}');
-    console.log('[operations-images] platform:', platform);
+    console.log('[operations-images] application platform:', platform || 'native');
+    console.log('[operations-images] dependency platform:', dependencyPlatform);
+    console.log('[operations-images] fast build:', fastBuild ? 'enabled' : 'disabled');
     console.log('[operations-images] image prefix:', imagePrefix);
     console.log('[operations-images] dependency image prefix:', dependencyImagePrefix);
     console.log('[operations-images] image version:', imageVersion);
@@ -658,6 +672,24 @@ function valuesOf(value) {
     return Array.isArray(value) ? value : [value];
 }
 
+function hostDockerPlatform() {
+    if (process.platform === 'darwin' || process.platform === 'linux') {
+        if (process.arch === 'arm64') return 'linux/arm64';
+        if (process.arch === 'x64') return 'linux/amd64';
+    }
+    return '';
+}
+
+function flagEnabled(argValue, envValue) {
+    return truthy(argValue) || truthy(envValue);
+}
+
+function truthy(value) {
+    if (value == null || value === false) return false;
+    const normalized = String(value).trim().toLowerCase();
+    return normalized !== '' && normalized !== '0' && normalized !== 'false' && normalized !== 'no' && normalized !== 'off';
+}
+
 function runNode(cwd, commandArgs) {
     run(process.execPath, commandArgs, cwd);
 }
@@ -722,7 +754,7 @@ Options:
   --dependency-prefix <name>      Registry root for dependency mirrors. Defaults to DEPENDENCY_IMAGE_PREFIX, or the registry host from --prefix.
   --dependency-image <image[,..]> Add extra dependency images to pull/export/push.
   --version <tag>                 Image tag. Defaults to IMAGE_VERSION or ${model.imageTag ?? '0.0.1-SNAPSHOT'}.
-  --platform <os/arch>            Docker platform. Defaults to DOCKER_DEFAULT_PLATFORM or linux/amd64.
+  --platform <os/arch>            Docker platform. Defaults to DOCKER_DEFAULT_PLATFORM or native for application builds.
   --output <dir>                  Bundle directory. Defaults to .work/image-bundle beside this script.
   --archive <file>                Package archive. Defaults to <output>.tar.gz.
   --root <dir>                    Monorepo root. Defaults to ../.. from this operations environment.
@@ -736,6 +768,7 @@ Options:
   --skip-console                  Skip frontend image operations.
   --skip-dependencies             Skip infrastructure dependency image operations.
   --skip-archive                  Leave package directory unpacked.
+  --no-fast-build                 Disable default fast backend build flags (--skip-install --offline). Can also be set with OPERATIONS_NO_FAST_BUILD=true.
   --dry-run                       Print commands without running them.\`);
 }
 

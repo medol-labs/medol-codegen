@@ -254,6 +254,18 @@ Images default to `linux/amd64`. Override the target CPU architecture when neede
 node scripts/build-images.mjs --platform linux/arm64
 ```
 
+For fast local rebuilds after dependencies have already been installed once, skip the preliminary Maven reactor install:
+
+```bash
+node scripts/build-images.mjs --skip-install
+```
+
+Use Maven offline mode when the local repository is already warm:
+
+```bash
+node scripts/build-images.mjs --skip-install --offline
+```
+
 Export the generated images to a Docker archive for offline transfer:
 
 ```bash

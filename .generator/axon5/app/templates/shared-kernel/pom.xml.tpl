@@ -19,7 +19,7 @@
     <properties>
         <java.version>21</java.version>
         <kotlin.version>2.3.20</kotlin.version>
-        <kotlin.compiler.daemon>false</kotlin.compiler.daemon>
+        <kotlin.compiler.daemon>true</kotlin.compiler.daemon>
         <axon.version>5.1.1</axon.version>
         <spring-cloud.version>2025.0.0</spring-cloud.version>
         <fabric8-kubernetes-client.version>7.8.0</fabric8-kubernetes-client.version>

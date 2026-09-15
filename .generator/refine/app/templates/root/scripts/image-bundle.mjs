@@ -16,7 +16,7 @@ const imageName = String(args.image ?? process.env.IMAGE_NAME ?? defaultImageNam
 const fullImageName = `${imagePrefix}/${imageName}:${imageVersion}`;
 const tarFile = resolve(root, args.output ?? args.file ?? process.env.IMAGE_TAR ?? defaultTar);
 const dryRun = Boolean(args['dry-run']);
-const platform = String(args.platform ?? process.env.DOCKER_DEFAULT_PLATFORM ?? 'linux/amd64');
+const platform = String(args.platform ?? process.env.DOCKER_DEFAULT_PLATFORM ?? '').trim();
 
 switch (command) {
     case 'build':
@@ -45,7 +45,15 @@ switch (command) {
 
 function buildImage() {
     ensureDockerfile();
-    run('docker', ['build', '--platform', platform, ...buildArgs(), '-t', fullImageName, '.']);
+    run('docker', [
+        'build',
+        ...platformArgs(),
+        ...cacheArgs(),
+        ...buildArgs(),
+        '-t',
+        fullImageName,
+        '.'
+    ], {env: {...process.env, DOCKER_BUILDKIT: process.env.DOCKER_BUILDKIT ?? '1'}});
 }
 
 function exportImage() {
@@ -66,7 +74,7 @@ function pushImage() {
 function printPlan() {
     console.log(`[images] image name: ${fullImageName}`);
     console.log(`[images] archive: ${tarFile}`);
-    console.log(`[images] platform: ${platform}`);
+    console.log(`[images] platform: ${platform || 'native'}`);
     const envArgs = buildArgs();
     if (envArgs.length > 0) {
         console.log(`[images] build args: ${envArgs.join(' ')}`);
@@ -77,12 +85,36 @@ function buildArgs() {
     return valuesOf(args['build-arg']).flatMap((value) => ['--build-arg', String(value)]);
 }
 
-function run(commandName, commandArgs) {
+function platformArgs() {
+    return platform ? ['--platform', platform] : [];
+}
+
+function cacheArgs() {
+    if (flagEnabled(args['no-cache']) || flagEnabled(args['no-cache-from'])) {
+        return flagEnabled(args['no-cache']) ? ['--no-cache'] : [];
+    }
+    if (dryRun || imageExists(fullImageName)) {
+        return ['--cache-from', fullImageName];
+    }
+    return [];
+}
+
+function imageExists(name) {
+    const result = spawnSync('docker', ['image', 'inspect', name], {
+        cwd: root,
+        stdio: 'ignore',
+        shell: process.platform === 'win32'
+    });
+    return result.status === 0;
+}
+
+function run(commandName, commandArgs, options = {}) {
     console.log(`[images] ${commandName} ${commandArgs.join(' ')}`);
     if (dryRun) return;
     const result = spawnSync(commandName, commandArgs, {
         cwd: root,
         stdio: 'inherit',
+        env: options.env ?? process.env,
         shell: process.platform === 'win32'
     });
     if (result.status !== 0) {
@@ -114,6 +146,17 @@ function loadDotEnv(path) {
             process.env[key] = value;
         }
     }
+}
+
+function truthy(value) {
+    return ['1', 'true', 'yes', 'on'].includes(String(value ?? '').trim().toLowerCase());
+}
+
+function flagEnabled(argValue, envValue) {
+    if (argValue !== undefined) {
+        return argValue === true || truthy(argValue);
+    }
+    return truthy(envValue);
 }
 
 function parseArgs(argv) {
@@ -158,8 +201,10 @@ Options:
   --image <name>             Docker image name. Defaults to IMAGE_NAME or ${defaultImageName}.
   --prefix <name>            Docker image prefix. Defaults to DOCKER_IMAGE_PREFIX or medol.
   --version <tag>            Image tag. Defaults to IMAGE_VERSION or 0.0.1-SNAPSHOT.
-  --platform <os/arch>       Target CPU architecture. Defaults to DOCKER_DEFAULT_PLATFORM or linux/amd64.
+  --platform <os/arch>       Target CPU architecture. Defaults to DOCKER_DEFAULT_PLATFORM or native.
   --build-arg <key=value>    Forward a Docker build argument, for example VITE_AXON_API_URL.
+  --no-cache                 Disable Docker layer cache.
+  --no-cache-from            Do not seed the build cache from the existing local image.
   --output <file>            Image archive path. Defaults to IMAGE_TAR or ${defaultTar}.
   --root <dir>               Generated frontend root. Defaults to current directory.
   --dry-run                  Print commands without running them.`);

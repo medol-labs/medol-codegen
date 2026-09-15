@@ -22,7 +22,7 @@
         <jib.container.platform.os>linux</jib.container.platform.os>
         <jib.container.platform.architecture>amd64</jib.container.platform.architecture>
         <docker.image.prefix>medol</docker.image.prefix>
-        <kotlin.compiler.daemon>false</kotlin.compiler.daemon>
+        <kotlin.compiler.daemon>true</kotlin.compiler.daemon>
     </properties>
     <dependencyManagement>
         <dependencies>

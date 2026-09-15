@@ -1,20 +1,27 @@
-FROM node:22-bookworm-slim AS deps
+# syntax=docker/dockerfile:1.7
+
+FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS node-base
 
 WORKDIR /app
 
-COPY package.json yarn.lock* package-lock.json* pnpm-lock.yaml* .npmrc* ./
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+ARG PNPM_VERSION=10.25.0
 
-RUN \
-  if [ -f yarn.lock ]; then yarn --frozen-lockfile; \
-  elif [ -f package-lock.json ]; then npm ci; \
-  elif [ -f pnpm-lock.yaml ]; then yarn global add pnpm && pnpm i --frozen-lockfile; \
-  else echo "Lockfile not found." && exit 1; \
-  fi
+RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
 
-FROM node:22-bookworm-slim AS builder
+FROM node-base AS deps
 
-WORKDIR /app
+COPY package.json pnpm-lock.yaml .npmrc* ./
+
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+  pnpm install --frozen-lockfile --prefer-offline --store-dir /root/.local/share/pnpm/store
+
+FROM node-base AS builder
+
 ENV NODE_ENV=production
+ENV NO_UPDATE_NOTIFIER=1
+ENV UPDATE_NOTIFIER_IS_DISABLED=true
 ARG VITE_API_URL
 ARG VITE_SUPABASE_API_KEY
 ARG VITE_AUTH_PROVIDER
@@ -34,9 +41,9 @@ COPY --from=deps /app/node_modules ./node_modules
 
 COPY . .
 
-RUN npm run build
+RUN pnpm run build:bundle
 
-FROM nginx:1.27-alpine AS runner
+FROM --platform=$TARGETPLATFORM nginx:1.27-alpine AS runner
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY docker-entrypoint.d/ /docker-entrypoint.d/

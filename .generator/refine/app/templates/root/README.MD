@@ -20,19 +20,19 @@ Refine's hooks and components simplifies the development process and eliminates 
 ### Running the development server.
 
 ```bash
-    npm run dev
+    pnpm run dev
 ```
 
 ### Building for production.
 
 ```bash
-    npm run build
+    pnpm run build
 ```
 
 ### Running the production server.
 
 ```bash
-    npm run start
+    pnpm run start
 ```
 
 ## Container Image
@@ -43,7 +43,7 @@ Build the frontend image:
 node scripts/build-images.mjs
 ```
 
-Images default to `linux/amd64`. Override the target CPU architecture when needed:
+Images follow the native Docker platform by default. Override the target CPU architecture when needed:
 
 ```bash
 node scripts/build-images.mjs --platform linux/arm64
@@ -65,6 +65,16 @@ Configure these values in `.env` or the Compose environment:
 ```bash
 docker compose up -d
 ```
+
+Build the frontend image:
+
+```bash
+node scripts/build-images.mjs
+```
+
+The build uses pnpm, Docker BuildKit cache mounts for package-manager downloads, and reuses the previous local image as `--cache-from` when available. It follows the native Docker platform by default; pass `--platform linux/amd64` or set `DOCKER_DEFAULT_PLATFORM` when a fixed target architecture is required.
+
+The Docker image build runs `pnpm run build:bundle` to avoid repeating a full TypeScript check inside the image. Run `pnpm run build` or `pnpm run typecheck` in local development or CI before publishing when type-check validation is required.
 
 Export and import the image for an offline environment:
 

@@ -17,6 +17,8 @@ const tarFile = resolve(root, args.output ?? args.file ?? process.env.IMAGE_TAR 
 const dryRun = Boolean(args['dry-run']);
 const jibGoal = 'com.google.cloud.tools:jib-maven-plugin:3.4.5:dockerBuild';
 const platform = parsePlatform(args.platform ?? process.env.DOCKER_DEFAULT_PLATFORM ?? 'linux/amd64');
+const skipInstall = flagEnabled(args['skip-install'], process.env.FAST_IMAGE_BUILD);
+const offline = flagEnabled(args.offline, process.env.MAVEN_OFFLINE);
 
 switch (command) {
     case 'build':
@@ -46,9 +48,14 @@ switch (command) {
 function buildImages() {
     ensureModules();
     ensureMavenWrapper();
-    run('./mvnw', ['-pl', modules.join(','), '-am', '-DskipTests', 'install']);
+    if (!skipInstall) {
+        run('./mvnw', [...mavenGlobalArgs(), '-pl', modules.join(','), '-am', '-DskipTests', 'install']);
+    } else {
+        console.log('[images] skipping Maven install; using already-built local reactor artifacts');
+    }
     for (const moduleName of modules) {
         run('./mvnw', [
+            ...mavenGlobalArgs(),
             '-pl', moduleName,
             '-DskipTests',
             `-Djib.to.image=${imageName(moduleName)}`,
@@ -89,6 +96,8 @@ function printPlan() {
     }
     console.log(`[images] archive: ${tarFile}`);
     console.log(`[images] platform: ${platform.os}/${platform.architecture}`);
+    console.log(`[images] Maven install: ${skipInstall ? 'skipped' : 'enabled'}`);
+    console.log(`[images] Maven offline: ${offline ? 'enabled' : 'disabled'}`);
 }
 
 function run(commandName, commandArgs) {
@@ -102,6 +111,10 @@ function run(commandName, commandArgs) {
     if (result.status !== 0) {
         process.exit(result.status ?? 1);
     }
+}
+
+function mavenGlobalArgs() {
+    return offline ? ['-o'] : [];
 }
 
 function imageNames() {
@@ -140,6 +153,17 @@ function selectedModules(availableModules, moduleArg) {
 function valuesOf(value) {
     if (value == null) return [];
     return Array.isArray(value) ? value : [value];
+}
+
+function truthy(value) {
+    return ['1', 'true', 'yes', 'on'].includes(String(value ?? '').trim().toLowerCase());
+}
+
+function flagEnabled(argValue, envValue) {
+    if (argValue !== undefined) {
+        return argValue === true || truthy(argValue);
+    }
+    return truthy(envValue);
 }
 
 function loadDotEnv(path) {
@@ -209,6 +233,8 @@ Options:
   --prefix <name>          Docker image prefix. Defaults to DOCKER_IMAGE_PREFIX or medol.
   --version <tag>          Image tag. Defaults to IMAGE_VERSION or 0.0.1-SNAPSHOT.
   --platform <os/arch>     Target CPU architecture. Defaults to DOCKER_DEFAULT_PLATFORM or linux/amd64.
+  --skip-install           Skip the preliminary reactor install. Also enabled by FAST_IMAGE_BUILD=true.
+  --offline                Run Maven with -o. Also enabled by MAVEN_OFFLINE=true.
   --output <file>          Image archive path. Defaults to IMAGE_TAR or ${defaultTar}.
   --root <dir>             Generated backend root. Defaults to current directory.
   --dry-run                Print commands without running them.`);

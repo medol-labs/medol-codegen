@@ -217,25 +217,54 @@ function renderEnvironmentExample(model, environmentName) {
         '# Copy values into your operations secret/env store and keep real secrets out of Git.',
         '',
         `GATEWAY_PORT=${resolved.environment.variables.GATEWAY_PORT ?? resolved.gateway?.servicePort ?? 9080}`,
+        `APISIX_IMAGE=${resolved.gateway?.image ?? 'apache/apisix:3.13.0-debian'}`,
+        `APISIX_CONTAINER_NAME=${resolved.gateway?.name ?? 'apisix'}`,
         'POSTGRES_USER=medol',
         'POSTGRES_PASSWORD=change-me',
         'POSTGRES_DB=medol',
+        `POSTGRES_IMAGE=${resolved.infrastructure.find((component) => component.type === 'postgres')?.image ?? 'postgres:16'}`,
+        `POSTGRES_PORT=${resolved.infrastructure.find((component) => component.type === 'postgres')?.servicePort ?? 5432}`,
         'MEDOL_AXON_EVENT_STORAGE=umadb',
+        `UMADB_IMAGE=${resolved.infrastructure.find((component) => component.type === 'umadb')?.image ?? 'umadb/umadb:0.7.8'}`,
+        `UMADB_TARGET=${resolved.infrastructure.find((component) => component.type === 'umadb')?.name ?? 'umadb'}:${resolved.infrastructure.find((component) => component.type === 'umadb')?.servicePort ?? 50051}`,
+        'UMADB_PLAINTEXT=true',
         'UMADB_API_KEY=',
         'UMADB_BATCH_SIZE=256',
         'UMADB_REQUEST_TIMEOUT=PT10S',
+        `UMADB_PORT=${resolved.infrastructure.find((component) => component.type === 'umadb')?.servicePort ?? 50051}`,
+        `AXON_SERVER_IMAGE=${resolved.infrastructure.find((component) => component.type === 'axon-server')?.image ?? 'axoniq/axonserver:2026.0.3-jdk-21'}`,
+        `AXON_SERVER_SERVERS=${resolved.infrastructure.find((component) => component.type === 'axon-server')?.name ?? 'axon-server'}:${resolved.infrastructure.find((component) => component.type === 'axon-server')?.servicePort ?? 8124}`,
         'AXON_UPDATE_CHECK_DISABLED=true',
+        'VITE_SUPABASE_API_KEY=',
         ''
     ];
 
     resolved.applications.forEach((application) => {
         lines.push(`${application.envVarPrefix}_IMAGE=${imageWithTag(localApplicationImageName(application), resolved.imageTag)}`);
+        lines.push(`${application.envVarPrefix}_CONTAINER_NAME=${application.name}`);
         if (application.exposePorts) {
             lines.push(`${application.envVarPrefix}_PORT=${application.hostPort ?? application.servicePort}`);
         }
     });
 
-    lines.push('');
+    lines.push(
+        '',
+        'MONOREPO_ROOT=../..',
+        `DOCKER_IMAGE_PREFIX=${resolved.imagePrefix ?? 'medol'}`,
+        `DEPENDENCY_IMAGE_PREFIX=${resolved.dependencyImagePrefix ?? resolved.imagePrefix ?? 'medol'}`,
+        `IMAGE_VERSION=${resolved.imageTag ?? '0.0.1-SNAPSHOT'}`,
+        'IMAGE_BUNDLE_OUTPUT=.work/image-bundle',
+        'IMAGE_BUNDLE_ARCHIVE=.work/image-bundle.tar.gz',
+        'DOCKER_DEFAULT_PLATFORM=',
+        'EXTRA_DEPENDENCY_IMAGES=',
+        'OPERATIONS_NO_FAST_BUILD=false',
+        'OPERATIONS_FULL_IMAGE_BUILD=false',
+        '',
+        'HARBOR_INSTALLER=',
+        'ZOT_IMAGE=ghcr.io/project-zot/zot-linux-amd64:v2.1.8',
+        'ZOT_HTTP_PORT=5000',
+        ''
+    );
     return lines.join('\n');
 }
 

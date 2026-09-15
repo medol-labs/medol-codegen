@@ -161,6 +161,48 @@ test('writes sync read model target registration with field aliases and local sy
     assert.match(registration, /repository\.save\(projection\)/);
 });
 
+test('writes sync read model source resource for referenced source read models', () => {
+    const writes = new Map();
+    const writer = syncWriter(writes);
+    writer.fullModel = {
+        slices: [{
+            context: 'RuntimeAgentOperations',
+            readmodels: [{
+                name: 'AgentFeatureSchemaCatalog',
+                sync: true,
+                syncSource: 'DatasetGovernance.FeatureSchemaCatalog'
+            }]
+        }]
+    };
+    const slice = {
+        context: 'DatasetGovernance',
+        concepts: ['FeatureSchema'],
+        name: 'FeatureSchemaCatalog'
+    };
+    const readmodel = {
+        name: 'FeatureSchemaCatalog',
+        title: 'Feature Schema Catalog'
+    };
+
+    readModelWriterMethods._writeReadModelResource.call(
+        writer,
+        'tech.medo.datasetgovernance.featureschemacatalog',
+        'datasetgovernance',
+        'FeatureSchemaCatalog',
+        slice,
+        readmodel,
+        'FeatureSchemaCatalogReadModel',
+        [{name: 'featureSchemaId', type: 'UUID'}]
+    );
+
+    const sourceResource = writes.get(
+        'kotlin/datasetgovernance/FeatureSchemaCatalog/FeatureSchemaCatalogReadModelSyncReadModelResource.kt'
+    );
+    assert.match(sourceResource, /@RequestMapping\("\/sync\/read-models\/dataset-governance\/feature-schema-catalog"\)/);
+    assert.match(sourceResource, /repository\.findAll\(PageRequest\.of\(0, size\.coerceIn\(1, 1000\)\)\)/);
+    assert.match(sourceResource, /"items" to page\.content/);
+});
+
 test('does not write sync registration for read models without sync source or a single id', () => {
     const writes = new Map();
     const writer = syncWriter(writes);
@@ -186,6 +228,7 @@ test('does not write sync registration for read models without sync source or a 
 
 function syncWriter(writes) {
     return {
+        ...readModelWriterMethods,
         model: {rootPackage: 'tech.medo'},
         fs: {
             write(path, content) {

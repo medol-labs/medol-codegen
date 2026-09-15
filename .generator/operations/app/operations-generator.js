@@ -183,7 +183,7 @@ const clean = args.clean !== false && args.clean !== 'false';
 const skipBackend = Boolean(args['skip-backend']);
 const skipConsole = Boolean(args['skip-console']);
 const skipDependencies = Boolean(args['skip-dependencies']);
-const fastBuild = !flagEnabled(args['no-fast-build'], process.env.OPERATIONS_NO_FAST_BUILD ?? process.env.OPERATIONS_FULL_IMAGE_BUILD);
+const fastBuild = flagEnabled(args['fast-build'], process.env.OPERATIONS_FAST_IMAGE_BUILD);
 const serviceIncludes = serviceFilterValues('service', 'include-service', 'only-service');
 const serviceExcludes = serviceFilterValues('exclude-service', 'skip-service');
 const applicationNames = ${JSON.stringify(applicationNames, null, 4)};
@@ -768,7 +768,7 @@ Options:
   --skip-console                  Skip frontend image operations.
   --skip-dependencies             Skip infrastructure dependency image operations.
   --skip-archive                  Leave package directory unpacked.
-  --no-fast-build                 Disable default fast backend build flags (--skip-install --offline). Can also be set with OPERATIONS_NO_FAST_BUILD=true.
+  --fast-build                    Skip backend reactor install and run Maven offline. Only use when local artifacts are already compiled.
   --dry-run                       Print commands without running them.\`);
 }
 

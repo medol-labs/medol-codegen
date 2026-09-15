@@ -30,3 +30,10 @@ test('custom application extensions are created only when missing', () => {
     assert.match(generatorSource, /if \(!fs\.existsSync\(appExtensionsPath\)\)/);
     assert.match(generatorSource, /templates\/app-extensions\.tsx|app-extensions\.tsx/);
 });
+
+test('frontend application selection is available to runtime configuration', () => {
+    const runtimeConfig = readTemplate('root/docker-entrypoint.d/40-runtime-config.sh');
+
+    assert.match(runtimeConfig, /VITE_FRONTEND_APP/);
+    assert.match(runtimeConfig, /\$\{VITE_FRONTEND_APP:-\}/);
+});

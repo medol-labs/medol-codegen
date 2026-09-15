@@ -433,7 +433,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties
 data class SyncReadModelProperties(
     var enabled: Boolean = true,
     var mode: String = "pull-http",
-    var platformBaseUrl: String = "",
+    var sourceBaseUrl: String = "",
     var pageSize: Int = 200,
     var fixedDelayMs: Long = 30000,
     var parameters: Map<String, String> = emptyMap()
@@ -621,7 +621,7 @@ class HttpPullSyncReadModelAdapter(
         mode.equals("pull-http", ignoreCase = true)
 
     override fun syncOnce(target: SyncReadModelTarget, checkpoint: SyncReadModelCheckpoint?): SyncReadModelResult {
-        if (properties.platformBaseUrl.isBlank()) {
+        if (properties.sourceBaseUrl.isBlank()) {
             return SyncReadModelResult(target.name, 0)
         }
 
@@ -631,7 +631,7 @@ class HttpPullSyncReadModelAdapter(
 
         do {
             val uriBuilder = UriComponentsBuilder
-                .fromHttpUrl(properties.platformBaseUrl)
+                .fromHttpUrl(properties.sourceBaseUrl)
                 .path(target.sourcePath)
                 .queryParam("size", properties.pageSize)
             val context = SyncReadModelContext(properties, checkpoint)
@@ -1060,6 +1060,60 @@ ${idFields.length === 1 ? `
     fun findOne(@PathVariable id: ${idType}): ResponseEntity<${name}> =
         repository.findById(id)?.let { ResponseEntity.ok(it) } ?: ResponseEntity.notFound().build()
 ` : ''}
+}
+`);
+        if (this._isSyncReadModelSource(slice, readmodel)) {
+            this._writeSyncReadModelSourceResource(packageName, context, slicePackage, slice, readmodel, name);
+        }
+    },
+
+    _isSyncReadModelSource(slice, readmodel) {
+        const currentContext = slice.context ?? slice.boundedContext ?? '';
+        const currentReadModelNames = [
+            readmodel.name,
+            readmodel.title
+        ].filter(Boolean);
+        const sourceNames = currentReadModelNames.map((readModelName) => `${currentContext}.${readModelName}`);
+        const fullModel = this.fullModel ?? this.model;
+        return (fullModel.slices ?? []).some((candidateSlice) =>
+            (candidateSlice.readmodels ?? []).some((candidateReadModel) =>
+                candidateReadModel.sync && sourceNames.includes(candidateReadModel.syncSource)
+            )
+        );
+    },
+
+    _writeSyncReadModelSourceResource(packageName, context, slicePackage, slice, readmodel, name) {
+        const repositoryName = `${name}Repository`;
+        const resourceName = `${name}SyncReadModelResource`;
+        const sourceContext = slice.context ?? slice.boundedContext ?? context;
+        const sourcePath = `/sync/read-models/${kebab(sourceContext)}/${kebab(readmodel.name ?? readmodel.title)}`;
+        const readModelPermission = permissionCode(readmodel.name ?? readmodel.title);
+
+        this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${resourceName}.kt`), `package ${packageName}
+
+import org.springframework.data.domain.PageRequest
+import org.springframework.security.access.prepost.PreAuthorize
+import org.springframework.web.bind.annotation.CrossOrigin
+import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
+import org.springframework.web.bind.annotation.RestController
+
+@CrossOrigin
+@RestController
+@RequestMapping("${sourcePath}")
+class ${resourceName}(private val repository: ${repositoryName}) {
+    @PreAuthorize("hasAuthority('*:*') or hasAuthority('${readModelPermission}:list') or hasAuthority('${readModelPermission}:read')")
+    @GetMapping
+    fun findAllForSync(
+        @RequestParam(defaultValue = "200") size: Int
+    ): Map<String, Any?> {
+        val page = repository.findAll(PageRequest.of(0, size.coerceIn(1, 1000)))
+        return mapOf(
+            "items" to page.content,
+            "nextCursor" to null
+        )
+    }
 }
 `);
     },

@@ -19,6 +19,13 @@ function titleOf(item) {
     return item?.title ?? item?.name ?? '';
 }
 
+function permissionName(code) {
+    if (code === '*:*') return 'All Permissions';
+    return String(code ?? '')
+        .replace(/[_:]+/g, ' ')
+        .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 function uniqBy(items, key) {
     const seen = new Set();
     const result = [];
@@ -31,11 +38,13 @@ function uniqBy(items, key) {
     return result;
 }
 
-function actorSecurityModel(model) {
-    const slices = model.slices ?? [];
+function actorSecurityModel(model, options = {}) {
+    const selectedContexts = options.contexts ? new Set(options.contexts) : null;
+    const slices = (model.slices ?? [])
+        .filter((slice) => !selectedContexts || selectedContexts.has(slice.context));
     const actorNames = uniqBy(
         [
-            ...(model.actors ?? []),
+            ...(selectedContexts ? [] : (model.actors ?? [])),
             ...slices.flatMap((slice) => slice.actors ?? [])
         ].filter((actor) => actor?.name),
         (actor) => actor.name
@@ -51,7 +60,11 @@ function actorSecurityModel(model) {
 
     function addPermission(code, description) {
         if (!code) return;
-        permissions.set(code, {code, description});
+        permissions.set(code, {
+            code,
+            name: permissionName(code),
+            description
+        });
     }
 
     function grant(actorName, permissionCode) {

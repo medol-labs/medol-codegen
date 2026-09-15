@@ -340,9 +340,14 @@ ${beanMethods}
 
     _writeIamArtifacts({modulePath, migrationFileName}) {
         const model = this.fullModel ?? this.model;
-        const security = actorSecurityModel(model);
+        const deploymentContexts = (this.model.contexts ?? []).map((context) => context.name).filter(Boolean);
+        const security = actorSecurityModel(model, {contexts: deploymentContexts});
         const iam = iamSecurityContract(model);
         const modulePrefix = modulePath ? `${modulePath.replace(/\/+$/, '')}/` : '';
+        this.fs.write(
+            this.destinationPath(`${modulePrefix}src/main/resources/iam/bootstrap/authorization-seed.json`),
+            `${JSON.stringify(security, null, 2)}\n`
+        );
         this.fs.copyTpl(this.templatePath('identity-access-management/src/main/resources/db/migration/V1__identity_access.sql.tpl'), this.destinationPath(`${modulePrefix}src/main/resources/db/migration/${migrationFileName}`), {
             security,
             iam

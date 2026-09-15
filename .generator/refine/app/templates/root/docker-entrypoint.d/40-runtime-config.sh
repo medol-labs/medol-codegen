@@ -22,6 +22,7 @@ window.__APP_CONFIG__ = {
   VITE_AUTH_PROVIDER: "$(js_escape "${VITE_AUTH_PROVIDER:-}")",
   VITE_ACCESS_CONTROL_MODE: "$(js_escape "${VITE_ACCESS_CONTROL_MODE:-}")",
   VITE_AUTH_API_URL: "$(js_escape "$auth_api_url")",
+  VITE_FRONTEND_APP: "$(js_escape "${VITE_FRONTEND_APP:-}")",
   VITE_AXON_API_URL: "$(js_escape "${VITE_AXON_API_URL:-}")"<% backendModules.forEach((module) => { -%>,
   <%= module.envName %>: "$(js_escape "${<%= module.envName %>:-}")"<% }) -%>
 };

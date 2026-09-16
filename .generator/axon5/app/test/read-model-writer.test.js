@@ -239,6 +239,63 @@ test('writes sync read model source resource for referenced source read models',
     assert.match(sourceResource, /"items" to items/);
 });
 
+test('writes read model projector as overridable projection updater', () => {
+    const writes = new Map();
+    const event = {
+        id: 'event-1',
+        title: 'OrganizationRegisteredEvent',
+        fields: [
+            {name: 'organizationId', type: 'UUID'},
+            {name: 'organizationName', type: 'String'}
+        ]
+    };
+    const slice = {
+        context: 'OrganizationManagement',
+        concepts: [{name: 'Organization'}],
+        events: [event]
+    };
+    const readmodel = {
+        name: 'OrganizationDirectory',
+        dependencies: [{direction: 'INBOUND', elementType: 'EVENT', id: 'event-1'}],
+        fields: [
+            {name: 'organizationId', type: 'UUID', idAttribute: true},
+            {name: 'organizationName', type: 'String'}
+        ]
+    };
+    const writer = {
+        ...readModelWriterMethods,
+        model: {rootPackage: 'tech.medo', slices: [slice]},
+        fs: {
+            write(path, content) {
+                writes.set(path, content);
+            }
+        },
+        _kotlinPath(relative) {
+            return `kotlin/${relative}`;
+        }
+    };
+
+    readModelWriterMethods._writeReadModelProjector.call(
+        writer,
+        'tech.medo.organizationmanagement.organizationdirectory',
+        'organizationmanagement',
+        'organizationdirectory',
+        slice,
+        readmodel,
+        'OrganizationDirectory',
+        [readmodel.fields[0]]
+    );
+
+    const projector = writes.get('kotlin/organizationmanagement/organizationdirectory/OrganizationDirectoryProjector.kt');
+    assert.match(projector, /interface OrganizationDirectoryProjectionUpdater/);
+    assert.match(projector, /class DefaultOrganizationDirectoryProjectionUpdater/);
+    assert.match(projector, /@ConditionalOnMissingBean\(OrganizationDirectoryProjectionUpdater::class\)/);
+    assert.match(projector, /class OrganizationDirectoryProjector\(\n    private val updater: OrganizationDirectoryProjectionUpdater\n\)/);
+    assert.match(projector, /updater\.update\(event, message\)/);
+    assert.doesNotMatch(projector, /outbox\.append/);
+    assert.doesNotMatch(projector, /SyncReadModelOutboxAppender/);
+});
+
 test('does not write sync registration for read models without sync source or a single id', () => {
     const writes = new Map();
     const writer = syncWriter(writes);

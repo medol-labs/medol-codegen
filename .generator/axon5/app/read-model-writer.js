@@ -1504,21 +1504,10 @@ class ${resourceName}(
         const keyName = `${name}Key`;
         const metadataFields = readModelMetadataFields(readmodel);
         const includeMetadata = metadataFields.length > 0;
-        const syncSource = this._isSyncReadModelSource(slice, readmodel);
         const includeEventTime = events.some((event) =>
             this._readModelConventionalAssignments(readmodel, event, new Set()).some((assignment) => assignment.usesEventTime)
         );
-        const includeEventMessage = includeMetadata || includeEventTime || syncSource;
         const metadataAssignments = readModelMetadataAssignments(metadataFields, '            ');
-        const eventMessageParameter = includeEventMessage
-            ? `,\n        message: EventMessage`
-            : '';
-        const sourceAlias = this._syncSourceAliasForReadModel(slice, readmodel);
-        const sourceContext = sourceAlias?.context ?? slice.context ?? slice.boundedContext ?? context;
-        const sourceReadModel = sourceAlias?.readModel ?? readmodel.name ?? readmodel.title;
-        const handlerAnnotations = syncSource
-            ? `    @Transactional\n    @EventHandler`
-            : `    @EventHandler`;
         const eventImports = events
             .map((event) => `import ${this._eventPackage(event, slice)}.${_eventTitle(event.title)}`)
             .join('\n');
@@ -1535,7 +1524,7 @@ class ${resourceName}(
             })
             .filter(Boolean), (value) => value)
             .join('\n');
-        const handlers = events.map((event) => {
+        const updaterHandlers = events.map((event) => {
             const eventFields = new Set((event.fields ?? []).map((field) => field.name));
             const directFieldNames = new Set(readmodel.fields
                 .filter((field) => eventFields.has(field.name))
@@ -1556,16 +1545,6 @@ class ${resourceName}(
                 .join('\n');
             const saveAssignments = [assignments, metadataAssignments].filter(Boolean).join('\n');
             const availableIds = idFields.filter((field) => eventFields.has(field.name));
-            const appendOutbox = (keyExpression, indent = '        ') => syncSource
-                ? `${indent}outbox.append(
-${indent}    sourceContext = "${sourceContext}",
-${indent}    sourceReadModel = "${sourceReadModel}",
-${indent}    readModelKey = ${keyExpression}.toString(),
-${indent}    operation = "UPSERT",
-${indent}    payload = entity.toReadModel(),
-${indent}    message = message
-${indent})`
-                : '';
 
             if (availableIds.length === idFields.length) {
                 const rawKeyExpression = idFields.length > 1
@@ -1581,9 +1560,10 @@ ${indent})`
                 const initializeIds = idFields
                     .map((field) => `                this.${field.name} = ${singleKeyEventField?.optional && field.name === idFields[0].name ? 'key' : readModelStorageExpression(field, `event.${field.name}`)}`)
                     .join('\n');
-                return `${handlerAnnotations}
-    fun on(
-        event: ${_eventTitle(event.title)}${eventMessageParameter}
+                return `    @Transactional
+    override fun update(
+        event: ${_eventTitle(event.title)},
+        message: EventMessage
     ) {
 ${keyGuard}
         val entity = repository.findProjectionById(${keyExpression}) ?: ${name}Projection().apply {
@@ -1591,7 +1571,6 @@ ${initializeIds}
         }
 ${saveAssignments || '        // No read-model fields are present on this event.'}
         repository.save(entity)
-${appendOutbox(keyExpression)}
     }`;
             }
 
@@ -1606,46 +1585,73 @@ ${appendOutbox(keyExpression)}
                 const readModelKey = idFields
                     .map((field) => `entity.${field.name}`)
                     .join(' + ":" + ');
-                return `${handlerAnnotations}
-    fun on(
-        event: ${_eventTitle(event.title)}${eventMessageParameter}
+                return `    @Transactional
+    override fun update(
+        event: ${_eventTitle(event.title)},
+        message: EventMessage
     ) {
 ${lookupGuard}
         repository.findProjectionsBy${pascal(lookupField.name)}(${lookupExpression}).forEach { entity ->
 ${saveAssignments || '            // No read-model fields are present on this event.'}
             repository.save(entity)
-${appendOutbox(readModelKey, '            ')}
         }
     }`;
             }
 
-            return `    @EventHandler
-    fun on(event: ${_eventTitle(event.title)}) {
+            return `    override fun update(
+        event: ${_eventTitle(event.title)},
+        message: EventMessage
+    ) {
         // Skipped: ${_eventTitle(event.title)} does not provide enough key fields to locate ${name}Projection.
     }`;
         }).join('\n\n');
+        const interfaceMethods = events.map((event) => `    fun update(
+        event: ${_eventTitle(event.title)},
+        message: EventMessage
+    )`).join('\n\n');
+        const eventHandlers = events.map((event) => `    @EventHandler
+    fun on(
+        event: ${_eventTitle(event.title)},
+        message: EventMessage
+    ) {
+        updater.update(event, message)
+    }`).join('\n\n');
 
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${name}Projector.kt`), `package ${packageName}
 
 import org.axonframework.messaging.eventhandling.annotation.EventHandler
+import org.axonframework.messaging.eventhandling.EventMessage
 import org.axonframework.messaging.core.annotation.Namespace
-${includeEventMessage ? 'import org.axonframework.messaging.eventhandling.EventMessage\n' : ''}import org.springframework.stereotype.Component
-${syncSource ? 'import org.springframework.transaction.annotation.Transactional\n' : ''}${syncSource ? `import ${this.model.rootPackage}.shared.application.sync.SyncReadModelOutboxAppender\n` : ''}
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
+import org.springframework.stereotype.Component
+import org.springframework.transaction.annotation.Transactional
 ${includeMetadata ? `import ${this.model.rootPackage}.shared.application.metadata.ProjectionMetadata\n` : ''}
 ${eventImports}
 ${stateImports}
 ${includeEventTime ? 'import java.time.LocalDateTime\nimport java.time.ZoneOffset\n' : ''}
 
-@Namespace("${readModelProcessingGroup(readmodel)}")
+interface ${name}ProjectionUpdater {
+${interfaceMethods}
+}
+
 @Component
-class ${name}Projector(
-    private val repository: ${repositoryName}${syncSource ? ',\n    private val outbox: SyncReadModelOutboxAppender' : ''}
-) {
-${handlers}
+@ConditionalOnMissingBean(${name}ProjectionUpdater::class)
+class Default${name}ProjectionUpdater(
+    private val repository: ${repositoryName}
+) : ${name}ProjectionUpdater {
+${updaterHandlers}
 ${includeEventTime ? `
     private fun eventTime(message: EventMessage): LocalDateTime =
         LocalDateTime.ofInstant(message.timestamp(), ZoneOffset.UTC)
 ` : ''}
+}
+
+@Namespace("${readModelProcessingGroup(readmodel)}")
+@Component
+class ${name}Projector(
+    private val updater: ${name}ProjectionUpdater
+) {
+${eventHandlers}
 }
 `);
     },

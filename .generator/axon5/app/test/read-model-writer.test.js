@@ -125,8 +125,20 @@ test('writes shared sync read model support with switchable adapters and checkpo
     assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /highWatermarkSequence/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /medol_sync_read_model_outbox/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /uk_sync_read_model_outbox_event/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /idx_sync_read_model_outbox_channel_sequence/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /idx_sync_read_model_outbox_source_sequence/);
-    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /existsBySourceContextAndSourceReadModelAndReadModelKeyAndEventIdAndOperation/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /idx_sync_read_model_outbox_queue_available/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /object SyncOutboxStatus/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /class SyncOutboxQueue/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /LockModeType\.PESSIMISTIC_WRITE/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /fun findAvailableForClaim/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /fun findExpiredClaimsForClaim/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /fun claimAvailable/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /fun markProcessed/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /fun markFailed/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /fun purgeProcessedBefore/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /existsByChannelAndMessageKeyAndEventIdAndOperation/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /existsBySourceContextAndSourceReadModelAndMessageKeyAndEventIdAndOperation/);
     assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /requires medol\.sync\.source-base-url/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelScheduler.kt'), /adapters\.firstOrNull \{ it\.supports\(properties\.mode\) \}/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelScheduler.kt'), /adapter\.syncOnce\(target, checkpoint\)/);
@@ -234,7 +246,8 @@ test('writes sync read model source resource for referenced source read models',
     assert.match(sourceResource, /highWatermarkSequence/);
     assert.match(sourceResource, /page\.hasNext\(\)/);
     assert.match(sourceResource, /@GetMapping\("\/deltas"\)/);
-    assert.match(sourceResource, /SyncReadModelOutboxRepository/);
+    assert.match(sourceResource, /SyncOutboxRepository/);
+    assert.match(sourceResource, /findBySourceContextAndSourceReadModelAndSequenceGreaterThanOrderBySequenceAsc/);
     assert.match(sourceResource, /afterSequence/);
     assert.match(sourceResource, /"items" to items/);
 });
@@ -293,7 +306,73 @@ test('writes read model projector as overridable projection updater', () => {
     assert.match(projector, /class OrganizationDirectoryProjector\(\n    private val updater: OrganizationDirectoryProjectionUpdater\n\)/);
     assert.match(projector, /updater\.update\(event, message\)/);
     assert.doesNotMatch(projector, /outbox\.append/);
-    assert.doesNotMatch(projector, /SyncReadModelOutboxAppender/);
+    assert.doesNotMatch(projector, /SyncOutboxAppender/);
+});
+
+test('writes sync source read model updater with transactional outbox append', () => {
+    const writes = new Map();
+    const event = {
+        id: 'event-1',
+        title: 'FeatureSchemaDefinedEvent',
+        fields: [
+            {name: 'featureSchemaId', type: 'UUID'},
+            {name: 'featureDomain', type: 'String'}
+        ]
+    };
+    const slice = {
+        context: 'DatasetGovernance',
+        concepts: [{name: 'FeatureSchema'}],
+        events: [event]
+    };
+    const readmodel = {
+        name: 'FeatureSchemaCatalog',
+        dependencies: [{direction: 'INBOUND', elementType: 'EVENT', id: 'event-1'}],
+        fields: [
+            {name: 'featureSchemaId', type: 'UUID', idAttribute: true},
+            {name: 'featureDomain', type: 'String'}
+        ]
+    };
+    const writer = {
+        ...readModelWriterMethods,
+        fullModel: {
+            slices: [{
+                context: 'RuntimeAgentOperations',
+                readmodels: [{
+                    name: 'AgentFeatureSchemaCatalog',
+                    sync: true,
+                    syncSource: 'DatasetGovernance.FeatureSchemaCatalog'
+                }]
+            }]
+        },
+        model: {rootPackage: 'tech.medo', slices: [slice]},
+        fs: {
+            write(path, content) {
+                writes.set(path, content);
+            }
+        },
+        _kotlinPath(relative) {
+            return `kotlin/${relative}`;
+        }
+    };
+
+    readModelWriterMethods._writeReadModelProjector.call(
+        writer,
+        'tech.medo.datasetgovernance.featureschemacatalog',
+        'datasetgovernance',
+        'featureschemacatalog',
+        slice,
+        readmodel,
+        'FeatureSchemaCatalog',
+        [readmodel.fields[0]]
+    );
+
+    const projector = writes.get('kotlin/datasetgovernance/featureschemacatalog/FeatureSchemaCatalogProjector.kt');
+    assert.match(projector, /SyncOutboxAppender/);
+    assert.match(projector, /private val outbox: SyncOutboxAppender/);
+    assert.match(projector, /outbox\.appendReadModel/);
+    assert.match(projector, /sourceContext = "DatasetGovernance"/);
+    assert.match(projector, /sourceReadModel = "FeatureSchemaCatalog"/);
+    assert.match(projector, /payload = entity\.toReadModel\(\)/);
 });
 
 test('does not write sync registration for read models without sync source or a single id', () => {

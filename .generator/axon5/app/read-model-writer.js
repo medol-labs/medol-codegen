@@ -514,12 +514,19 @@ import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.Index
 import jakarta.persistence.Lob
+import jakarta.persistence.LockModeType
 import jakarta.persistence.Table
 import jakarta.persistence.UniqueConstraint
 import org.axonframework.messaging.eventhandling.EventMessage
+import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Lock
+import org.springframework.data.jpa.repository.Query
+import org.springframework.data.repository.query.Param
 import org.springframework.stereotype.Component
+import org.springframework.transaction.annotation.Transactional
+import java.time.Duration
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 
@@ -534,15 +541,25 @@ import java.time.ZoneOffset
     ],
     indexes = [
         Index(
+            name = "idx_sync_read_model_outbox_channel_sequence",
+            columnList = "channel, sequence"
+        ),
+        Index(
             name = "idx_sync_read_model_outbox_source_sequence",
             columnList = "source_context, source_read_model, sequence"
+        ),
+        Index(
+            name = "idx_sync_read_model_outbox_queue_available",
+            columnList = "channel, status, available_at, sequence"
         )
     ]
 )
-class SyncReadModelOutbox {
+class SyncOutboxMessage {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     var sequence: Long? = null
+
+    var channel: String = ""
 
     @Column(name = "source_context")
     var sourceContext: String = ""
@@ -551,7 +568,7 @@ class SyncReadModelOutbox {
     var sourceReadModel: String = ""
 
     @Column(name = "read_model_key")
-    var readModelKey: String = ""
+    var messageKey: String = ""
     var operation: String = "UPSERT"
 
     @Column(name = "event_id")
@@ -569,36 +586,118 @@ class SyncReadModelOutbox {
     @Lob
     @Column(columnDefinition = "text")
     var payloadJson: String = "{}"
+
+    @Lob
+    @Column(columnDefinition = "text")
+    var headersJson: String = "{}"
+
+    var status: String? = SyncOutboxStatus.AVAILABLE
+
+    @Column(name = "available_at")
+    var availableAt: LocalDateTime? = LocalDateTime.now()
+
+    @Column(name = "claimed_by")
+    var claimedBy: String? = null
+
+    @Column(name = "claimed_until")
+    var claimedUntil: LocalDateTime? = null
+
+    @Column(name = "retry_count")
+    var retryCount: Int? = 0
+
+    @Column(name = "processed_at")
+    var processedAt: LocalDateTime? = null
+
+    @Column(name = "last_error", columnDefinition = "text")
+    var lastError: String? = null
 }
 
-interface SyncReadModelOutboxRepository : JpaRepository<SyncReadModelOutbox, Long> {
+object SyncOutboxStatus {
+    const val AVAILABLE = "AVAILABLE"
+    const val PROCESSING = "PROCESSING"
+    const val PROCESSED = "PROCESSED"
+    const val FAILED = "FAILED"
+}
+
+interface SyncOutboxRepository : JpaRepository<SyncOutboxMessage, Long> {
+    fun findByChannelAndSequenceGreaterThanOrderBySequenceAsc(
+        channel: String,
+        sequence: Long,
+        pageable: Pageable
+    ): List<SyncOutboxMessage>
+
     fun findBySourceContextAndSourceReadModelAndSequenceGreaterThanOrderBySequenceAsc(
         sourceContext: String,
         sourceReadModel: String,
         sequence: Long,
         pageable: Pageable
-    ): List<SyncReadModelOutbox>
+    ): List<SyncOutboxMessage>
 
-    fun existsBySourceContextAndSourceReadModelAndReadModelKeyAndEventIdAndOperation(
-        sourceContext: String,
-        sourceReadModel: String,
-        readModelKey: String,
+    fun existsByChannelAndMessageKeyAndEventIdAndOperation(
+        channel: String,
+        messageKey: String,
         eventId: String,
         operation: String
     ): Boolean
 
+    fun existsBySourceContextAndSourceReadModelAndMessageKeyAndEventIdAndOperation(
+        sourceContext: String,
+        sourceReadModel: String,
+        messageKey: String,
+        eventId: String,
+        operation: String
+    ): Boolean
+
+    fun findFirstByChannelOrderBySequenceDesc(channel: String): SyncOutboxMessage?
+
     fun findFirstBySourceContextAndSourceReadModelOrderBySequenceDesc(
         sourceContext: String,
         sourceReadModel: String
-    ): SyncReadModelOutbox?
+    ): SyncOutboxMessage?
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query(
+        """
+        select message from SyncOutboxMessage message
+        where message.channel = :channel
+          and (message.status is null or message.status = :status)
+          and (message.availableAt is null or message.availableAt <= :availableAt)
+        order by message.sequence asc
+        """
+    )
+    fun findAvailableForClaim(
+        @Param("channel") channel: String,
+        @Param("status") status: String,
+        @Param("availableAt") availableAt: LocalDateTime,
+        pageable: Pageable
+    ): List<SyncOutboxMessage>
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query(
+        """
+        select message from SyncOutboxMessage message
+        where message.channel = :channel
+          and message.status = :status
+          and message.claimedUntil <= :claimedUntil
+        order by message.sequence asc
+        """
+    )
+    fun findExpiredClaimsForClaim(
+        @Param("channel") channel: String,
+        @Param("status") status: String,
+        @Param("claimedUntil") claimedUntil: LocalDateTime,
+        pageable: Pageable
+    ): List<SyncOutboxMessage>
+
+    fun deleteByStatusAndProcessedAtBefore(status: String, processedAt: LocalDateTime): Long
 }
 
 @Component
-class SyncReadModelOutboxAppender(
-    private val repository: SyncReadModelOutboxRepository,
+class SyncOutboxAppender(
+    private val repository: SyncOutboxRepository,
     private val objectMapper: ObjectMapper
 ) {
-    fun append(
+    fun appendReadModel(
         sourceContext: String,
         sourceReadModel: String,
         readModelKey: String,
@@ -607,7 +706,7 @@ class SyncReadModelOutboxAppender(
         message: EventMessage
     ) {
         val eventId = message.identifier()
-        if (repository.existsBySourceContextAndSourceReadModelAndReadModelKeyAndEventIdAndOperation(
+        if (repository.existsBySourceContextAndSourceReadModelAndMessageKeyAndEventIdAndOperation(
                 sourceContext,
                 sourceReadModel,
                 readModelKey,
@@ -617,18 +716,126 @@ class SyncReadModelOutboxAppender(
         ) {
             return
         }
-        repository.save(SyncReadModelOutbox().also {
+        append(
+            channel = syncReadModelChannel(sourceContext, sourceReadModel),
+            sourceContext = sourceContext,
+            sourceReadModel = sourceReadModel,
+            messageKey = readModelKey,
+            operation = operation,
+            payload = payload,
+            message = message,
+            eventId = eventId
+        )
+    }
+
+    fun append(
+        channel: String,
+        sourceContext: String,
+        sourceReadModel: String,
+        messageKey: String,
+        operation: String,
+        payload: Any,
+        message: EventMessage,
+        eventId: String = message.identifier(),
+        headers: Map<String, Any?> = emptyMap()
+    ) {
+        if (repository.existsByChannelAndMessageKeyAndEventIdAndOperation(
+                channel,
+                messageKey,
+                eventId,
+                operation
+            )
+        ) {
+            return
+        }
+        repository.save(SyncOutboxMessage().also {
+            it.channel = channel
             it.sourceContext = sourceContext
             it.sourceReadModel = sourceReadModel
-            it.readModelKey = readModelKey
+            it.messageKey = messageKey
             it.operation = operation
             it.eventId = eventId
             it.eventType = message.type().toString()
             it.occurredAt = LocalDateTime.ofInstant(message.timestamp(), ZoneOffset.UTC)
             it.payloadJson = objectMapper.writeValueAsString(payload)
+            it.headersJson = objectMapper.writeValueAsString(headers)
         })
     }
 }
+
+@Component
+class SyncOutboxQueue(
+    private val repository: SyncOutboxRepository
+) {
+    @Transactional
+    fun claimAvailable(
+        channel: String,
+        consumerId: String,
+        batchSize: Int,
+        claimTimeout: Duration = Duration.ofMinutes(5)
+    ): List<SyncOutboxMessage> {
+        val now = LocalDateTime.now()
+        val limit = PageRequest.of(0, batchSize.coerceIn(1, 1000))
+        val available = repository.findAvailableForClaim(
+            channel,
+            SyncOutboxStatus.AVAILABLE,
+            now,
+            limit
+        )
+        val expired = repository.findExpiredClaimsForClaim(
+            channel,
+            SyncOutboxStatus.PROCESSING,
+            now,
+            limit
+        )
+        val claimed = (available + expired)
+            .distinctBy { it.sequence }
+            .take(batchSize.coerceIn(1, 1000))
+            .onEach {
+                it.status = SyncOutboxStatus.PROCESSING
+                it.claimedBy = consumerId
+                it.claimedUntil = now.plus(claimTimeout)
+                it.lastError = null
+            }
+        return repository.saveAll(claimed).toList()
+    }
+
+    @Transactional
+    fun markProcessed(sequence: Long) {
+        repository.findById(sequence).ifPresent {
+            it.status = SyncOutboxStatus.PROCESSED
+            it.processedAt = LocalDateTime.now()
+            it.claimedBy = null
+            it.claimedUntil = null
+            repository.save(it)
+        }
+    }
+
+    @Transactional
+    fun markFailed(sequence: Long, error: String?, maxRetries: Int = 10, retryDelay: Duration = Duration.ofSeconds(30)) {
+        repository.findById(sequence).ifPresent {
+            val nextRetryCount = (it.retryCount ?: 0) + 1
+            it.retryCount = nextRetryCount
+            it.lastError = error?.take(4000)
+            it.claimedBy = null
+            it.claimedUntil = null
+            if (nextRetryCount >= maxRetries) {
+                it.status = SyncOutboxStatus.FAILED
+            } else {
+                it.status = SyncOutboxStatus.AVAILABLE
+                it.availableAt = LocalDateTime.now().plus(retryDelay)
+            }
+            repository.save(it)
+        }
+    }
+
+    @Transactional
+    fun purgeProcessedBefore(cutoff: LocalDateTime): Long =
+        repository.deleteByStatusAndProcessedAtBefore(SyncOutboxStatus.PROCESSED, cutoff)
+}
+
+fun syncReadModelChannel(sourceContext: String, sourceReadModel: String): String =
+    "readmodel.$sourceContext.$sourceReadModel"
 `);
         this.fs.write(this._sharedKernelKotlinPath(`${basePath}/SyncReadModelRegistry.kt`), `package ${basePackage}
 
@@ -1374,14 +1581,14 @@ import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.ObjectMapper
-import ${this.model.rootPackage}.shared.application.sync.SyncReadModelOutboxRepository
+import ${this.model.rootPackage}.shared.application.sync.SyncOutboxRepository
 
 @CrossOrigin
 @RestController
 @RequestMapping("${sourcePath}")
 class ${resourceName}(
     private val repository: ${repositoryName},
-    private val outboxRepository: SyncReadModelOutboxRepository,
+    private val outboxRepository: SyncOutboxRepository,
     private val objectMapper: ObjectMapper
 ) {
     private val mapType = object : TypeReference<Map<String, Any?>>() {}
@@ -1439,9 +1646,10 @@ class ${resourceName}(
                 mapOf(
                     "sequence" to row.sequence,
                     "operation" to row.operation,
+                    "channel" to row.channel,
                     "sourceContext" to row.sourceContext,
                     "sourceReadModel" to row.sourceReadModel,
-                    "readModelKey" to row.readModelKey,
+                    "readModelKey" to row.messageKey,
                     "eventId" to row.eventId,
                     "eventType" to row.eventType,
                     "occurredAt" to row.occurredAt,
@@ -1504,6 +1712,10 @@ class ${resourceName}(
         const keyName = `${name}Key`;
         const metadataFields = readModelMetadataFields(readmodel);
         const includeMetadata = metadataFields.length > 0;
+        const syncSource = this._isSyncReadModelSource(slice, readmodel);
+        const sourceAlias = this._syncSourceAliasForReadModel(slice, readmodel);
+        const sourceContext = sourceAlias?.context ?? slice.context ?? slice.boundedContext ?? context;
+        const sourceReadModel = sourceAlias?.readModel ?? readmodel.name ?? readmodel.title;
         const includeEventTime = events.some((event) =>
             this._readModelConventionalAssignments(readmodel, event, new Set()).some((assignment) => assignment.usesEventTime)
         );
@@ -1545,6 +1757,17 @@ class ${resourceName}(
                 .join('\n');
             const saveAssignments = [assignments, metadataAssignments].filter(Boolean).join('\n');
             const availableIds = idFields.filter((field) => eventFields.has(field.name));
+            const appendOutbox = (keyExpression, indent = '        ') => syncSource
+                ? `
+${indent}outbox.appendReadModel(
+${indent}    sourceContext = "${sourceContext}",
+${indent}    sourceReadModel = "${sourceReadModel}",
+${indent}    readModelKey = ${keyExpression}.toString(),
+${indent}    operation = "UPSERT",
+${indent}    payload = entity.toReadModel(),
+${indent}    message = message
+${indent})`
+                : '';
 
             if (availableIds.length === idFields.length) {
                 const rawKeyExpression = idFields.length > 1
@@ -1571,6 +1794,7 @@ ${initializeIds}
         }
 ${saveAssignments || '        // No read-model fields are present on this event.'}
         repository.save(entity)
+${appendOutbox(keyExpression)}
     }`;
             }
 
@@ -1594,6 +1818,7 @@ ${lookupGuard}
         repository.findProjectionsBy${pascal(lookupField.name)}(${lookupExpression}).forEach { entity ->
 ${saveAssignments || '            // No read-model fields are present on this event.'}
             repository.save(entity)
+${appendOutbox(readModelKey, '            ')}
         }
     }`;
             }
@@ -1626,6 +1851,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
 ${includeMetadata ? `import ${this.model.rootPackage}.shared.application.metadata.ProjectionMetadata\n` : ''}
+${syncSource ? `import ${this.model.rootPackage}.shared.application.sync.SyncOutboxAppender\n` : ''}
 ${eventImports}
 ${stateImports}
 ${includeEventTime ? 'import java.time.LocalDateTime\nimport java.time.ZoneOffset\n' : ''}
@@ -1637,7 +1863,7 @@ ${interfaceMethods}
 @Component
 @ConditionalOnMissingBean(${name}ProjectionUpdater::class)
 class Default${name}ProjectionUpdater(
-    private val repository: ${repositoryName}
+    private val repository: ${repositoryName}${syncSource ? ',\n    private val outbox: SyncOutboxAppender' : ''}
 ) : ${name}ProjectionUpdater {
 ${updaterHandlers}
 ${includeEventTime ? `

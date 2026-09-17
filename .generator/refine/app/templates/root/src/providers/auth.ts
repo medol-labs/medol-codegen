@@ -8,6 +8,7 @@ import {
   fetchCurrentUser,
   getAccessToken,
   storeLocalAuth,
+  validateCurrentSession,
 } from "./api-auth";
 import { supabaseClient } from "./supabase-client";
 
@@ -367,14 +368,9 @@ const authProvider: AuthProvider = {
         };
       }
 
-      if (cachedCurrentUser()) {
-        return {
-          authenticated: true,
-        };
-      }
-
-      await fetchCurrentUser();
+      await validateCurrentSession();
     } catch (error: any) {
+      clearLocalAuth();
       return {
         authenticated: false,
         error: error || {

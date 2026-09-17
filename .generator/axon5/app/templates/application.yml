@@ -75,12 +75,6 @@ medol:
     flow-logging:
       enabled: ${MEDOL_AXON_FLOW_LOGGING_ENABLED:true}
     event-storage: ${MEDOL_AXON_EVENT_STORAGE:umadb}
-  sync:
-    enabled: ${MEDOL_SYNC_ENABLED:true}
-    mode: ${MEDOL_SYNC_MODE:pull-http}
-    source-base-url: ${MEDOL_SYNC_SOURCE_BASE_URL:}
-    page-size: ${MEDOL_SYNC_PAGE_SIZE:200}
-    fixed-delay-ms: ${MEDOL_SYNC_FIXED_DELAY_MS:30000}
 <% if (hasInfra) { -%>
     umadb:
       target: ${UMADB_TARGET:localhost:<%= umadbPort %>}
@@ -89,6 +83,12 @@ medol:
       batch-size: ${UMADB_BATCH_SIZE:256}
       request-timeout: ${UMADB_REQUEST_TIMEOUT:PT10S}
 <% } -%>
+  sync:
+    enabled: ${MEDOL_SYNC_ENABLED:true}
+    mode: ${MEDOL_SYNC_MODE:outbox-delta}
+    source-base-url: ${MEDOL_SYNC_SOURCE_BASE_URL:}
+    page-size: ${MEDOL_SYNC_PAGE_SIZE:200}
+    fixed-delay-ms: ${MEDOL_SYNC_FIXED_DELAY_MS:30000}
 <% if (externalSystems.length > 0) { -%>
 
 external:

@@ -49,7 +49,7 @@ function buildImages() {
     ensureModules();
     ensureMavenWrapper();
     if (!skipInstall) {
-        run('./mvnw', [...mavenGlobalArgs(), '-pl', modules.join(','), '-am', '-DskipTests', 'install']);
+        run('./mvnw', [...mavenGlobalArgs(), '-pl', modules.join(','), '-am', '-DskipTests', 'clean', 'install']);
     } else {
         console.log('[images] skipping Maven install; using already-built local reactor artifacts');
     }

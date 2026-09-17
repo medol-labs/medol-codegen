@@ -208,6 +208,9 @@ test('renders Kubernetes and K3s manifests from the same operations model', () =
     assert.doesNotMatch(k3s['dev/k3s/environments/dev/kustomization.yaml'], /secrets\.example\.yaml/);
     assert.match(k3s['dev/k3s/environments/dev/configmap.yaml'], /name: "federation-service-dev-config"/);
     assert.match(k3s['dev/k3s/environments/dev/configmap.yaml'], /SERVER_PORT: "8080"/);
+    assert.match(k3s['dev/k3s/environments/dev/configmap.yaml'], /MEDOL_SYNC_ENABLED: "true"/);
+    assert.match(k3s['dev/k3s/environments/dev/configmap.yaml'], /MEDOL_SYNC_MODE: "outbox-delta"/);
+    assert.match(k3s['dev/k3s/environments/dev/configmap.yaml'], /MEDOL_SYNC_SOURCE_BASE_URL: ""/);
     assert.match(k3s['dev/k3s/environments/dev/configmap.yaml'], /VITE_API_URL: "https:\/\/iwdfzvfqbtokqetmbmbp\.supabase\.co"/);
     assert.match(k3s['dev/k3s/environments/dev/configmap.yaml'], /VITE_FEDERATION_SERVICE_API_URL: "\/api\/federations"/);
     assert.match(k3s['dev/k3s/environments/dev/configmap.yaml'], /VITE_SUPABASE_API_KEY: ""/);
@@ -249,6 +252,18 @@ test('derives image names and K3s registry configuration from optional registry 
     assert.match(
         k3s['dev/k3s/environments/dev-registry/kustomization.yaml'],
         /newName: "registry\.internal:5000\/team\/federation-service"/
+    );
+    assert.match(
+        k3s['dev/k3s/environments/dev-registry/kustomization.yaml'],
+        /path: "image-pull-policy\.yaml"/
+    );
+    assert.match(
+        k3s['dev/k3s/environments/dev-registry/image-pull-policy.yaml'],
+        /path: "\/spec\/template\/spec\/containers\/0\/imagePullPolicy"/
+    );
+    assert.match(
+        k3s['dev/k3s/environments/dev-registry/image-pull-policy.yaml'],
+        /value: "Always"/
     );
     assert.match(
         k3s['dev/k3s/cluster/registries.yaml'],

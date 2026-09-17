@@ -324,10 +324,10 @@ The build script uses Maven/Jib under the hood:
 ```bash
 <% if (modulePrefix) { -%>
 cd ..
-./mvnw -pl <%= modulePrefix %> -am -DskipTests install
+./mvnw -pl <%= modulePrefix %> -am -DskipTests clean install
 ./mvnw -pl <%= modulePrefix %> -DskipTests -Djib.container.platform.os=linux -Djib.container.platform.architecture=amd64 com.google.cloud.tools:jib-maven-plugin:3.4.5:dockerBuild
 <% } else if (hasInfra) { -%>
-./mvnw -pl <module-name> -am -DskipTests install
+./mvnw -pl <module-name> -am -DskipTests clean install
 ./mvnw -pl <module-name> -DskipTests -Djib.container.platform.os=linux -Djib.container.platform.architecture=amd64 com.google.cloud.tools:jib-maven-plugin:3.4.5:dockerBuild
 <% } else { -%>
 ./mvnw -DskipTests -Djib.container.platform.os=linux -Djib.container.platform.architecture=amd64 com.google.cloud.tools:jib-maven-plugin:3.4.5:dockerBuild

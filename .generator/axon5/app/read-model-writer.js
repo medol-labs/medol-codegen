@@ -461,7 +461,11 @@ data class SyncReadModelContext(
 ) {
     fun requiredParameter(name: String, target: String): String =
         properties.parameters[name]
+            ?: properties.parameters.entries.firstOrNull { (key, _) -> relaxedKey(key) == relaxedKey(name) }?.value
             ?: throw IllegalArgumentException("Sync target $target requires medol.sync.parameters.$name")
+
+    private fun relaxedKey(value: String): String =
+        value.filter { it.isLetterOrDigit() }.lowercase()
 }
 
 data class SyncReadModelResult(
@@ -513,11 +517,13 @@ import jakarta.persistence.GeneratedValue
 import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.Index
-import jakarta.persistence.Lob
 import jakarta.persistence.LockModeType
 import jakarta.persistence.Table
 import jakarta.persistence.UniqueConstraint
+import org.hibernate.annotations.JdbcTypeCode
+import org.hibernate.type.SqlTypes
 import org.axonframework.messaging.eventhandling.EventMessage
+import org.slf4j.LoggerFactory
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
@@ -583,11 +589,11 @@ class SyncOutboxMessage {
     @Column(name = "created_at")
     var createdAt: LocalDateTime = LocalDateTime.now()
 
-    @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(columnDefinition = "text")
     var payloadJson: String = "{}"
 
-    @Lob
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     @Column(columnDefinition = "text")
     var headersJson: String = "{}"
 
@@ -697,6 +703,8 @@ class SyncOutboxAppender(
     private val repository: SyncOutboxRepository,
     private val objectMapper: ObjectMapper
 ) {
+    private val log = LoggerFactory.getLogger(javaClass)
+
     fun appendReadModel(
         sourceContext: String,
         sourceReadModel: String,
@@ -714,6 +722,14 @@ class SyncOutboxAppender(
                 operation
             )
         ) {
+            log.debug(
+                "SYNC OUTBOX skip duplicate source={}.{} key={} operation={} eventId={}",
+                sourceContext,
+                sourceReadModel,
+                readModelKey,
+                operation,
+                eventId
+            )
             return
         }
         append(
@@ -746,9 +762,16 @@ class SyncOutboxAppender(
                 operation
             )
         ) {
+            log.debug(
+                "SYNC OUTBOX skip duplicate channel={} key={} operation={} eventId={}",
+                channel,
+                messageKey,
+                operation,
+                eventId
+            )
             return
         }
-        repository.save(SyncOutboxMessage().also {
+        val saved = repository.save(SyncOutboxMessage().also {
             it.channel = channel
             it.sourceContext = sourceContext
             it.sourceReadModel = sourceReadModel
@@ -760,6 +783,17 @@ class SyncOutboxAppender(
             it.payloadJson = objectMapper.writeValueAsString(payload)
             it.headersJson = objectMapper.writeValueAsString(headers)
         })
+        log.info(
+            "SYNC OUTBOX stored sequence={} channel={} source={}.{} key={} operation={} eventId={} eventType={}",
+            saved.sequence,
+            saved.channel,
+            saved.sourceContext,
+            saved.sourceReadModel,
+            saved.messageKey,
+            saved.operation,
+            saved.eventId,
+            saved.eventType
+        )
     }
 }
 
@@ -1005,6 +1039,7 @@ class HttpPullSyncReadModelAdapter(
 import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import org.springframework.web.client.RestClient
 import org.springframework.web.util.UriComponentsBuilder
@@ -1016,6 +1051,7 @@ class OutboxDeltaSyncReadModelAdapter(
     restClientBuilder: RestClient.Builder,
     private val objectMapper: ObjectMapper
 ) : SyncReadModelAdapter {
+    private val log = LoggerFactory.getLogger(javaClass)
     private val restClient: RestClient = restClientBuilder.build()
     private val mapType = object : TypeReference<Map<String, Any?>>() {}
 
@@ -1029,6 +1065,7 @@ class OutboxDeltaSyncReadModelAdapter(
 
         var count = 0
         val context = SyncReadModelContext(properties, checkpoint)
+        val queryParameters = target.queryParameters(context)
         var bootstrapHighWatermark: Long? = null
         if (checkpoint?.bootstrapCompleted != true) {
             var cursor: String? = null
@@ -1038,7 +1075,15 @@ class OutboxDeltaSyncReadModelAdapter(
                     .path(target.sourcePath)
                     .queryParam("size", properties.pageSize)
                 cursor?.takeIf { it.isNotBlank() }?.let { snapshotUriBuilder.queryParam("cursor", it) }
-                target.queryParameters(context).forEach { (name, value) -> snapshotUriBuilder.queryParam(name, value) }
+                queryParameters.forEach { (name, value) -> snapshotUriBuilder.queryParam(name, value) }
+
+                log.debug(
+                    "SYNC READMODEL snapshot pull target={} path={} cursor={} parameters={}",
+                    target.name,
+                    target.sourcePath,
+                    cursor,
+                    queryParameters
+                )
 
                 val snapshotResponse = restClient.get()
                     .uri(snapshotUriBuilder.toUriString())
@@ -1046,13 +1091,30 @@ class OutboxDeltaSyncReadModelAdapter(
                     .body(JsonNode::class.java)
 
                 val snapshotSyncedAt = LocalDateTime.now()
-                snapshotResponse.itemsNode().forEach { item ->
+                val snapshotItems = snapshotResponse.itemsNode().toList()
+                snapshotItems.forEach { item ->
                     target.upsert(objectMapper.convertValue(item, mapType), snapshotSyncedAt)
                     count += 1
                 }
                 bootstrapHighWatermark = snapshotResponse?.get("highWatermarkSequence")?.takeIf { !it.isNull }?.asLong()
                     ?: bootstrapHighWatermark
                 cursor = snapshotResponse?.get("nextCursor")?.takeIf { !it.isNull }?.asText()
+                if (snapshotItems.isNotEmpty()) {
+                    log.info(
+                        "SYNC READMODEL snapshot stored target={} itemCount={} highWatermarkSequence={} nextCursor={}",
+                        target.name,
+                        snapshotItems.size,
+                        bootstrapHighWatermark,
+                        cursor
+                    )
+                } else {
+                    log.debug(
+                        "SYNC READMODEL snapshot empty target={} highWatermarkSequence={} nextCursor={}",
+                        target.name,
+                        bootstrapHighWatermark,
+                        cursor
+                    )
+                }
             } while (!cursor.isNullOrBlank())
         }
 
@@ -1063,7 +1125,15 @@ class OutboxDeltaSyncReadModelAdapter(
             .queryParam("afterSequence", afterSequence)
             .queryParam("size", properties.pageSize)
 
-        target.queryParameters(context).forEach { (name, value) -> uriBuilder.queryParam(name, value) }
+        queryParameters.forEach { (name, value) -> uriBuilder.queryParam(name, value) }
+
+        log.debug(
+            "SYNC READMODEL delta pull target={} path={} afterSequence={} parameters={}",
+            target.name,
+            target.deltaPath,
+            afterSequence,
+            queryParameters
+        )
 
         val response = restClient.get()
             .uri(uriBuilder.toUriString())
@@ -1071,17 +1141,37 @@ class OutboxDeltaSyncReadModelAdapter(
             .body(JsonNode::class.java)
 
         val syncedAt = LocalDateTime.now()
-        response.itemsNode().forEach { item ->
+        val deltaItems = response.itemsNode().toList()
+        var storedDeltaCount = 0
+        deltaItems.forEach { item ->
             val operation = item.get("operation")?.asText() ?: "UPSERT"
             if (operation.equals("UPSERT", ignoreCase = true)) {
                 val payload = item.get("payload") ?: item
                 target.upsert(objectMapper.convertValue(payload, mapType), syncedAt)
                 count += 1
+                storedDeltaCount += 1
             }
         }
 
         val nextSequence = response?.get("nextSequence")?.takeIf { !it.isNull }?.asLong()
             ?: checkpoint?.lastSequence
+        if (deltaItems.isNotEmpty()) {
+            log.info(
+                "SYNC READMODEL delta stored target={} pulledItemCount={} storedItemCount={} afterSequence={} nextSequence={}",
+                target.name,
+                deltaItems.size,
+                storedDeltaCount,
+                afterSequence,
+                nextSequence
+            )
+        } else {
+            log.debug(
+                "SYNC READMODEL delta empty target={} afterSequence={} nextSequence={}",
+                target.name,
+                afterSequence,
+                nextSequence
+            )
+        }
         return SyncReadModelResult(target.name, count, nextSequence = nextSequence)
     }
 
@@ -1136,6 +1226,14 @@ class SyncReadModelScheduler(
             }
         }
         checkpoint.lastAttemptedAt = LocalDateTime.now()
+        log.debug(
+            "SYNC READMODEL target start target={} source={} mode={} bootstrapCompleted={} lastSequence={}",
+            target.name,
+            target.source,
+            properties.mode,
+            checkpoint.bootstrapCompleted,
+            checkpoint.lastSequence
+        )
         try {
             val result = adapter.syncOnce(target, checkpoint)
             checkpoint.lastSuccessfulSyncedAt = LocalDateTime.now()
@@ -1151,6 +1249,14 @@ class SyncReadModelScheduler(
             log.warn("Sync read model target={} failed", target.name, ex)
         }
         checkpoints.save(checkpoint)
+        log.debug(
+            "SYNC READMODEL checkpoint stored target={} status={} itemCount={} lastSequence={} bootstrapCompleted={}",
+            target.name,
+            checkpoint.lastStatus,
+            checkpoint.syncedItemCount,
+            checkpoint.lastSequence,
+            checkpoint.bootstrapCompleted
+        )
     }
 }
 `);
@@ -1784,7 +1890,7 @@ ${indent})`
                     .map((field) => `                this.${field.name} = ${singleKeyEventField?.optional && field.name === idFields[0].name ? 'key' : readModelStorageExpression(field, `event.${field.name}`)}`)
                     .join('\n');
                 return `    @Transactional
-    override fun update(
+    open override fun update(
         event: ${_eventTitle(event.title)},
         message: EventMessage
     ) {
@@ -1810,7 +1916,7 @@ ${appendOutbox(keyExpression)}
                     .map((field) => `entity.${field.name}`)
                     .join(' + ":" + ');
                 return `    @Transactional
-    override fun update(
+    open override fun update(
         event: ${_eventTitle(event.title)},
         message: EventMessage
     ) {
@@ -1823,7 +1929,7 @@ ${appendOutbox(readModelKey, '            ')}
     }`;
             }
 
-            return `    override fun update(
+            return `    open override fun update(
         event: ${_eventTitle(event.title)},
         message: EventMessage
     ) {
@@ -1848,6 +1954,8 @@ import org.axonframework.messaging.eventhandling.annotation.EventHandler
 import org.axonframework.messaging.eventhandling.EventMessage
 import org.axonframework.messaging.core.annotation.Namespace
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
 ${includeMetadata ? `import ${this.model.rootPackage}.shared.application.metadata.ProjectionMetadata\n` : ''}
@@ -1860,9 +1968,7 @@ interface ${name}ProjectionUpdater {
 ${interfaceMethods}
 }
 
-@Component
-@ConditionalOnMissingBean(${name}ProjectionUpdater::class)
-class Default${name}ProjectionUpdater(
+open class Default${name}ProjectionUpdater(
     private val repository: ${repositoryName}${syncSource ? ',\n    private val outbox: SyncOutboxAppender' : ''}
 ) : ${name}ProjectionUpdater {
 ${updaterHandlers}
@@ -1870,6 +1976,16 @@ ${includeEventTime ? `
     private fun eventTime(message: EventMessage): LocalDateTime =
         LocalDateTime.ofInstant(message.timestamp(), ZoneOffset.UTC)
 ` : ''}
+}
+
+@Configuration(proxyBeanMethods = false)
+class ${name}ProjectionUpdaterConfiguration {
+    @Bean
+    @ConditionalOnMissingBean(${name}ProjectionUpdater::class)
+    fun default${name}ProjectionUpdater(
+        repository: ${repositoryName}${syncSource ? ',\n        outbox: SyncOutboxAppender' : ''}
+    ): ${name}ProjectionUpdater =
+        Default${name}ProjectionUpdater(repository${syncSource ? ', outbox' : ''})
 }
 
 @Namespace("${readModelProcessingGroup(readmodel)}")

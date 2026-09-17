@@ -14,6 +14,7 @@ const TOKEN_KEY = "medol-auth-token";
 const USER_KEY = "medol-current-user";
 export const AUTH_STATE_CHANGE_EVENT = "medol-auth-state-change";
 let currentUserRequest: Promise<CurrentUser> | null = null;
+let validatedAccessToken: string | null = null;
 
 export const authProviderMode = (): string =>
   getAppConfig("VITE_AUTH_PROVIDER", "local");
@@ -28,6 +29,7 @@ export const authBackendBaseUrl = (): string =>
   );
 
 export const storeLocalAuth = (token: string, user?: CurrentUser) => {
+  validatedAccessToken = null;
   localStorage.setItem(TOKEN_KEY, token);
   if (user) {
     localStorage.setItem(USER_KEY, JSON.stringify(user));
@@ -76,6 +78,7 @@ export const exchangePortalJwtForSystemSession = async (params: {
 };
 
 export const clearLocalAuth = () => {
+  validatedAccessToken = null;
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
   window.dispatchEvent(new Event(AUTH_STATE_CHANGE_EVENT));
@@ -132,13 +135,15 @@ export const fetchCurrentUser = async (): Promise<CurrentUser> => {
     return currentUserRequest;
   }
 
-  currentUserRequest = authFetch(`${authBackendBaseUrl()}/api/me`)
-    .then(async (response) => {
+  currentUserRequest = getAccessToken()
+    .then(async (accessToken) => {
+      const response = await authFetch(`${authBackendBaseUrl()}/api/me`);
       if (!response.ok) {
         throw new Error("Current user could not be loaded.");
       }
 
       const user = (await response.json()) as CurrentUser;
+      validatedAccessToken = accessToken ?? null;
       localStorage.setItem(USER_KEY, JSON.stringify(user));
       window.dispatchEvent(new Event(AUTH_STATE_CHANGE_EVENT));
       return user;
@@ -148,4 +153,15 @@ export const fetchCurrentUser = async (): Promise<CurrentUser> => {
     });
 
   return currentUserRequest;
+};
+
+export const validateCurrentSession = async (): Promise<CurrentUser> => {
+  const accessToken = await getAccessToken();
+  const cachedUser = cachedCurrentUser();
+
+  if (accessToken && accessToken === validatedAccessToken && cachedUser) {
+    return cachedUser;
+  }
+
+  return fetchCurrentUser();
 };

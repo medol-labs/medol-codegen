@@ -257,13 +257,22 @@ function registryEnvironmentFiles(baseModel, registryModel, options) {
     if (!registryModel.registry?.imagePrefix) return {};
     const environmentName = `${options.environmentName}-registry`;
     const files = {};
+    files[`${options.root}/environments/${environmentName}/image-pull-policy.yaml`] = renderYaml([
+        {op: 'add', path: '/spec/template/spec/containers/0/imagePullPolicy', value: 'Always'}
+    ]);
     files[`${options.root}/environments/${environmentName}/kustomization.yaml`] = renderYaml({
         resources: [`../${options.environmentName}`],
         images: baseModel.applications.map((application) => ({
             name: localApplicationImageName(application),
             newName: registryApplicationImageName(registryModel, application),
             newTag: registryModel.imageTag
-        }))
+        })),
+        patches: [{
+            target: {
+                kind: 'Deployment'
+            },
+            path: 'image-pull-policy.yaml'
+        }]
     });
     return files;
 }
@@ -463,6 +472,14 @@ function applicationConfigVariables(model, application, options) {
     const applicationVariables = applicationEnvironmentVariables(model, application);
     const hasIdentityAccessManagement = hasApplicationContext(application, 'IdentityAccessManagement');
     const hasConfiguredCors = applicationVariables.some((variable) => variable.name === 'MEDOL_SECURITY_ALLOWED_ORIGINS');
+    const backendSyncDefaults = application.kind === 'backend'
+        ? [
+            { name: 'MEDOL_SYNC_ENABLED', value: 'true' },
+            { name: 'MEDOL_SYNC_MODE', value: 'outbox-delta' },
+            { name: 'MEDOL_SYNC_SOURCE_BASE_URL', value: '' },
+            { name: 'MEDOL_SYNC_FIXED_DELAY_MS', value: '30000' }
+        ].filter((variable) => !applicationVariables.some((candidate) => candidate.name === variable.name))
+        : [];
     const k3sDevCors = application.kind === 'backend'
         && options.name.toLowerCase() === 'k3s'
         && options.environmentName === 'dev'
@@ -474,6 +491,7 @@ function applicationConfigVariables(model, application, options) {
         : [];
     return [
         ...applicationVariables,
+        ...backendSyncDefaults,
         ...k3sDevCors,
         ...(hasIdentityAccessManagement
             ? [{ name: 'MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED', value: 'true' }]

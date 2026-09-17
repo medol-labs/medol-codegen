@@ -1,8 +1,17 @@
 const assert = require('node:assert/strict');
+const {readFileSync} = require('node:fs');
+const {join} = require('node:path');
 const test = require('node:test');
 
 const {readModelWriterMethods} = require('../read-model-writer');
 const {safeDatabaseIdentifier} = require('../model-helpers');
+
+test('places UmaDB event storage settings under medol.axon', () => {
+    const template = readFileSync(join(__dirname, '../templates/application.yml'), 'utf8');
+
+    assert.match(template, /  axon:[\s\S]*?    umadb:[\s\S]*?  sync:/);
+    assert.doesNotMatch(template, /  sync:[\s\S]*?    umadb:/);
+});
 
 test('keeps generated database identifiers within PostgreSQL identifier length', () => {
     const name = safeDatabaseIdentifier(
@@ -113,6 +122,7 @@ test('writes shared sync read model support with switchable adapters and checkpo
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelAdapter.kt'), /fun supports\(mode: String\): Boolean/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelAdapter.kt'), /fun syncOnce\(target: SyncReadModelTarget, checkpoint: SyncReadModelCheckpoint\?\): SyncReadModelResult/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelTarget.kt'), /val queryParameters: \(SyncReadModelContext\) -> Map<String, String>/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelTarget.kt'), /relaxedKey\(key\) == relaxedKey\(name\)/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelProperties.kt'), /var parameters: Map<String, String> = emptyMap\(\)/);
     assert.match(writes.get('shared/shared/application/sync/HttpPullSyncReadModelAdapter.kt'), /mode\.equals\("pull-http", ignoreCase = true\)/);
     assert.match(writes.get('shared/shared/application/sync/HttpPullSyncReadModelAdapter.kt'), /target\.queryParameters\(context\)\.forEach/);
@@ -123,6 +133,10 @@ test('writes shared sync read model support with switchable adapters and checkpo
     assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /target\.sourcePath/);
     assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /nextCursor/);
     assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /highWatermarkSequence/);
+    assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /SYNC READMODEL snapshot pull/);
+    assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /SYNC READMODEL snapshot stored/);
+    assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /SYNC READMODEL delta pull/);
+    assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /SYNC READMODEL delta stored/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /medol_sync_read_model_outbox/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /uk_sync_read_model_outbox_event/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /idx_sync_read_model_outbox_channel_sequence/);
@@ -139,9 +153,13 @@ test('writes shared sync read model support with switchable adapters and checkpo
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /fun purgeProcessedBefore/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /existsByChannelAndMessageKeyAndEventIdAndOperation/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /existsBySourceContextAndSourceReadModelAndMessageKeyAndEventIdAndOperation/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /SYNC OUTBOX stored/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /@JdbcTypeCode\(SqlTypes\.LONGVARCHAR\)/);
+    assert.doesNotMatch(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /@Lob/);
     assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /requires medol\.sync\.source-base-url/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelScheduler.kt'), /adapters\.firstOrNull \{ it\.supports\(properties\.mode\) \}/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelScheduler.kt'), /adapter\.syncOnce\(target, checkpoint\)/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelScheduler.kt'), /SYNC READMODEL checkpoint stored/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelCheckpoint.kt'), /medol_sync_read_model_checkpoint/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelCheckpoint.kt'), /lastSequence/);
 });
@@ -301,8 +319,13 @@ test('writes read model projector as overridable projection updater', () => {
 
     const projector = writes.get('kotlin/organizationmanagement/organizationdirectory/OrganizationDirectoryProjector.kt');
     assert.match(projector, /interface OrganizationDirectoryProjectionUpdater/);
-    assert.match(projector, /class DefaultOrganizationDirectoryProjectionUpdater/);
+    assert.match(projector, /open class DefaultOrganizationDirectoryProjectionUpdater/);
+    assert.match(projector, /open override fun update\(/);
+    assert.match(projector, /@Configuration\(proxyBeanMethods = false\)/);
+    assert.match(projector, /class OrganizationDirectoryProjectionUpdaterConfiguration/);
+    assert.match(projector, /@Bean/);
     assert.match(projector, /@ConditionalOnMissingBean\(OrganizationDirectoryProjectionUpdater::class\)/);
+    assert.doesNotMatch(projector, /@Component\s+@ConditionalOnMissingBean\(OrganizationDirectoryProjectionUpdater::class\)\s+class Default/);
     assert.match(projector, /class OrganizationDirectoryProjector\(\n    private val updater: OrganizationDirectoryProjectionUpdater\n\)/);
     assert.match(projector, /updater\.update\(event, message\)/);
     assert.doesNotMatch(projector, /outbox\.append/);

@@ -31,6 +31,10 @@ function envPrefix(value) {
     return kebab(value).toUpperCase().replace(/[^A-Z0-9]+/g, '_');
 }
 
+function mapEnvKey(value) {
+    return String(value ?? '').toUpperCase().replace(/[^A-Z0-9]+/g, '');
+}
+
 function processorDependency(processor, direction, elementType) {
     return (processor.dependencies ?? []).find((candidate) =>
         candidate.direction === direction && candidate.elementType === elementType
@@ -382,8 +386,28 @@ ${beanMethods}
             dockerComposeEnabled: 'true',
             deploymentFrontends: this._deploymentFrontends(appName, appPort),
             externalSystems: this._externalSystemConfigs(),
-            integrationClients: this._integrationClientConfigs()
+            integrationClients: this._integrationClientConfigs(),
+            syncSourceContexts: this._syncSourceContextConfigs()
         };
+    },
+
+    _syncSourceContextConfigs() {
+        const contexts = new Map();
+        for (const slice of this.model.slices ?? []) {
+            for (const readmodel of slice.readmodels ?? []) {
+                if (!readmodel.syncSource) continue;
+                const parts = String(readmodel.syncSource).split('.').filter(Boolean);
+                const sourceContext = parts.length > 1 ? parts.slice(0, -1).join('.') : '';
+                if (!sourceContext) continue;
+                const configKey = kebab(sourceContext);
+                contexts.set(configKey, {
+                    sourceContext,
+                    configKey,
+                    env: `MEDOL_SYNC_SOURCE_BASE_URLS_${mapEnvKey(sourceContext)}`
+                });
+            }
+        }
+        return [...contexts.values()].sort((a, b) => a.configKey.localeCompare(b.configKey));
     },
 
     _deploymentFrontends(appName, appPort) {

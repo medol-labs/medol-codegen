@@ -87,6 +87,12 @@ medol:
     enabled: ${MEDOL_SYNC_ENABLED:true}
     mode: ${MEDOL_SYNC_MODE:outbox-delta}
     source-base-url: ${MEDOL_SYNC_SOURCE_BASE_URL:}
+<% if ((syncSourceContexts ?? []).length > 0) { -%>
+    source-base-urls:
+<% syncSourceContexts.forEach((source) => { -%>
+      <%= source.configKey %>: ${<%= source.env %>:}
+<% }) -%>
+<% } -%>
     page-size: ${MEDOL_SYNC_PAGE_SIZE:200}
     fixed-delay-ms: ${MEDOL_SYNC_FIXED_DELAY_MS:30000}
 <% if (externalSystems.length > 0) { -%>

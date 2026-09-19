@@ -85,6 +85,9 @@ services:
       SUPABASE_JWT_JWK_SET_URI: ${SUPABASE_JWT_JWK_SET_URI:-}
       MEDOL_AXON_EVENT_STORAGE: ${MEDOL_AXON_EVENT_STORAGE:-umadb}
       MEDOL_SYNC_SOURCE_BASE_URL: ${MEDOL_SYNC_SOURCE_BASE_URL:-}
+<% (syncSourceContexts ?? []).forEach((source) => { -%>
+      <%= source.env %>: ${<%= source.env %>:-}
+<% }) -%>
       UMADB_TARGET: ${APP_UMADB_TARGET:-umadb:50051}
       UMADB_PLAINTEXT: ${UMADB_PLAINTEXT:-true}
       UMADB_API_KEY: ${UMADB_API_KEY:-}

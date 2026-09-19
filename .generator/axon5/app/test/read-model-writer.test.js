@@ -13,6 +13,13 @@ test('places UmaDB event storage settings under medol.axon', () => {
     assert.doesNotMatch(template, /  sync:[\s\S]*?    umadb:/);
 });
 
+test('security template exposes an internal rest client bean', () => {
+    const template = readFileSync(join(__dirname, '../templates/security/MedolRestClientSecurityConfiguration.kt.tpl'), 'utf8');
+
+    assert.match(template, /fun medolInternalRestClient\(/);
+    assert.match(template, /defaultHeader\(InternalTokenAuthenticationFilter\.INTERNAL_TOKEN_HEADER, token\)/);
+});
+
 test('keeps generated database identifiers within PostgreSQL identifier length', () => {
     const name = safeDatabaseIdentifier(
         'Extremely Long Runtime Infrastructure Participant Execution Plan Coordination Dashboard'
@@ -128,11 +135,13 @@ test('writes shared sync read model support with switchable adapters and checkpo
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelProperties.kt'), /sourceBaseUrls\.firstMatching\(target\.sourceContext\)/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelProperties.kt'), /var parameters: Map<String, String> = emptyMap\(\)/);
     assert.match(writes.get('shared/shared/application/sync/HttpPullSyncReadModelAdapter.kt'), /mode\.equals\("pull-http", ignoreCase = true\)/);
+    assert.match(writes.get('shared/shared/application/sync/HttpPullSyncReadModelAdapter.kt'), /@param:Qualifier\("medolInternalRestClient"\) private val restClient: RestClient/);
     assert.match(writes.get('shared/shared/application/sync/HttpPullSyncReadModelAdapter.kt'), /val sourceBaseUrl = properties\.sourceBaseUrlFor\(target\)/);
     assert.match(writes.get('shared/shared/application/sync/HttpPullSyncReadModelAdapter.kt'), /\.fromHttpUrl\(sourceBaseUrl\)/);
     assert.match(writes.get('shared/shared/application/sync/HttpPullSyncReadModelAdapter.kt'), /target\.queryParameters\(context\)\.forEach/);
     assert.match(writes.get('shared/shared/application/sync/HttpPullSyncReadModelAdapter.kt'), /queryParam\("updatedAfter", it\)/);
     assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /mode\.equals\("outbox-delta", ignoreCase = true\)/);
+    assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /@param:Qualifier\("medolInternalRestClient"\) private val restClient: RestClient/);
     assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /val sourceBaseUrl = properties\.sourceBaseUrlFor\(target\)/);
     assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /\.fromHttpUrl\(sourceBaseUrl\)/);
     assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /afterSequence/);

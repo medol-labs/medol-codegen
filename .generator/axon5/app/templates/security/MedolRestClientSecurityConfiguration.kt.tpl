@@ -17,4 +17,16 @@ class MedolRestClientSecurityConfiguration {
                 builder.defaultHeader(InternalTokenAuthenticationFilter.INTERNAL_TOKEN_HEADER, token)
             }
         }
+
+    @Bean
+    fun medolInternalRestClient(
+        restClientBuilder: RestClient.Builder,
+        properties: MedolSecurityProperties
+    ): RestClient {
+        val token = properties.internalToken.trim()
+        if (token.isNotBlank()) {
+            restClientBuilder.defaultHeader(InternalTokenAuthenticationFilter.INTERNAL_TOKEN_HEADER, token)
+        }
+        return restClientBuilder.build()
+    }
 }

@@ -434,10 +434,24 @@ data class SyncReadModelProperties(
     var enabled: Boolean = true,
     var mode: String = "outbox-delta",
     var sourceBaseUrl: String = "",
+    var sourceBaseUrls: Map<String, String> = emptyMap(),
     var pageSize: Int = 200,
     var fixedDelayMs: Long = 30000,
     var parameters: Map<String, String> = emptyMap()
-)
+) {
+    fun sourceBaseUrlFor(target: SyncReadModelTarget): String =
+        sourceBaseUrls.firstMatching(target.sourceContext)
+            ?: sourceBaseUrls.firstMatching(target.source)
+            ?: sourceBaseUrl
+
+    private fun Map<String, String>.firstMatching(name: String): String? =
+        entries.firstOrNull { (key, value) ->
+            relaxedKey(key) == relaxedKey(name) && value.isNotBlank()
+        }?.value
+
+    private fun relaxedKey(value: String): String =
+        value.filter { it.isLetterOrDigit() }.lowercase()
+}
 `);
         this.fs.write(this._sharedKernelKotlinPath(`${basePath}/SyncReadModelTarget.kt`), `package ${basePackage}
 
@@ -993,7 +1007,8 @@ class HttpPullSyncReadModelAdapter(
         mode.equals("pull-http", ignoreCase = true)
 
     override fun syncOnce(target: SyncReadModelTarget, checkpoint: SyncReadModelCheckpoint?): SyncReadModelResult {
-        if (properties.sourceBaseUrl.isBlank()) {
+        val sourceBaseUrl = properties.sourceBaseUrlFor(target)
+        if (sourceBaseUrl.isBlank()) {
             throw IllegalStateException("Sync target \${target.name} requires medol.sync.source-base-url")
         }
 
@@ -1003,7 +1018,7 @@ class HttpPullSyncReadModelAdapter(
 
         do {
             val uriBuilder = UriComponentsBuilder
-                .fromHttpUrl(properties.sourceBaseUrl)
+                .fromHttpUrl(sourceBaseUrl)
                 .path(target.sourcePath)
                 .queryParam("size", properties.pageSize)
             val context = SyncReadModelContext(properties, checkpoint)
@@ -1059,7 +1074,8 @@ class OutboxDeltaSyncReadModelAdapter(
         mode.equals("outbox-delta", ignoreCase = true)
 
     override fun syncOnce(target: SyncReadModelTarget, checkpoint: SyncReadModelCheckpoint?): SyncReadModelResult {
-        if (properties.sourceBaseUrl.isBlank()) {
+        val sourceBaseUrl = properties.sourceBaseUrlFor(target)
+        if (sourceBaseUrl.isBlank()) {
             throw IllegalStateException("Sync target \${target.name} requires medol.sync.source-base-url")
         }
 
@@ -1071,7 +1087,7 @@ class OutboxDeltaSyncReadModelAdapter(
             var cursor: String? = null
             do {
                 val snapshotUriBuilder = UriComponentsBuilder
-                    .fromHttpUrl(properties.sourceBaseUrl)
+                    .fromHttpUrl(sourceBaseUrl)
                     .path(target.sourcePath)
                     .queryParam("size", properties.pageSize)
                 cursor?.takeIf { it.isNotBlank() }?.let { snapshotUriBuilder.queryParam("cursor", it) }
@@ -1120,7 +1136,7 @@ class OutboxDeltaSyncReadModelAdapter(
 
         val afterSequence = bootstrapHighWatermark ?: checkpoint?.lastSequence ?: 0
         val uriBuilder = UriComponentsBuilder
-            .fromHttpUrl(properties.sourceBaseUrl)
+            .fromHttpUrl(sourceBaseUrl)
             .path(target.deltaPath)
             .queryParam("afterSequence", afterSequence)
             .queryParam("size", properties.pageSize)
@@ -1709,7 +1725,7 @@ class ${resourceName}(
         val reserved = setOf("afterSequence", "size", "cursor")
         val filters = parameters.filterKeys { it !in reserved }
         val pageNumber = cursor?.toIntOrNull()?.coerceAtLeast(0) ?: 0
-        val page = repository.findAll(PageRequest.of(pageNumber, size.coerceIn(1, 1000)))
+        val page = repository.findAllByCriteria(null, PageRequest.of(pageNumber, size.coerceIn(1, 1000)))
         val highWatermark = outboxRepository
             .findFirstBySourceContextAndSourceReadModelOrderBySequenceDesc("${sourceContext}", "${sourceReadModel}")
             ?.sequence ?: 0

@@ -123,11 +123,18 @@ test('writes shared sync read model support with switchable adapters and checkpo
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelAdapter.kt'), /fun syncOnce\(target: SyncReadModelTarget, checkpoint: SyncReadModelCheckpoint\?\): SyncReadModelResult/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelTarget.kt'), /val queryParameters: \(SyncReadModelContext\) -> Map<String, String>/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelTarget.kt'), /relaxedKey\(key\) == relaxedKey\(name\)/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelProperties.kt'), /var sourceBaseUrls: Map<String, String> = emptyMap\(\)/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelProperties.kt'), /fun sourceBaseUrlFor\(target: SyncReadModelTarget\): String/);
+    assert.match(writes.get('shared/shared/application/sync/SyncReadModelProperties.kt'), /sourceBaseUrls\.firstMatching\(target\.sourceContext\)/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelProperties.kt'), /var parameters: Map<String, String> = emptyMap\(\)/);
     assert.match(writes.get('shared/shared/application/sync/HttpPullSyncReadModelAdapter.kt'), /mode\.equals\("pull-http", ignoreCase = true\)/);
+    assert.match(writes.get('shared/shared/application/sync/HttpPullSyncReadModelAdapter.kt'), /val sourceBaseUrl = properties\.sourceBaseUrlFor\(target\)/);
+    assert.match(writes.get('shared/shared/application/sync/HttpPullSyncReadModelAdapter.kt'), /\.fromHttpUrl\(sourceBaseUrl\)/);
     assert.match(writes.get('shared/shared/application/sync/HttpPullSyncReadModelAdapter.kt'), /target\.queryParameters\(context\)\.forEach/);
     assert.match(writes.get('shared/shared/application/sync/HttpPullSyncReadModelAdapter.kt'), /queryParam\("updatedAfter", it\)/);
     assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /mode\.equals\("outbox-delta", ignoreCase = true\)/);
+    assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /val sourceBaseUrl = properties\.sourceBaseUrlFor\(target\)/);
+    assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /\.fromHttpUrl\(sourceBaseUrl\)/);
     assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /afterSequence/);
     assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /bootstrapCompleted/);
     assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /target\.sourcePath/);
@@ -259,7 +266,7 @@ test('writes sync read model source resource for referenced source read models',
     );
     assert.match(sourceResource, /@RequestMapping\("\/sync\/read-models\/dataset-governance\/feature-schema-catalog"\)/);
     assert.match(sourceResource, /@RequestParam\(required = false\) cursor: String\?/);
-    assert.match(sourceResource, /repository\.findAll\(PageRequest\.of\(pageNumber, size\.coerceIn\(1, 1000\)\)\)/);
+    assert.match(sourceResource, /repository\.findAllByCriteria\(null, PageRequest\.of\(pageNumber, size\.coerceIn\(1, 1000\)\)\)/);
     assert.match(sourceResource, /payload\[name\]\?\.toString\(\) != value/);
     assert.match(sourceResource, /highWatermarkSequence/);
     assert.match(sourceResource, /page\.hasNext\(\)/);

@@ -540,10 +540,9 @@ ${eventMethods}
     },
 
     _copyMavenWrapper() {
-        const axonTemplates = path.resolve(__dirname, '../../axon/app/templates');
-        this.fs.copy(path.join(axonTemplates, '.mvn'), this.destinationPath('.mvn'));
-        this.fs.copy(path.join(axonTemplates, 'root/mvnw'), this.destinationPath('mvnw'));
-        this.fs.copy(path.join(axonTemplates, 'root/mvnw.cmd'), this.destinationPath('mvnw.cmd'));
+        this.fs.copy(this.templatePath('.mvn'), this.destinationPath('.mvn'));
+        this.fs.copy(this.templatePath('mvnw'), this.destinationPath('mvnw'));
+        this.fs.copy(this.templatePath('mvnw.cmd'), this.destinationPath('mvnw.cmd'));
     },
 
     _writeDevSeedScript() {

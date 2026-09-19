@@ -80,9 +80,8 @@ gen /opt/codegen/.generator/app/ --generator axon5 --generator-type slices --con
 gen /opt/codegen/.generator/app/ --generator axon5 --generator-type slices --all-slices
 ```
 
-The top-level generator supports five targets:
+The top-level generator supports four targets:
 
-- `axon` for the Kotlin/Spring Boot backend
 - `axon5` for the Axon Framework 5 backend generated directly from CodegenModel
 - `refine` for the React refine frontend foundation
 - `operations` for Docker Compose, APISIX, Kubernetes, K3s, and Harbor operations artifacts
@@ -685,7 +684,6 @@ This generates Axon 4, Axon 5, Refine, operations, and Simulation artifacts with
 Generated files are separated by target:
 
 ```text
-example/generated/axon
 example/generated/axon5
 example/generated/refine
 example/generated/operations/dev
@@ -761,7 +759,6 @@ RALPH_SYNC_PLANNED=1 MEDOL_WORKSPACE_ID=<workspace-id> bash .agent/ralph.sh
 To jump directly into a target:
 
 ```bash
-./test-codegen-model.sh axon
 ./test-codegen-model.sh axon5
 ./test-codegen-model.sh refine
 ./test-codegen-model.sh operations
@@ -798,7 +795,7 @@ If only `config.json` exists and these fields are present, the generator uses th
 The generator now uses the Event Modeling Toolkit `CodegenModel` as its core input:
 
 ```text
-codegen-model.json -> common/core CodegenModel -> axon/refine/operations/simulation generators
+codegen-model.json -> common/core CodegenModel -> axon5/refine/operations/simulation generators
 ```
 
 Legacy `config.json` is converted into the same core model only as a fallback.
@@ -824,7 +821,7 @@ The `CodegenModel` keeps the domain model shape stable for code generation:
 - `dependencies`: normalized inbound/outbound element links while preserving the legacy `type` field for compatibility
 - `fields`: normalized field metadata, including id/generated/technical/query flags and source mapping metadata
 
-Axon currently consumes the backward-compatible config emitted by the core layer, so existing templates continue to work. Refine, Deploy, and Simulation consume the normalized `CodegenModel` directly for generation.
+Axon5, Refine, Operations, and Simulation consume the normalized `CodegenModel` directly for generation.
 
 ## Updating The Generator
 

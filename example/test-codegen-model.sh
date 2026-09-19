@@ -18,7 +18,6 @@ model_path="${CODEGEN_MODEL_PATH:-$default_model_path}"
 translations_path="${CODEGEN_TRANSLATIONS_PATH:-}"
 model_locale="${CODEGEN_MODEL_LOCALE:-}"
 medol_base_url="${MEDOL_BASE_URL:-http://host.docker.internal:5172}"
-axon_workspace="$script_dir/$output_root/axon"
 axon5_workspace="$script_dir/$output_root/axon5"
 refine_workspace="$script_dir/$output_root/refine"
 operations_workspace="$script_dir/$output_root/operations"
@@ -30,9 +29,9 @@ if [[ "$current_dir" != "$script_dir" ]]; then
 fi
 
 case "$target" in
-  all|axon|axon5|refine|operations|simulation|shell|update|model) ;;
+  all|axon5|refine|operations|simulation|shell|update|model) ;;
   *)
-    echo "Usage: ./test-codegen-model.sh [all|axon|axon5|refine|operations|simulation|shell|update [workspace-id]]" >&2
+    echo "Usage: ./test-codegen-model.sh [all|axon5|refine|operations|simulation|shell|update [workspace-id]]" >&2
     exit 1
     ;;
 esac
@@ -47,7 +46,7 @@ require_image() {
 }
 
 verify_image() {
-  if ! docker run --rm "$image" /bin/sh -lc "command -v update >/dev/null && grep -q 'loadGeneratorModel' /opt/codegen/.generator/axon/app/index.js && grep -q 'allAggregates' /opt/codegen/.generator/axon/aggregates/index.js && grep -q 'loadCodegenModel' /opt/codegen/.generator/axon5/app/index.js && test -f /opt/codegen/.generator/operations/app/index.js && grep -q 'image-pull-policy.yaml' /opt/codegen/.generator/operations/app/renderers/kubernetes-renderer.js && test -f /opt/codegen/.generator/simulation/app/index.js"; then
+  if ! docker run --rm "$image" /bin/sh -lc "command -v update >/dev/null && grep -q 'loadCodegenModel' /opt/codegen/.generator/axon5/app/index.js && test -f /opt/codegen/.generator/operations/app/index.js && grep -q 'image-pull-policy.yaml' /opt/codegen/.generator/operations/app/renderers/kubernetes-renderer.js && test -f /opt/codegen/.generator/simulation/app/index.js"; then
     echo "Docker image $image does not include the latest codegen-model generator changes." >&2
     echo "Rebuild it from the code-generator root with:" >&2
     echo "  docker build -f Dockerfile.codegen -t $image ." >&2
@@ -127,12 +126,6 @@ run_gen() {
     /bin/sh -lc "yes a | gen '$generator_path' \"\$@\"" sh "$@"
 }
 
-run_axon() {
-  run_gen "$axon_workspace" --generator axon --generator-type Skeleton
-  run_gen "$axon_workspace" --generator axon --generator-type slices --all-slices
-  run_gen "$axon_workspace" --generator axon --generator-type aggregates --all-aggregates
-}
-
 run_axon5() {
   rm -rf "$axon5_workspace"
   run_gen "$axon5_workspace" --generator axon5 --generator-type Skeleton
@@ -156,14 +149,10 @@ run_simulation() {
 
 case "$target" in
   all)
-    run_axon
     run_axon5
     run_refine
     run_operations
     run_simulation
-    ;;
-  axon)
-    run_axon
     ;;
   axon5)
     run_axon5

@@ -40,12 +40,12 @@ export function DataTablePagination<TData>({
   return (
     <div
       className={cn(
-        "flex w-full flex-col-reverse items-center justify-between gap-4 overflow-auto p-1 sm:flex-row sm:gap-8",
+        "flex w-full min-w-0 flex-col-reverse items-center justify-between gap-3 overflow-visible p-1 sm:flex-row sm:flex-wrap sm:gap-x-6 sm:gap-y-2",
         className,
       )}
       {...props}
     >
-      <div className="flex-1 whitespace-nowrap text-muted-foreground text-sm">
+      <div className="min-w-0 flex-1 whitespace-nowrap text-muted-foreground text-sm">
         <span className="font-medium text-foreground">
           {t("table.pagination.totalRows", { total: totalRows }, "{{total}} row(s)")}
         </span>
@@ -58,8 +58,8 @@ export function DataTablePagination<TData>({
           </span>
         ) : null}
       </div>
-      <div className="flex flex-col-reverse items-center gap-4 sm:flex-row sm:gap-6 lg:gap-8">
-        <div className="flex items-center space-x-2">
+      <div className="flex min-w-0 flex-col-reverse items-center gap-3 sm:flex-row sm:flex-wrap sm:justify-end sm:gap-x-5 sm:gap-y-2 lg:gap-x-6">
+        <div className="flex items-center gap-2">
           <p className="whitespace-nowrap font-medium text-sm">{t("table.pagination.rowsPerPage", "Rows per page")}</p>
           <Select
             value={`${table.getState().pagination.pageSize}`}
@@ -85,7 +85,7 @@ export function DataTablePagination<TData>({
             pageCount,
           }, "Page {{page}} of {{pageCount}}")}
         </div>
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center gap-2">
           <Button
             aria-label={t("table.pagination.firstPage", "Go to first page")}
             variant="outline"

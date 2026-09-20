@@ -422,6 +422,13 @@ const RefineGenerator = class extends Generator {
                 appExtensionsPath
             );
         }
+        const menuIconsPath = this.destinationPath('./src/domain/menu-icons.tsx');
+        if (!fs.existsSync(menuIconsPath)) {
+            this.fs.copy(
+                this.templatePath('menu-icons.tsx'),
+                menuIconsPath
+            );
+        }
         ['.dockerignore', '.env-example', '.gitignore', '.npmrc'].forEach((file) => {
             this.fs.copyTpl(
                 this.templatePath(`root/${file}`),

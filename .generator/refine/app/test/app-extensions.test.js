@@ -22,6 +22,7 @@ test('generated frontend framework delegates application-specific behavior to st
 
     const defaultExtensions = readTemplate('app-extensions.tsx');
     assert.doesNotMatch(defaultExtensions, /federation-learning|runtime-agent|organizationId/i);
+    assert.match(defaultExtensions, /module\.resources\.length > 0/);
 });
 
 test('custom application extensions are created only when missing', () => {

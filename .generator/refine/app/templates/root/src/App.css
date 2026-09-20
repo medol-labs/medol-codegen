@@ -172,3 +172,65 @@
     @apply bg-background text-foreground;
   }
 }
+
+@layer components {
+  [data-sidebar="content"] {
+    overscroll-behavior: contain;
+    scrollbar-color: transparent transparent;
+    scrollbar-width: thin;
+  }
+
+  [data-sidebar="content"]:hover {
+    scrollbar-color: color-mix(in oklch, var(--sidebar-foreground) 28%, transparent) transparent;
+  }
+
+  [data-sidebar="content"]::-webkit-scrollbar {
+    width: 10px;
+  }
+
+  [data-sidebar="content"]::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  [data-sidebar="content"]::-webkit-scrollbar-thumb {
+    min-height: 40px;
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background-color: transparent;
+    background-clip: content-box;
+  }
+
+  [data-sidebar="content"]:hover::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklch, var(--sidebar-foreground) 28%, transparent);
+  }
+
+  [data-sidebar="content"]::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklch, var(--sidebar-foreground) 42%, transparent);
+  }
+
+  [data-slot="table-container"] {
+    scrollbar-color: color-mix(in oklch, var(--foreground) 22%, transparent) transparent;
+    scrollbar-width: thin;
+  }
+
+  [data-slot="table-container"]::-webkit-scrollbar {
+    height: 10px;
+    width: 10px;
+  }
+
+  [data-slot="table-container"]::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  [data-slot="table-container"]::-webkit-scrollbar-thumb {
+    min-width: 48px;
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background-color: color-mix(in oklch, var(--foreground) 22%, transparent);
+    background-clip: content-box;
+  }
+
+  [data-slot="table-container"]::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklch, var(--foreground) 36%, transparent);
+  }
+}

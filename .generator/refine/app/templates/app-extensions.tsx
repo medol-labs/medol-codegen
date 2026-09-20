@@ -13,7 +13,8 @@ export function AppExtensionProvider({ children }: PropsWithChildren) {
 export function useAppExtensions(): AppExtensionState {
   return {
     dataProviderKey: "default",
-    filterBackendModules: (modules) => modules,
+    filterBackendModules: (modules) =>
+      modules.filter((module) => module.resources.length > 0),
     filterResources: (resources) => resources,
     resolveBackendBaseUrl: (module) => module.apiUrl,
   };

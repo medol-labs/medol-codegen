@@ -1,6 +1,7 @@
 // Generated from config.json by the refine generator.
 import { IResourceItem } from "@refinedev/core";
 import { FlaskConical, LayoutDashboard, Package } from "lucide-react";
+import { resolveMenuIcon } from "@/domain/menu-icons";
 import { getAppConfig } from "@/providers/app-config";
 
 export const backendModules = [
@@ -29,7 +30,7 @@ export const resources: IResourceItem[] = [
     meta: {
       label: "Dashboard",
       i18nKey: "resources.dashboard.label",
-      icon: <LayoutDashboard />,
+      icon: resolveMenuIcon({ type: "dashboard", name: "dashboard", fallback: <LayoutDashboard /> }),
     },
   },
 <% chapters.forEach((chapter) => { -%>
@@ -38,7 +39,7 @@ export const resources: IResourceItem[] = [
     meta: {
       label: "<%= chapter.label %>",
       i18nKey: "<%= chapter.i18nKey %>",
-      icon: <FlaskConical />,
+      icon: resolveMenuIcon({ type: "chapter", name: "<%= chapter.name %>", label: "<%= chapter.label %>", fallback: <FlaskConical /> }),
     },
   },
 <% }) -%>
@@ -61,7 +62,7 @@ export const resources: IResourceItem[] = [
 <% } -%>
       label: "<%= resource.label %>",
       i18nKey: "<%= resource.i18nKey %>",
-      icon: <Package />,
+      icon: resolveMenuIcon({ type: "resource", name: "<%= resource.name %>", label: "<%= resource.label %>", parent: <%- resource.chapter ? `"${resource.chapter.name}"` : 'undefined' %>, fallback: <Package /> }),
       tableName: "<%= resource.tableName %>",
       idField: "<%= resource.idField %>",
       idFields: <%- JSON.stringify(resource.idFields) %>,

@@ -33,6 +33,7 @@ import { ChevronRight, ListIcon } from "lucide-react";
 import React from "react";
 import { useLocation } from "react-router";
 
+import { resolveMenuIcon } from "@/domain/menu-icons";
 import { backendModules } from "@/providers/resources";
 
 export function Sidebar() {
@@ -74,6 +75,17 @@ export function Sidebar() {
     };
   }, [moduleMenuItemsKey, can]);
 
+  React.useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const activeItem = document.querySelector<HTMLElement>(
+        '[data-sidebar="content"] [data-sidebar-active="true"]',
+      );
+      activeItem?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [selectedKey, moduleMenuItemsKey]);
+
   return (
     <ShadcnSidebar collapsible="icon" className={cn("border-none")}>
       <ShadcnSidebarRail />
@@ -86,7 +98,9 @@ export function Sidebar() {
           "flex-col",
           "gap-2",
           "pt-2",
-          "pb-2",
+          "pb-8",
+          "scroll-pb-8",
+          "overscroll-contain",
           "border-r",
           "border-border",
           {
@@ -281,6 +295,14 @@ function SidebarItemGroup({ item, selectedKey }: MenuItemProps) {
 
 function SidebarItemCollapsible({ item, selectedKey }: MenuItemProps) {
   const { name, children } = item;
+  const containsSelectedItem = menuItemContainsKey(item, selectedKey);
+  const [isOpen, setIsOpen] = React.useState(containsSelectedItem);
+
+  React.useEffect(() => {
+    if (containsSelectedItem) {
+      setIsOpen(true);
+    }
+  }, [containsSelectedItem]);
 
   const chevronIcon = (
     <ChevronRight
@@ -297,7 +319,12 @@ function SidebarItemCollapsible({ item, selectedKey }: MenuItemProps) {
   );
 
   return (
-    <Collapsible key={`collapsible-${name}`} className={cn("w-full", "group")}>
+    <Collapsible
+      key={`collapsible-${name}`}
+      open={isOpen}
+      onOpenChange={setIsOpen}
+      className={cn("w-full", "group")}
+    >
       <CollapsibleTrigger asChild>
         <SidebarButton item={item} rightIcon={chevronIcon} />
       </CollapsibleTrigger>
@@ -313,6 +340,16 @@ function SidebarItemCollapsible({ item, selectedKey }: MenuItemProps) {
         ))}
       </CollapsibleContent>
     </Collapsible>
+  );
+}
+
+function menuItemContainsKey(item: TreeMenuItem, selectedKey?: string): boolean {
+  if (!selectedKey) {
+    return false;
+  }
+
+  return item.key === selectedKey || Boolean(
+    item.children?.some((child) => menuItemContainsKey(child, selectedKey)),
   );
 }
 
@@ -351,6 +388,7 @@ function SidebarItemDropdown({ item, selectedKey }: MenuItemProps) {
                 })}
               >
                 <ItemIcon
+                  item={child}
                   icon={child.meta?.icon ?? child.icon}
                   isSelected={isSelected}
                 />
@@ -464,11 +502,21 @@ function getDisplayName(item: TreeMenuItem, translate: ReturnType<typeof useTran
 }
 
 type IconProps = {
+  item: TreeMenuItem;
   icon: React.ReactNode;
   isSelected?: boolean;
 };
 
-function ItemIcon({ icon, isSelected }: IconProps) {
+function ItemIcon({ item, icon, isSelected }: IconProps) {
+  const fallback = icon ?? <ListIcon />;
+  const resolvedIcon = resolveMenuIcon({
+    type: item.name === "dashboard" ? "dashboard" : item.children?.length ? "chapter" : "resource",
+    name: item.name,
+    label: item.meta?.label,
+    parent: typeof item.meta?.parent === "string" ? item.meta.parent : undefined,
+    fallback,
+  });
+
   return (
     <div
       className={cn("mt-0.5", "flex", "w-4", "shrink-0", "justify-center", {
@@ -476,7 +524,7 @@ function ItemIcon({ icon, isSelected }: IconProps) {
         "text-sidebar-primary-foreground": isSelected,
       })}
     >
-      {icon ?? <ListIcon />}
+      {resolvedIcon}
     </div>
   );
 }
@@ -504,7 +552,7 @@ function SidebarButton({
 
   const buttonContent = (
     <>
-      <ItemIcon icon={item.meta?.icon ?? item.icon} isSelected={isSelected} />
+      <ItemIcon item={item} icon={item.meta?.icon ?? item.icon} isSelected={isSelected} />
       <span
         className={cn(
           "line-clamp-2",
@@ -548,6 +596,7 @@ function SidebarButton({
       )}
       title={displayName}
       aria-label={displayName}
+      data-sidebar-active={isSelected ? "true" : undefined}
       onClick={onClick}
       {...props}
     >

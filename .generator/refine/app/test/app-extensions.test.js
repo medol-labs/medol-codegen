@@ -14,6 +14,9 @@ test('generated frontend framework delegates application-specific behavior to st
     assert.match(readTemplate('root/src/App.tsx'), /AppExtensionProvider/);
     assert.match(readTemplate('root/src/App.tsx'), /resolveBackendBaseUrl/);
     assert.match(readTemplate('root/src/components/refine-ui/layout/header.tsx'), /HeaderExtensionActions/);
+    const sidebar = readTemplate('root/src/components/refine-ui/layout/sidebar.tsx');
+    assert.match(sidebar, /useAppExtensions/);
+    assert.match(sidebar, /filterBackendModules\(backendModules\)/);
     const router = readTemplate('root/src/providers/app-router.tsx');
     assert.equal(occurrences(router, 'import { AuthenticatedRouteExtension }'), 1);
     assert.equal(occurrences(router, '<AuthenticatedRouteExtension>'), 1);
@@ -37,4 +40,11 @@ test('frontend application selection is available to runtime configuration', () 
 
     assert.match(runtimeConfig, /VITE_FRONTEND_APP/);
     assert.match(runtimeConfig, /\$\{VITE_FRONTEND_APP:-\}/);
+});
+
+test('frontend package declares directly imported peer dependencies', () => {
+    const packageTemplate = JSON.parse(readTemplate('root/package.json'));
+
+    assert.equal(packageTemplate.dependencies['@supabase/supabase-js'], '2.90.1');
+    assert.equal(packageTemplate.dependencies['@tanstack/react-query'], '5.90.16');
 });

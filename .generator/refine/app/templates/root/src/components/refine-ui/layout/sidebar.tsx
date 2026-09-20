@@ -34,17 +34,20 @@ import React from "react";
 import { useLocation } from "react-router";
 
 import { resolveMenuIcon } from "@/domain/menu-icons";
+import { useAppExtensions } from "@/domain/app-extensions";
 import { backendModules } from "@/providers/resources";
 
 export function Sidebar() {
   const { open } = useShadcnSidebar();
   const { can } = useCanWithoutCache();
   const { menuItems, selectedKey } = useMenu();
+  const { filterBackendModules } = useAppExtensions();
   const location = useLocation();
-  const activeModule = getActiveBackendModule(location.pathname);
+  const visibleBackendModules = filterBackendModules(backendModules);
+  const activeModule = getActiveBackendModule(location.pathname, visibleBackendModules);
   const moduleMenuItems = React.useMemo(
-    () => filterMenuItemsForModule(menuItems, activeModule),
-    [menuItems, activeModule],
+    () => filterMenuItemsForModule(menuItems, activeModule, visibleBackendModules),
+    [menuItems, activeModule, visibleBackendModules],
   );
   const moduleMenuItemsKey = menuItemsSignature(moduleMenuItems);
   const [visibleMenuItems, setVisibleMenuItems] =
@@ -121,18 +124,25 @@ export function Sidebar() {
   );
 }
 
-function getActiveBackendModule(pathname: string) {
-  if (backendModules.length <= 1) {
-    return backendModules[0];
+function getActiveBackendModule(
+  pathname: string,
+  modules: typeof backendModules,
+) {
+  if (modules.length <= 1) {
+    return modules[0];
   }
 
-  return backendModules.find((module) =>
+  return modules.find((module) =>
     module.resources.some((route) => pathname.startsWith(`/${route}`)),
-  ) ?? backendModules[0];
+  ) ?? modules[0];
 }
 
-function filterMenuItemsForModule(items: TreeMenuItem[], activeModule: (typeof backendModules)[number] | undefined): TreeMenuItem[] {
-  if (!activeModule || backendModules.length <= 1) {
+function filterMenuItemsForModule(
+  items: TreeMenuItem[],
+  activeModule: (typeof backendModules)[number] | undefined,
+  modules: typeof backendModules,
+): TreeMenuItem[] {
+  if (!activeModule || modules.length <= 1) {
     return items;
   }
 

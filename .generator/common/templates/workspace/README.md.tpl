@@ -84,8 +84,8 @@ regenerate operations files when needed:
 ```yaml
 operations:
   registry:
-    host: 192.168.50.2:5000
-    namespace: fl
+    host: registry.example.com
+    namespace: team
     insecure: true
 ```
 

@@ -4,6 +4,7 @@ import { useTranslate } from "@refinedev/core";
 import { createColumnHelper } from "@tanstack/react-table";
 import React from "react";
 
+import { frontendComposition } from "@/app/composition/composition.resolved";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { CommandButton } from "@/components/refine-ui/buttons/command";
 import { EditButton } from "@/components/refine-ui/buttons/edit";
@@ -16,6 +17,7 @@ import {
   ListViewHeader
 } from "@/components/refine-ui/views/list-view";
 import { Checkbox } from "@/components/ui/checkbox";
+import { renderFieldOverride, renderSlotExtensions } from "@/platform/composition";
 <% if (resource.hasLongTextFields) { -%>
 import { CopyableText } from "@/components/refine-ui/fields/copyable-text";
 <% } -%>
@@ -94,7 +96,19 @@ export const <%= resource.component %>List = () => {
           ],
 <% } -%>
         },
-        cell: ({ getValue }) => <%- field.cellValue %>,
+        cell: ({ getValue, row }) =>
+          renderFieldOverride<<%= resource.component %>Record>(
+            frontendComposition,
+            "field:<%= resource.route %>:display:<%= field.name %>",
+            {
+              value: getValue(),
+              record: row.original,
+              resource: "<%= resource.route %>",
+              field: "<%= field.name %>",
+              view: "display",
+              compact: true,
+            },
+          ) ?? <%- field.cellValue %>,
       }),
 <% }) -%>
       columnHelper.display({
@@ -120,6 +134,12 @@ export const <%= resource.component %>List = () => {
             )}
 <% } -%>
             <RowActionMenu>
+              {renderSlotExtensions<<%= resource.component %>Record>(
+                frontendComposition,
+                "row-actions:<%= resource.route %>:list",
+                "rowActions.before",
+                { resource: "<%= resource.route %>", record: row.original },
+              )}
 <% if (resource.editCommand) { -%>
                 {isCommandVisible(row.original, <%- JSON.stringify(resource.editCommand.enabledField ?? '') %>, <%- JSON.stringify(resource.editCommand.stateField ?? '') %>, <%- JSON.stringify(resource.editCommand.allowedStates ?? []) %>) && (
                   <EditButton variant="ghost" recordItemId={row.original.<%= resource.idField %>} size="sm" />
@@ -143,6 +163,12 @@ export const <%= resource.component %>List = () => {
                 )}
 <% }) -%>
               <ShowButton variant="ghost" recordItemId={row.original.<%= resource.idField %>} size="sm" />
+              {renderSlotExtensions<<%= resource.component %>Record>(
+                frontendComposition,
+                "row-actions:<%= resource.route %>:list",
+                "rowActions.after",
+                { resource: "<%= resource.route %>", record: row.original },
+              )}
             </RowActionMenu>
           </div>
         ),
@@ -177,9 +203,11 @@ export const <%= resource.component %>List = () => {
   return (
     <ListView>
       <ListViewHeader canCreate={false}>
+        {renderSlotExtensions(frontendComposition, "toolbar:<%= resource.route %>:list", "toolbar.before", { resource: "<%= resource.route %>", table })}
 <% if (resource.createCommand) { -%>
         <CommandButton variant="default" command="<%= resource.createCommand.name %>" />
 <% } -%>
+        {renderSlotExtensions(frontendComposition, "toolbar:<%= resource.route %>:list", "toolbar.actions", { resource: "<%= resource.route %>", table })}
       </ListViewHeader>
       <RefineDataTable table={table} actionBar={
 <% if (resource.deleteCommand) { -%>
@@ -193,6 +221,7 @@ export const <%= resource.component %>List = () => {
           isQuerying={table.refineCore.tableQuery.isFetching}
           onQuery={() => table.refineCore.tableQuery.refetch()}
         />
+        {renderSlotExtensions(frontendComposition, "toolbar:<%= resource.route %>:list", "toolbar.after", { resource: "<%= resource.route %>", table })}
       </RefineDataTable>
     </ListView>
   );

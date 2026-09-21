@@ -17,6 +17,10 @@ test('generated frontend framework delegates application-specific behavior to st
     const sidebar = readTemplate('root/src/components/refine-ui/layout/sidebar.tsx');
     assert.match(sidebar, /useAppExtensions/);
     assert.match(sidebar, /filterBackendModules\(backendModules\)/);
+    assert.match(readTemplate('EXTENSIONS.md.tpl'), /Blueprint/);
+    assert.match(readTemplate('EXTENSIONS.md.tpl'), /src\/domain\/page-overrides\.tsx/);
+    assert.match(readTemplate('EXTENSIONS.md.tpl'), /src\/domain\/app-extensions\.tsx/);
+    assert.match(readTemplate('EXTENSIONS.md.tpl'), /src\/app\/composition\/composition\.custom\.ts/);
     const router = readTemplate('root/src/providers/app-router.tsx');
     assert.equal(occurrences(router, 'import { AuthenticatedRouteExtension }'), 1);
     assert.equal(occurrences(router, '<AuthenticatedRouteExtension>'), 1);
@@ -33,6 +37,13 @@ test('custom application extensions are created only when missing', () => {
 
     assert.match(generatorSource, /if \(!fs\.existsSync\(appExtensionsPath\)\)/);
     assert.match(generatorSource, /templates\/app-extensions\.tsx|app-extensions\.tsx/);
+    assert.match(generatorSource, /if \(!fs\.existsSync\(pageOverridesPath\)\)/);
+    assert.match(generatorSource, /if \(!fs\.existsSync\(resourceOverridesPath\)\)/);
+    assert.match(generatorSource, /if \(!fs\.existsSync\(customCompositionPath\)\)/);
+    assert.ok(fs.existsSync(path.join(templates, 'page-overrides.tsx')));
+    assert.ok(fs.existsSync(path.join(templates, 'resource-overrides.tsx')));
+    assert.ok(fs.existsSync(path.join(templates, 'composition.custom.ts')));
+    assert.ok(fs.existsSync(path.join(templates, 'composition.resolved.ts')));
 });
 
 test('frontend application selection is available to runtime configuration', () => {
@@ -47,4 +58,74 @@ test('frontend package declares directly imported peer dependencies', () => {
 
     assert.equal(packageTemplate.dependencies['@supabase/supabase-js'], '2.90.1');
     assert.equal(packageTemplate.dependencies['@tanstack/react-query'], '5.90.16');
+});
+
+test('frontend extension manifest model lists resources, commands, and fields', () => {
+    const { _test } = require('../index');
+    const manifest = _test.buildExtensionManifestModel({
+        appName: 'Participant Console',
+        frontendApplication: {
+            name: 'FederationLearningParticipantConsole',
+            title: 'Federation Learning Participant Console'
+        },
+        backendModules: [{
+            name: 'runtime-agent',
+            label: 'Runtime Agent',
+            dataProviderName: 'runtime-agent',
+            homeRoute: '/dashboard'
+        }],
+        resources: [{
+            route: 'dataset-readiness',
+            name: 'dataset_readiness',
+            label: 'Dataset Readiness',
+            component: 'DatasetReadiness',
+            moduleName: 'runtime-agent',
+            dataProviderName: 'runtime-agent',
+            canList: true,
+            listPagePath: 'runtimeagentoperations/slices/dataset-readiness',
+            listFile: 'list',
+            showPagePath: 'runtimeagentoperations/slices/dataset-readiness',
+            showFile: 'show',
+            fields: [{ name: 'datasetId', label: 'Dataset Id', tsType: 'string' }],
+            commands: [{
+                name: 'approveDatasetForTraining',
+                pagePath: 'runtimeagentoperations/slices/approve-dataset-for-training',
+                file: 'approve-dataset-for-training',
+                fields: [{ name: 'datasetId', label: 'Dataset Id', tsType: 'string' }]
+            }],
+            itemCommands: [],
+        }]
+    });
+
+    assert.equal(manifest.appName, 'FederationLearningParticipantConsole');
+    assert.equal(manifest.resources[0].pageOverrides[0].key, 'dataset-readiness:list');
+    assert.equal(manifest.resources[0].pageOverrides[2].key, 'dataset-readiness:approveDatasetForTraining');
+    assert.equal(manifest.resources[0].commandOverrides[0].overrideKey, 'dataset-readiness:approveDatasetForTraining');
+    assert.equal(manifest.resources[0].fieldOverrides[0].overrideId, 'field:datasetId');
+});
+
+test('frontend templates include typed composition and blueprint skeleton', () => {
+    const compositionTemplate = readTemplate('src/app/composition/composition.generated.ts.tpl');
+    const platformComposition = readTemplate('root/src/platform/composition/index.ts');
+    const blueprintContract = readTemplate('root/src/platform/blueprint/contracts/index.ts');
+    const blueprintResolver = readTemplate('root/src/platform/blueprint/resolver/index.ts');
+    const pageOverrides = readTemplate('page-overrides.tsx');
+
+    assert.match(compositionTemplate, /frontendCompositionGenerated/);
+    assert.match(platformComposition, /ExtensionDefinition/);
+    assert.match(platformComposition, /OverrideDefinition/);
+    assert.match(platformComposition, /resolveFrontendComposition/);
+    assert.match(platformComposition, /renderFieldOverride/);
+    assert.match(platformComposition, /renderSlotExtensions/);
+    assert.match(platformComposition, /runFormBehavior/);
+    assert.match(platformComposition, /MEDOL-FE-EXT-001/);
+    assert.match(readTemplate('composition.resolved.ts'), /frontendCompositionGenerated/);
+    assert.match(readTemplate('composition.resolved.ts'), /frontendCompositionCustom/);
+    assert.match(blueprintContract, /FrontendBlueprint/);
+    assert.match(blueprintContract, /ResolvedFrontendBlueprint/);
+    assert.match(blueprintContract, /ListPageModel/);
+    assert.match(blueprintResolver, /MEDOL-FE-BLUEPRINT-002/);
+    assert.match(blueprintResolver, /MEDOL-FE-BLUEPRINT-004/);
+    assert.match(pageOverrides, /PageOverrideTarget/);
+    assert.match(pageOverrides, /frontendComposition\.overrides/);
 });

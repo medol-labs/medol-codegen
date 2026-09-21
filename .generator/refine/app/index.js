@@ -179,6 +179,7 @@ const RefineGenerator = class extends Generator {
             const model = buildFrontendModel(codegenModel, undefined, { frontendApp });
             this._writeDomainModel(buildDomainModel(model.frontendSource));
             this._writeI18n(model.i18n);
+            this._writeExtensionManifest(model);
             return;
         }
 
@@ -189,6 +190,8 @@ const RefineGenerator = class extends Generator {
         this._writeFrameworkComponents();
         this._writeDomainModel(buildDomainModel(model.frontendSource));
         this._writeI18n(model.i18n);
+        this._writeExtensionManifest(model);
+        this._writeComposition(model);
 
         if (this.answers.generatorType === 'all' || this.answers.generatorType === 'resources') {
             this._writeResources(model);
@@ -389,6 +392,34 @@ const RefineGenerator = class extends Generator {
         );
     }
 
+    _writeExtensionManifest(model) {
+        this.fs.copyTpl(
+            this.templatePath('EXTENSIONS.md.tpl'),
+            this.destinationPath('./EXTENSIONS.md'),
+            buildExtensionManifestModel(model)
+        );
+    }
+
+    _writeComposition(model) {
+        const customCompositionPath = this.destinationPath('./src/app/composition/composition.custom.ts');
+        if (!fs.existsSync(customCompositionPath)) {
+            this.fs.copy(
+                this.templatePath('composition.custom.ts'),
+                customCompositionPath
+            );
+        }
+        this.fs.copy(
+            this.templatePath('composition.resolved.ts'),
+            this.destinationPath('./src/app/composition/composition.resolved.ts')
+        );
+        this._deleteGeneratedFile(this.destinationPath('./src/app/composition/composition.generated.ts'));
+        this.fs.copyTpl(
+            this.templatePath('src/app/composition/composition.generated.ts.tpl'),
+            this.destinationPath('./src/app/composition/composition.generated.ts'),
+            buildExtensionManifestModel(model)
+        );
+    }
+
     _writeFrameworkComponents() {
         this.fs.copy(
             this.templatePath('root/src/components/refine-ui/fields/copyable-text.tsx'),
@@ -429,6 +460,21 @@ const RefineGenerator = class extends Generator {
                 menuIconsPath
             );
         }
+        const pageOverridesPath = this.destinationPath('./src/domain/page-overrides.tsx');
+        if (!fs.existsSync(pageOverridesPath)) {
+            this.fs.copy(
+                this.templatePath('page-overrides.tsx'),
+                pageOverridesPath
+            );
+        }
+        const resourceOverridesPath = this.destinationPath('./src/domain/resource-overrides.tsx');
+        if (!fs.existsSync(resourceOverridesPath)) {
+            this.fs.copy(
+                this.templatePath('resource-overrides.tsx'),
+                resourceOverridesPath
+            );
+        }
+        this._writeComposition(model);
         ['.dockerignore', '.env-example', '.gitignore', '.npmrc'].forEach((file) => {
             this.fs.copyTpl(
                 this.templatePath(`root/${file}`),
@@ -497,5 +543,151 @@ module.exports = RefineGenerator;
 module.exports._test = {
     defaultFrontendOutputRoot,
     frontendApplicationsForSelection,
-    frontendApplicationFor
+    frontendApplicationFor,
+    buildExtensionManifestModel
 };
+
+function buildExtensionManifestModel(model) {
+    const appName = model.frontendApplication?.name ?? model.appName ?? 'FrontendApplication';
+    const appTitle = model.frontendApplication?.title ?? model.appName ?? appName;
+    const backendModules = model.backendModules ?? [];
+    const resources = (model.resources ?? []).map((resource) => ({
+        ...resource,
+        extensionId: `resource:${resource.route}`,
+        pageOverrides: [
+            { view: 'list', key: `${resource.route}:list`, path: `src/contexts/${resource.listPagePath}/${resource.listFile}.tsx`, enabled: resource.canList },
+            { view: 'show', key: `${resource.route}:show`, path: `src/contexts/${resource.showPagePath}/${resource.showFile}.tsx`, enabled: true },
+            ...(resource.commands ?? []).map((command) => ({
+                view: command.name,
+                key: `${resource.route}:${command.name}`,
+                path: `src/contexts/${command.pagePath}/${command.file}.tsx`,
+                enabled: true
+            })),
+        ].filter((item) => item.enabled),
+        commandOverrides: (resource.commands ?? []).map((command) => ({
+            ...command,
+            extensionId: `command:${resource.route}:${command.name}`,
+            overrideKey: `${resource.route}:${command.name}`,
+            pagePath: `src/contexts/${command.pagePath}/${command.file}.tsx`,
+            fields: (command.fields ?? []).map((field) => extensionField(field))
+        })),
+        fieldOverrides: (resource.fields ?? []).map((field) => extensionField(field)),
+    }));
+
+    return {
+        appName,
+        appTitle,
+        backendModules,
+        resources,
+        extensionPoints: [
+            {
+                id: 'app.provider',
+                area: 'Extension',
+                typeSignature: 'AppExtensionProvider(props: PropsWithChildren): ReactNode',
+                defaultImplementation: 'src/domain/app-extensions.tsx',
+                overridePath: 'src/domain/app-extensions.tsx',
+                description: 'Wraps the app with application-specific providers such as runtime-agent access or tenant selection.'
+            },
+            {
+                id: 'app.backendModules',
+                area: 'Extension',
+                typeSignature: 'filterBackendModules(modules: BackendModule[]): BackendModule[]',
+                defaultImplementation: 'src/domain/app-extensions.tsx',
+                overridePath: 'src/domain/app-extensions.tsx',
+                description: 'Selects the backend systems visible to one frontend application.'
+            },
+            {
+                id: 'app.resources',
+                area: 'Extension',
+                typeSignature: 'filterResources(resources: IResourceItem[]): IResourceItem[]',
+                defaultImplementation: 'src/domain/app-extensions.tsx',
+                overridePath: 'src/domain/app-extensions.tsx',
+                description: 'Selects the resources visible in menus, routing, dashboard cards, and Refine metadata.'
+            },
+            {
+                id: 'app.backendBaseUrl',
+                area: 'Extension',
+                typeSignature: 'resolveBackendBaseUrl(module: BackendModule): string',
+                defaultImplementation: 'src/domain/app-extensions.tsx',
+                overridePath: 'src/domain/app-extensions.tsx',
+                description: 'Rewrites backend endpoints per frontend application or selected runtime.'
+            },
+            {
+                id: 'layout.headerActions',
+                area: 'Extension',
+                typeSignature: 'HeaderExtensionActions(props: { compact?: boolean }): ReactNode',
+                defaultImplementation: 'src/domain/app-extensions.tsx',
+                overridePath: 'src/domain/app-extensions.tsx',
+                description: 'Adds stable hand-written actions to the generated header.'
+            },
+            {
+                id: 'layout.authenticatedRoute',
+                area: 'Extension',
+                typeSignature: 'AuthenticatedRouteExtension(props: PropsWithChildren): ReactNode',
+                defaultImplementation: 'src/domain/app-extensions.tsx',
+                overridePath: 'src/domain/app-extensions.tsx',
+                description: 'Wraps authenticated routes with application-specific guards.'
+            },
+            {
+                id: 'access.additionalDecision',
+                area: 'Extension',
+                typeSignature: 'evaluateAdditionalAccess(params: AdditionalAccessParams): Promise<AdditionalAccessDecision | undefined>',
+                defaultImplementation: 'src/domain/app-extensions.tsx',
+                overridePath: 'src/domain/app-extensions.tsx',
+                description: 'Adds app-local access decisions on top of generated permission checks.'
+            },
+            {
+                id: 'navigation.menuIcon',
+                area: 'Override',
+                typeSignature: 'resolveMenuIcon(request: MenuIconRequest): ReactNode',
+                defaultImplementation: 'src/domain/menu-icons.tsx',
+                overridePath: 'src/domain/menu-icons.tsx',
+                description: 'Overrides dashboard, chapter, and resource menu icons while generated metadata remains fallback.'
+            },
+            {
+                id: 'resource.metadata',
+                area: 'Override',
+                typeSignature: 'ResourceOverride = Partial<IResourceItem> & { name: string }',
+                defaultImplementation: 'src/domain/resource-overrides.tsx',
+                overridePath: 'src/domain/resource-overrides.tsx',
+                description: 'Overrides resource labels, routes, icon metadata, or visibility metadata without editing generated resources.'
+            },
+            {
+                id: 'resource.page',
+                area: 'Override',
+                typeSignature: 'pageOverrides: Partial<Record<`${resourceRoute}:${view}`, ReactElement>>',
+                defaultImplementation: 'src/domain/page-overrides.tsx',
+                overridePath: 'src/domain/page-overrides.tsx',
+                description: 'Replaces generated resource pages or command pages; generated pages remain fallback.'
+            },
+            {
+                id: 'blueprint.resource',
+                area: 'Blueprint',
+                typeSignature: 'future: ResourceBlueprint<ResourceRecord>',
+                defaultImplementation: 'generated resource metadata',
+                overridePath: 'src/domain/blueprints/**',
+                description: 'Planned typed composition unit for resource pages, toolbar, row actions, and field renderers.'
+            },
+            {
+                id: 'blueprint.overrideRegistry',
+                area: 'Blueprint',
+                typeSignature: 'future: OverrideRegistry.register(extensionPoint, implementation)',
+                defaultImplementation: 'generated fallback registry',
+                overridePath: 'src/domain/overrides/**',
+                description: 'Planned typed registry inspired by Backstage extension overrides for static composition.'
+            },
+        ],
+    };
+}
+
+function extensionField(field) {
+    return {
+        name: field.name,
+        label: field.label ?? field.name,
+        type: field.type ?? field.tsType ?? 'unknown',
+        tsType: field.tsType ?? field.type ?? 'unknown',
+        overrideId: `field:${field.name}`,
+        rendererSignature: `FieldRenderer<${field.tsType ?? 'unknown'}>`,
+        defaultRenderer: field.longText ? 'CopyableText' : (field.enumOptions?.length ? 'Select/display text' : 'formatValue/display text')
+    };
+}

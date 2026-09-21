@@ -21,6 +21,7 @@ import {
   CreateView,
   CreateViewHeader,
 } from "@/components/refine-ui/views/create-view";
+import { frontendComposition } from "@/app/composition/composition.resolved";
 import { Button } from "@/components/ui/button";
 <% if (command.hasResultFields) { -%>
 import {
@@ -50,6 +51,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useCommandForm } from "@/hooks/command/useCommandForm";
+import { runFormBehavior } from "@/platform/composition";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { <%= command.schemaName %>, type <%= command.inputTypeName %> } from "@/contexts/domain/schemas";
 <% if (command.hasSelectFields) { -%>
@@ -311,16 +313,26 @@ export const <%= command.pageComponent %> = () => {
     navigate(-1);
     return;
 <% } else { -%>
-    const result = await onFinish(nextValues);
+    const result = await runFormBehavior<<%= command.inputTypeName %>>(
+      frontendComposition,
+      "behavior:<%= resource.route %>:<%= command.name %>",
+      nextValues,
+      (payload) => onFinish(payload),
+    );
     navigate("/<%= resource.route %>");
     return result;
 <% } -%>
 <% } else { -%>
 <% if (command.hasResultFields) { -%>
-    const result = await onFinish({
+    const result = await runFormBehavior<<%= command.inputTypeName %>>(
+      frontendComposition,
+      "behavior:<%= resource.route %>:<%= command.name %>",
+      {
       ...defaultValues,
       ...values,
-    }) as { data?: Record<string, unknown> } | Record<string, unknown> | void;
+      } as <%= command.inputTypeName %>,
+      (payload) => onFinish(payload),
+    ) as { data?: Record<string, unknown> } | Record<string, unknown> | void;
     const data = result && typeof result === "object" && "data" in result
       ? result.data
       : result;
@@ -329,10 +341,15 @@ export const <%= command.pageComponent %> = () => {
     }
     return result;
 <% } else { -%>
-    const result = await onFinish({
+    const result = await runFormBehavior<<%= command.inputTypeName %>>(
+      frontendComposition,
+      "behavior:<%= resource.route %>:<%= command.name %>",
+      {
       ...defaultValues,
       ...values,
-    });
+      } as <%= command.inputTypeName %>,
+      (payload) => onFinish(payload),
+    );
     navigate("/<%= resource.route %>");
     return result;
 <% } -%>

@@ -1,6 +1,7 @@
 // Generated from config.json by the refine generator.
 import { useShow, useTranslate } from "@refinedev/core";
 
+import { frontendComposition } from "@/app/composition/composition.resolved";
 import { ShowView, ShowViewHeader } from "@/components/refine-ui/views/show-view";
 <% if (resource.hasLongTextFields) { -%>
 import { CopyableText } from "@/components/refine-ui/fields/copyable-text";
@@ -12,6 +13,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { renderFieldOverride } from "@/platform/composition";
 
 const formatValue = (value: unknown, t: ReturnType<typeof useTranslate>) => {
   if (value === null || value === undefined || value === "") return "-";
@@ -46,9 +48,9 @@ export const <%= resource.component %>Show = () => {
             <div>
               <h4 className="mb-2 text-sm font-medium">{t("<%= field.i18nKey %>", "<%= field.label %>")}</h4>
 <% if (field.longText) { -%>
-              <CopyableText value={record?.<%= field.name %>} />
+              {renderFieldOverride(frontendComposition, "field:<%= resource.route %>:display:<%= field.name %>", { value: record?.<%= field.name %>, record, resource: "<%= resource.route %>", field: "<%= field.name %>", view: "display" }) ?? <CopyableText value={record?.<%= field.name %>} />}
 <% } else { -%>
-              <p className="text-sm text-muted-foreground">{formatValue(record?.<%= field.name %>, t)}</p>
+              {renderFieldOverride(frontendComposition, "field:<%= resource.route %>:display:<%= field.name %>", { value: record?.<%= field.name %>, record, resource: "<%= resource.route %>", field: "<%= field.name %>", view: "display" }) ?? <p className="text-sm text-muted-foreground">{formatValue(record?.<%= field.name %>, t)}</p>}
 <% } -%>
             </div>
             <Separator />

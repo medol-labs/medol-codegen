@@ -246,6 +246,50 @@ Create/edit/delete capabilities are generated only when matching event-modeling 
 
 When generating `all`, `resources`, `router`, or `pages`, the refine generator prompts for the commands to generate. Unselected commands are omitted from resource metadata, routes, list action buttons, and command form pages.
 
+### Frontend extension, override, and blueprint model
+
+Generated Refine projects use generated pages as fallback implementations and
+keep business customization in stable hand-written extension points. This is
+intentionally close to Backstage's extension/override style without requiring a
+large runtime plugin system up front.
+
+```text
+             Medol
+               |
+      Generator / Build time
+               |
+    +----------+----------+
+    |          |          |
+Blueprint  Extension  Override
+    |          |          |
+    +----------+----------+
+               |
+       Static Composition
+               |
+            React App
+```
+
+- **Blueprint** is the planned typed composition unit for resource pages,
+  toolbars, row actions, field renderers, and static override registration.
+- **Extension** is app-level behavior such as provider wrapping, backend module
+  filtering, resource filtering, backend URL resolution, header actions, route
+  guards, and additional access decisions.
+- **Override** is a targeted replacement for generated fallback behavior, such
+  as a page, command page, resource metadata entry, or menu icon.
+
+The current lightweight extension points are:
+
+- `src/domain/app-extensions.tsx`
+- `src/domain/page-overrides.tsx`
+- `src/domain/resource-overrides.tsx`
+- `src/domain/menu-icons.tsx`
+
+The generator also writes `EXTENSIONS.md` for each frontend application. This
+manifest lists backend modules, resources, commands, fields, override keys,
+default fallback files, type signatures, and stable hand-written paths. Treat it
+as the local contract for what business code can customize without editing
+generated `src/contexts/**` pages.
+
 Constrained values should be modeled explicitly in Medol with `enum` or scalar `oneOf` value types. The Refine generator renders those static fields as `Select` controls and emits matching Zod schemas. For runtime-maintained option sets, mark a string field with `dictionary "DICTIONARY_CODE"` and provide a standard `DictionaryValueCatalog` read model with `dictionaryCode`, `valueCode`, `displayName`, optional `displayOrder`, and either `state` or `active`. The generated form submits the selected `valueCode` and queries the catalog by `dictionaryCode`. `.generator/common/core/field-options.js` only preserves compatibility with explicit option metadata in the codegen model; it no longer carries business-specific field-name dictionaries.
 
 Command forms also understand Medol derived lookup fields as display snapshots. When a command has an id field plus a derived field such as `selectedCustomerName: String? display derived from CustomerCatalog.customerName by customerId`, the generated form renders only the `customerId` selector. Selecting a customer submits both `customerId` and the hidden `selectedCustomerName` snapshot, copied from `CustomerCatalog.customerName`. Multiple snapshot fields may point at the same selector key with the same `by customerId` lookup; the form copies each snapshot from the selected read-model record. These snapshot values are for display/audit payloads only and should not be used for authorization or business invariants.

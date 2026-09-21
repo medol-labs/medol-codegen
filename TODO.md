@@ -8,5 +8,16 @@
 - 基础镜像 node 22，升级
 - 支持显式 UI action 绑定语义，例如 `ui action on UserAccountCatalog`，用于指定 command 按钮挂载到哪个 readmodel/resource；没有显式声明时再使用当前的 owner concept / event projection 推断规则。
 - 优化 Axon 生成项目的 processor 资源使用：生成的集成测试应复用统一的 Spring Test `ApplicationContext`，并允许测试环境关闭无关的 streaming processors，避免完整测试套件因重复启动大量 processor 耗尽 native threads；生产配置应支持按 processor 配置 segment 数、worker 数和自动启动策略，普通 read model 与低频 automation 默认使用保守并发度，并补充线程数、事件积压和 token claim 的监控建议。
-- 前端生成器参考 Backstage 的 extension / override 体系演进：在保持当前轻量扩展点的基础上，逐步引入 typed extension points / override registry，用于覆盖 resource page、toolbar、row actions、field renderer、menu icon、header action 等可变区域；默认生成实现作为 fallback，业务项目在稳定手写目录维护 override，避免直接修改 generated contexts/pages。
-- 前端扩展体系需要参考 Backstage 文档设计方式同步补全文档：MEDOL/codegen model 应输出每个 frontend application、resource、command、field 对应的可扩展点清单、默认实现、override 类型签名、稳定文件路径和示例；生成项目 README/AGENTS/开发文档中也应包含这些内容，便于开发者知道哪些地方可覆盖、哪些生成文件不要改。
+- 前端生成器参考 Backstage 的 extension / override 体系演进，按阶段推进：
+  - [x] 保持当前轻量扩展点，并生成 `EXTENSIONS.md`，把 frontend application、backend module、resource、command、field 的可扩展点、默认 fallback、override key、类型签名、稳定手写路径和示例先文档化。
+  - [x] 引入 typed composition / blueprint 骨架：生成 `src/app/composition/composition.generated.ts` 作为 generated input，保留 `composition.custom.ts` 作为业务静态注册入口，通过 `composition.resolved.ts` 输出最终 composition，并提供 `platform/blueprint` contract/default/resolver。
+  - [x] 将 resource page、toolbar、row actions、field renderer、menu icon、header action、route guard、backend resolver 的核心入口收敛到 typed extension point contract；field renderer、toolbar、row action、form behavior 已接入 generated list/show/command form 模板。
+  - [ ] 引入构建期 override validation：target/slot 不存在、重复 override、重复 extension id、字段不存在、blueprint 继承循环时明确报错。
+  - [ ] 将 resource page 生成从“直接生成完整页面”逐步演进为 blueprint composition，便于业务替换 toolbar、row action、field renderer，而不是整页覆盖。
+  - [x] 支持 Behavior Extension：`beforeSubmit`、`afterSubmit`、`validate`、`mapCommandPayload`，避免业务为了提交逻辑被迫整页 override。
+- 前端扩展体系文档需保持和生成物同步：
+  - [x] 生成项目 README/AGENTS 说明哪些是 generated fallback，哪些是稳定手写扩展目录。
+  - [x] `EXTENSIONS.md` 输出每个 frontend application、resource、command、field 对应的扩展点清单、默认实现、override 类型签名、稳定文件路径和示例。
+  - [x] 生成 typed composition target 清单，作为 IDE、AI agent 和后续 Medol UI 的稳定扩展点入口。
+  - [ ] MEDOL/codegen model schema 显式输出扩展点元数据，供 UI、文档、蓝图生成和后续设计器展示使用。
+  - [ ] 在 MEDOL 文档中补充 Blueprint / Extension / Override 的建模含义和示例。

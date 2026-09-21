@@ -15,6 +15,38 @@ A React Framework for building internal tools, admin panels, dashboards & B2B ap
 
 Refine's hooks and components simplifies the development process and eliminates the repetitive tasks by providing industry-standard solutions for crucial aspects of a project, including authentication, access control, routing, networking, state management, and i18n.
 
+## Generated Code And Extensions
+
+This frontend is generated from a MEDOL/codegen model. Generated files under
+`src/contexts/**`, `src/contexts/resources.tsx`, and
+`src/contexts/routes.tsx` are fallback implementations and may be
+overwritten by regeneration.
+
+Business-specific customizations should live under stable hand-written
+extension points in `src/domain/**`:
+
+- `src/domain/app-extensions.tsx` for app providers, backend/resource filters,
+  backend URL resolution, header actions, route guards, and extra access
+  decisions.
+- `src/domain/page-overrides.tsx` for resource page and command page overrides.
+- `src/domain/resource-overrides.tsx` for Refine resource metadata overrides.
+- `src/domain/menu-icons.tsx` for menu icon overrides.
+- `src/app/composition/composition.custom.ts` for typed static extension,
+  override, and blueprint registrations.
+
+See `EXTENSIONS.md` for the generated extension manifest. It lists each
+frontend application, backend module, resource, command, field, override key,
+default fallback implementation, type signature, and stable hand-written path.
+The extension model follows a static composition flow. The generator owns
+`src/app/composition/composition.generated.ts` and resolves it with
+`src/app/composition/composition.custom.ts` through
+`src/app/composition/composition.resolved.ts`. Business projects own
+`composition.custom.ts`.
+
+```text
+MEDOL / Codegen Model -> Blueprint / Extension / Override -> React App
+```
+
 ## Available Scripts
 
 ### Running the development server.

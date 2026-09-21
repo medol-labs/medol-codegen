@@ -1,6 +1,9 @@
-# ES Code Generator
+# medol-codegen
 
-Custom Yeoman code generator for generating Axon-based Kotlin/Spring Boot, Refine frontend, operations, and simulation artifacts from Medol's `CodegenModel`.
+`medol-codegen` is the custom Yeoman-based generator used by the MEDOL
+pipeline. It generates Axon/Axon 5 Kotlin/Spring Boot backends, Refine
+frontends, operations assets, and simulation artifacts from MEDOL's
+`CodegenModel`.
 
 The project ships a standalone Docker image built from the official Node slim base image. The image bakes `.generator` into `/opt/codegen/.generator` and exposes a small local `gen` runner that executes the bundled generator directly.
 
@@ -30,7 +33,7 @@ gen /opt/codegen/.generator/app/ --generator axon5 --generator-type Skeleton
 Build the custom image from this repository:
 
 ```bash
-docker build -f Dockerfile.codegen -t es-codegen .
+docker build -f Dockerfile.codegen -t medol-codegen .
 ```
 
 The image build:
@@ -52,7 +55,7 @@ docker run -it \
   -v $PWD:/workspace \
   --name codegen \
   --rm \
-  es-codegen
+  medol-codegen
 ```
 
 This opens a bash shell in the container. The mounted `/workspace` is where generated files are written.
@@ -674,7 +677,7 @@ For compatibility, the generator still falls back to:
 To test non-interactive Docker generation with `example/codegen-model.json`:
 
 ```bash
-docker build -f Dockerfile.codegen -t es-codegen .
+docker build -f Dockerfile.codegen -t medol-codegen .
 cd example
 ./test-codegen-model.sh
 ```
@@ -828,7 +831,7 @@ Axon5, Refine, Operations, and Simulation consume the normalized `CodegenModel` 
 Because `.generator` is copied into the image, changes to generator code require rebuilding the image:
 
 ```bash
-docker build -f Dockerfile.codegen -t es-codegen .
+docker build -f Dockerfile.codegen -t medol-codegen .
 ```
 
 You do not need to run `npm install` manually on the host. Generator dependencies are installed during image build.

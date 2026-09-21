@@ -1,6 +1,6 @@
-# es-code-generator — AGENTS.md
+# medol-codegen — AGENTS.md
 
-`es-code-generator` contains Dockerized Yeoman generators used by the MEDOL pipeline. It reads a `codegen-model.json` from `/workspace` and generates Axon/Axon5 backend code and Refine frontend code.
+`medol-codegen` contains Dockerized Yeoman generators used by the MEDOL pipeline. It reads a `codegen-model.json` from `/workspace` and generates Axon/Axon5 backend code and Refine frontend code.
 
 ## Project Rules
 
@@ -37,7 +37,7 @@
 Rebuild the generator image after generator changes:
 
 ```bash
-docker build -f Dockerfile.codegen -t es-codegen .
+docker build -f Dockerfile.codegen -t medol-codegen .
 ```
 
 Run generation checks from `example/`:

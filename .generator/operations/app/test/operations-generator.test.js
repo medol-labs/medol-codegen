@@ -169,8 +169,11 @@ test('generates operations target file sets', () => {
     assert(files['operations/dev/k3s/cluster/k3d-dev.yaml']);
     assert(files['operations/dev/k3s/scripts/k3d-dev.sh']);
     assert.match(files['operations/dev/k3s/scripts/k3d-dev.sh'], /CLUSTER_NAME="\$\{CLUSTER_NAME:-learning-platform-dev\}"/);
+    assert.match(files['operations/dev/k3s/scripts/k3d-dev.sh'], /export KUBECONFIG="\$\{KUBECONFIG:-\$\{KUBECONFIG_FILE\}\}"/);
     assert.match(files['operations/dev/k3s/scripts/k3d-dev.sh'], /PRE_APPLY_FILE="\$\{PRE_APPLY_FILE:-\}"/);
-    assert.match(files['operations/dev/k3s/scripts/k3d-dev.sh'], /kubectl -n "\$\{NAMESPACE\}" apply -f "\$\{PRE_APPLY_FILE\}"/);
+    assert.match(files['operations/dev/k3s/scripts/k3d-dev.sh'], /KUBECTL_APPLY_VALIDATE="\$\{KUBECTL_APPLY_VALIDATE:-false\}"/);
+    assert.match(files['operations/dev/k3s/scripts/k3d-dev.sh'], /kubectl_apply\(\)/);
+    assert.match(files['operations/dev/k3s/scripts/k3d-dev.sh'], /kubectl -n "\$\{NAMESPACE\}" apply --validate="\$\{KUBECTL_APPLY_VALIDATE\}" -f "\$\{PRE_APPLY_FILE\}"/);
     assert.match(files['operations/dev/k3s/scripts/k3d-dev.sh'], /kubectl -n "\$\{NAMESPACE\}" rollout restart/);
     assert(files['operations/dev/harbor/README.md']);
     assert(files['operations/dev/harbor/.env-example']);

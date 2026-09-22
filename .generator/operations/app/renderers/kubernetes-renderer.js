@@ -817,6 +817,7 @@ function renderKubernetesReadme(name, model) {
             `\`scripts/k3d-dev.sh apply\` automatically applies \`environments/${environmentName}/secrets.${environmentName}.yaml\` first when the file exists.`,
             '`PRE_APPLY_FILE` can point at a manifest that must exist before Deployments are applied, such as ServiceAccount and RBAC objects referenced by custom overlays.',
             'When `REGISTRY_OVERLAY` and `EXTRA_COMPONENT` are both configured, the helper applies a temporary combined overlay so registry image overrides and extra resources are applied together.',
+            '`KUBECTL_APPLY_VALIDATE` defaults to `false` so offline or freshly started K3s clusters do not fail while `kubectl` tries to download OpenAPI schemas. Set `KUBECTL_APPLY_VALIDATE=true` when you want strict client-side validation.',
             '',
             '```bash',
             'k3d cluster create --config cluster/k3d-dev.yaml',
@@ -1087,12 +1088,14 @@ NAMESPACE="\${NAMESPACE:-${namespace}}"
 K3D_CONFIG="\${K3D_CONFIG:-\${K3S_DIR}/cluster/k3d-dev.yaml}"
 REGISTRY_CONFIG="\${REGISTRY_CONFIG:-\${K3S_DIR}/cluster/registries.yaml}"
 KUBECONFIG_FILE="\${KUBECONFIG_FILE:-\${WORK_DIR}/kubeconfig-\${CLUSTER_NAME}.yaml}"
+export KUBECONFIG="\${KUBECONFIG:-\${KUBECONFIG_FILE}}"
 ENVIRONMENT_OVERLAY="\${ENVIRONMENT_OVERLAY:-\${K3S_DIR}/environments/${environmentName}}"
 REGISTRY_OVERLAY="\${REGISTRY_OVERLAY:-\${K3S_DIR}/environments/${environmentName}-registry}"
 SECRETS_FILE="\${SECRETS_FILE:-\${K3S_DIR}/environments/${environmentName}/secrets.${environmentName}.yaml}"
 EXTRA_COMPONENT="\${EXTRA_COMPONENT:-}"
 EXTRA_OVERLAY="\${EXTRA_OVERLAY:-}"
 PRE_APPLY_FILE="\${PRE_APPLY_FILE:-}"
+KUBECTL_APPLY_VALIDATE="\${KUBECTL_APPLY_VALIDATE:-false}"
 
 command="\${1:-help}"
 
@@ -1119,6 +1122,7 @@ Environment overrides:
   EXTRA_COMPONENT=\${EXTRA_COMPONENT}
   EXTRA_OVERLAY=\${EXTRA_OVERLAY}
   PRE_APPLY_FILE=\${PRE_APPLY_FILE}
+  KUBECTL_APPLY_VALIDATE=\${KUBECTL_APPLY_VALIDATE}
 USAGE
 }
 
@@ -1155,16 +1159,20 @@ resources:
 components:
   - "$(kustomize_path "\${EXTRA_COMPONENT}")"
 YAML
-        echo "[k3d-dev] kubectl apply -k \${combined}"
-        kubectl apply -k "\${combined}"
+        echo "[k3d-dev] kubectl apply --validate=\${KUBECTL_APPLY_VALIDATE} -k \${combined}"
+        kubectl_apply -k "\${combined}"
         return
     fi
-    echo "[k3d-dev] kubectl apply -k \${overlay}"
-    kubectl apply -k "\${overlay}"
+    echo "[k3d-dev] kubectl apply --validate=\${KUBECTL_APPLY_VALIDATE} -k \${overlay}"
+    kubectl_apply -k "\${overlay}"
     if [[ -n "\${EXTRA_OVERLAY}" && -f "\${EXTRA_OVERLAY}/kustomization.yaml" ]]; then
-        echo "[k3d-dev] kubectl apply -k \${EXTRA_OVERLAY}"
-        kubectl apply -k "\${EXTRA_OVERLAY}"
+        echo "[k3d-dev] kubectl apply --validate=\${KUBECTL_APPLY_VALIDATE} -k \${EXTRA_OVERLAY}"
+        kubectl_apply -k "\${EXTRA_OVERLAY}"
     fi
+}
+
+kubectl_apply() {
+    kubectl apply --validate="\${KUBECTL_APPLY_VALIDATE}" "$@"
 }
 
 create_cluster() {
@@ -1196,16 +1204,16 @@ apply_manifests() {
         overlay="\${REGISTRY_OVERLAY}"
     fi
     echo "[k3d-dev] ensure namespace \${NAMESPACE}"
-    kubectl create namespace "\${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+    kubectl create namespace "\${NAMESPACE}" --dry-run=client -o yaml | kubectl_apply -f -
     if [[ -f "\${SECRETS_FILE}" ]]; then
-        echo "[k3d-dev] kubectl -n \${NAMESPACE} apply -f \${SECRETS_FILE}"
-        kubectl -n "\${NAMESPACE}" apply -f "\${SECRETS_FILE}"
+        echo "[k3d-dev] kubectl -n \${NAMESPACE} apply --validate=\${KUBECTL_APPLY_VALIDATE} -f \${SECRETS_FILE}"
+        kubectl -n "\${NAMESPACE}" apply --validate="\${KUBECTL_APPLY_VALIDATE}" -f "\${SECRETS_FILE}"
     else
         echo "[k3d-dev] skip missing secrets file: \${SECRETS_FILE}"
     fi
     if [[ -f "\${PRE_APPLY_FILE}" ]]; then
-        echo "[k3d-dev] kubectl -n \${NAMESPACE} apply -f \${PRE_APPLY_FILE}"
-        kubectl -n "\${NAMESPACE}" apply -f "\${PRE_APPLY_FILE}"
+        echo "[k3d-dev] kubectl -n \${NAMESPACE} apply --validate=\${KUBECTL_APPLY_VALIDATE} -f \${PRE_APPLY_FILE}"
+        kubectl -n "\${NAMESPACE}" apply --validate="\${KUBECTL_APPLY_VALIDATE}" -f "\${PRE_APPLY_FILE}"
     fi
     apply_overlay "\${overlay}"
 }

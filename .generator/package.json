@@ -6,7 +6,7 @@
     "test": "node --test axon5/app/test/*.test.js operations/app/test/*.test.js simulation/app/test/*.test.js refine/app/test/*.test.js"
   },
   "author": "",
-  "license": "ISC",
+  "license": "Apache-2.0",
   "description": "",
   "dependencies": {
     "uuid": "^9.0.1",

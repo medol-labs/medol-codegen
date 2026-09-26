@@ -391,7 +391,8 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
         hasArrayFields: formFields.some((field) => field.list || hasNestedArrayField(field)),
         hasFileFields: formFields.some((field) => field.fileInput),
         fileFields: formFields.filter((field) => field.fileInput),
-        fileUploadProducer: isFileUploadProducerCommand(command, rawFields)
+        fileUploadProducer: isFileUploadProducerCommand(command, rawFields),
+        downloadCommand: isDownloadCommand(command)
     };
 }
 
@@ -457,6 +458,10 @@ function hasSourceMapping(field) {
 function withPrefillFields(commands, resourceFields) {
     const resourceFieldNames = new Set(resourceFields.map((field) => field.name));
     return commands.map((command) => {
+        const rowPrefillFields = uniqueFields([
+            ...command.prefillCandidateFields.filter((field) => resourceFieldNames.has(field.name)),
+            ...(command.downloadCommand ? downloadCommandQueryFields(resourceFields) : [])
+        ]);
         const prefillFields = uniqueFields([
             ...command.prefillCandidateFields.filter((field) => resourceFieldNames.has(field.name)),
             ...(command.workflowPrefillFields ?? [])
@@ -464,7 +469,7 @@ function withPrefillFields(commands, resourceFields) {
         const formFieldNames = new Set(command.fields.map((field) => field.name));
         return {
             ...command,
-            rowPrefillFields: command.prefillCandidateFields.filter((field) => resourceFieldNames.has(field.name)),
+            rowPrefillFields,
             prefillFields,
             hiddenPrefillFields: prefillFields.filter((field) => !formFieldNames.has(field.name)),
             defaultValueEntries: uniqueFields([
@@ -483,6 +488,24 @@ function withPrefillFields(commands, resourceFields) {
             ]),
             hasSelectFields: command.fields.some((field) => field.select)
         };
+    });
+}
+
+function isDownloadCommand(command) {
+    const name = `${command?.name ?? ''} ${command?.title ?? ''}`.toLowerCase();
+    return /\bdownload\b/.test(name) || name.includes('download');
+}
+
+function downloadCommandQueryFields(resourceFields) {
+    return resourceFields.filter((field) => {
+        const name = String(field.name ?? '').toLowerCase();
+        return name.endsWith('uri')
+            || name.endsWith('url')
+            || name.endsWith('format')
+            || name.endsWith('id')
+            || name.endsWith('filename')
+            || name.endsWith('name')
+            || name.endsWith('version');
     });
 }
 

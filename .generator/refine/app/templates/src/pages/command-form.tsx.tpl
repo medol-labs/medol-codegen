@@ -54,6 +54,9 @@ import { useCommandForm } from "@/hooks/command/useCommandForm";
 import { runFormBehavior } from "@/platform/composition";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { <%= command.schemaName %>, type <%= command.inputTypeName %> } from "@/contexts/domain/schemas";
+<% if (command.downloadCommand) { -%>
+import { useFileDownload } from "@/components/download/file-download";
+<% } -%>
 <% if (command.hasSelectFields) { -%>
 import { ResourceMultiSelect, ResourceSelect } from "@/components/refine-ui/form/resource-select";
 <% } -%>
@@ -171,6 +174,9 @@ export const <%= command.pageComponent %> = () => {
 <% if (command.hasResultFields) { -%>
   const [commandResult, setCommandResult] = useState<Record<string, unknown> | null>(null);
 <% } -%>
+<% if (command.downloadCommand) { -%>
+  const { download } = useFileDownload();
+<% } -%>
   const defaultValues = {
 <% command.defaultValueEntries.forEach((field) => { -%>
     <%= field.name %>: <%- field.value %>,
@@ -262,6 +268,63 @@ export const <%= command.pageComponent %> = () => {
   }
 <% } -%>
 
+<% if (command.downloadCommand) { -%>
+  function resolveDownloadUri(data: unknown) {
+    const resultUri = findDownloadUri(data);
+    if (resultUri) return resultUri;
+
+    const searchKeys = Array.from(searchParams.keys());
+    const uriKey = searchKeys.find((key) => {
+      const normalized = key.toLowerCase();
+      return normalized.endsWith("uri") || normalized.endsWith("url");
+    });
+    return uriKey ? searchParams.get(uriKey) : undefined;
+  }
+
+  function findDownloadUri(value: unknown): string | undefined {
+    if (!value || typeof value !== "object") return undefined;
+    const record = value as Record<string, unknown>;
+    for (const [key, item] of Object.entries(record)) {
+      const normalized = key.toLowerCase();
+      if (
+        typeof item === "string" &&
+        item.trim().length > 0 &&
+        (normalized.endsWith("uri") || normalized.endsWith("url"))
+      ) {
+        return item;
+      }
+    }
+    return findDownloadUri(record.data);
+  }
+
+  function downloadFilename(values: <%= command.inputTypeName %>) {
+    const format = searchParams.get("modelFormat") ?? searchParams.get("format");
+    const extension = extensionByFormat(format);
+    const name =
+      searchParams.get("modelName") ??
+      searchParams.get("name") ??
+      String((values as Record<string, unknown>).modelName ?? (values as Record<string, unknown>).name ?? "<%= resource.route %>");
+    const version =
+      searchParams.get("modelVersion") ??
+      searchParams.get("version") ??
+      String((values as Record<string, unknown>).modelVersion ?? (values as Record<string, unknown>).version ?? "");
+    return [safeFilenamePart(name), safeFilenamePart(version)].filter(Boolean).join("-") + extension;
+  }
+
+  function extensionByFormat(format?: string | null) {
+    const normalized = String(format ?? "").toUpperCase();
+    if (normalized === "JSON") return ".json";
+    if (normalized === "PYTORCH_STATE_DICT") return ".pt";
+    if (normalized === "ONNX") return ".onnx";
+    if (normalized === "CSV") return ".csv";
+    return ".bin";
+  }
+
+  function safeFilenamePart(value: string) {
+    return String(value || "download").replace(/[^A-Za-z0-9._-]+/gu, "-");
+  }
+
+<% } -%>
   async function onSubmit(values: <%= command.inputTypeName %>) {
 <% if (command.hasFileFields) { -%>
     const nextValues = {
@@ -319,6 +382,12 @@ export const <%= command.pageComponent %> = () => {
       nextValues,
       (payload) => onFinish(payload),
     );
+<% if (command.downloadCommand) { -%>
+    await download({
+      uri: resolveDownloadUri(result),
+      filename: downloadFilename(nextValues),
+    });
+<% } -%>
     navigate("/<%= resource.route %>");
     return result;
 <% } -%>
@@ -339,6 +408,12 @@ export const <%= command.pageComponent %> = () => {
     if (data && typeof data === "object") {
       setCommandResult(data as Record<string, unknown>);
     }
+<% if (command.downloadCommand) { -%>
+    await download({
+      uri: resolveDownloadUri(data ?? result),
+      filename: downloadFilename(values),
+    });
+<% } -%>
     return result;
 <% } else { -%>
     const result = await runFormBehavior<<%= command.inputTypeName %>>(
@@ -350,6 +425,12 @@ export const <%= command.pageComponent %> = () => {
       } as <%= command.inputTypeName %>,
       (payload) => onFinish(payload),
     );
+<% if (command.downloadCommand) { -%>
+    await download({
+      uri: resolveDownloadUri(result),
+      filename: downloadFilename(values),
+    });
+<% } -%>
     navigate("/<%= resource.route %>");
     return result;
 <% } -%>

@@ -463,6 +463,84 @@ test('prefills concept selection fields for row commands addressed by technical 
     assert.deepEqual(command?.fields.map((field) => field.name), ['featureSchemaId', 'publishNote', 'featureDomain', 'version']);
 });
 
+test('prefills download commands with artifact row fields', () => {
+    const model = {
+        domain: 'Demo',
+        contexts: [{name: 'ModelManagement', title: 'Model Management'}],
+        aggregates: [],
+        transitions: [],
+        deployments: [{
+            name: 'PlatformBackend',
+            title: 'Platform Backend',
+            contexts: ['ModelManagement']
+        }],
+        slices: [{
+            id: 'slice-download-model-artifact',
+            context: 'ModelManagement',
+            chapter: 'Model Management',
+            title: 'Download Model Artifact',
+            concepts: ['ModelArtifact'],
+            commands: [{
+                id: 'command-download-model-artifact',
+                title: 'Download Model Artifact',
+                concept: 'ModelArtifact',
+                fields: [
+                    {name: 'modelId', type: 'UUID', idAttribute: true, technicalAttribute: true}
+                ],
+                dependencies: [{
+                    id: 'event-model-artifact-downloaded',
+                    direction: 'OUTBOUND',
+                    title: 'Model Artifact Downloaded',
+                    elementType: 'EVENT'
+                }]
+            }],
+            events: [{
+                id: 'event-model-artifact-downloaded',
+                title: 'Model Artifact Downloaded',
+                fields: [{name: 'modelId', type: 'UUID', idAttribute: true}],
+                dependencies: [{
+                    id: 'command-download-model-artifact',
+                    direction: 'INBOUND',
+                    title: 'Download Model Artifact',
+                    elementType: 'COMMAND'
+                }]
+            }],
+            readmodels: [{
+                id: 'readmodel-model-artifact-catalog',
+                title: 'Model Artifact Catalog',
+                listElement: true,
+                fields: [
+                    {name: 'modelId', type: 'UUID', idAttribute: true},
+                    {name: 'modelName', type: 'String'},
+                    {name: 'modelVersion', type: 'String'},
+                    {name: 'modelFormat', type: 'String'},
+                    {name: 'modelArtifactUri', type: 'String'}
+                ],
+                dependencies: [{
+                    id: 'event-model-artifact-downloaded',
+                    direction: 'INBOUND',
+                    title: 'Model Artifact Downloaded',
+                    elementType: 'EVENT'
+                }]
+            }]
+        }]
+    };
+
+    const frontend = buildFrontendModel(model);
+    const modelArtifactCatalog = frontend.resources.find((resource) => resource.name === 'model_artifact_catalog');
+    const command = modelArtifactCatalog?.commands.find((item) => item.name === 'downloadModelArtifact');
+
+    assert.equal(command?.downloadCommand, true);
+    assert.deepEqual(command?.rowPrefillFields.map((field) => field.name), [
+        'modelId',
+        'modelName',
+        'modelVersion',
+        'modelFormat',
+        'modelArtifactUri'
+    ]);
+    assert.deepEqual(command?.hiddenPrefillFields.map((field) => field.name), ['modelId']);
+});
+
 test('links non-lifecycle producer commands as row actions and supports explicit catalog field selects', () => {
     const model = {
         domain: 'Demo',

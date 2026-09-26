@@ -49,7 +49,7 @@ export const resources: IResourceItem[] = [
 <% if (resource.canList) { -%>
     list: "/<%= resource.route %>",
 <% } -%>
-<% if (resource.createCommand) { -%>
+<% if (resource.createCommand?.requiresPage) { -%>
     create: "/<%= resource.route %>/command/<%= resource.createCommand.route %>",
 <% } -%>
 <% if (resource.editCommand) { -%>
@@ -76,11 +76,8 @@ export const resources: IResourceItem[] = [
 <% if (resource.commands.length > 0) { -%>
       commandRoute: "/<%= resource.route %>/:id/command/:command",
       commands: {
-<% if (resource.createCommand) { -%>
-        <%= resource.createCommand.name %>: { label: "<%= resource.createCommand.label %>", i18nKey: "<%= resource.createCommand.i18nKey %>", route: "/<%= resource.route %>/command/<%= resource.createCommand.route %>", dataProviderName: "<%= resource.createCommand.dataProviderName %>"<% if (resource.createCommand.enabledField) { %>, enabledField: "<%= resource.createCommand.enabledField %>"<% } %><% if (resource.createCommand.stateField) { %>, stateField: "<%= resource.createCommand.stateField %>"<% } %><% if (resource.createCommand.allowedStates?.length) { %>, allowedStates: <%- JSON.stringify(resource.createCommand.allowedStates) %><% } %> },
-<% } -%>
-<% resource.routedCommands.forEach((command) => { -%>
-        <%= command.name %>: { label: "<%= command.label %>", i18nKey: "<%= command.i18nKey %>", route: "/<%= resource.route %>/:id/command/<%= command.route %>", dataProviderName: "<%= command.dataProviderName %>"<% if (command.enabledField) { %>, enabledField: "<%= command.enabledField %>"<% } %><% if (command.stateField) { %>, stateField: "<%= command.stateField %>"<% } %><% if (command.allowedStates?.length) { %>, allowedStates: <%- JSON.stringify(command.allowedStates) %><% } %> },
+<% resource.commands.forEach((command) => { -%>
+        <%= command.name %>: { label: <%- JSON.stringify(command.label) %>, i18nKey: <%- JSON.stringify(command.i18nKey) %>, route: <%- JSON.stringify(command.startsLifecycle ? `/${resource.route}/command/${command.route}` : `/${resource.route}/:id/command/${command.route}`) %>, dataProviderName: <%- JSON.stringify(command.dataProviderName) %>, uiPattern: <%- JSON.stringify(command.uiPattern) %>, interactionMode: <%- JSON.stringify(command.interactionMode) %>, requiresPage: <%= command.requiresPage ? "true" : "false" %>, confirmTitle: <%- JSON.stringify(command.confirmTitle) %>, confirmDescription: <%- JSON.stringify(command.confirmDescription) %>, confirmVariant: <%- JSON.stringify(command.confirmVariant) %><% if (command.enabledField) { %>, enabledField: <%- JSON.stringify(command.enabledField) %><% } %><% if (command.stateField) { %>, stateField: <%- JSON.stringify(command.stateField) %><% } %><% if (command.allowedStates?.length) { %>, allowedStates: <%- JSON.stringify(command.allowedStates) %><% } %> },
 <% }) -%>
       },
 <% } -%>

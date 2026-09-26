@@ -60,6 +60,21 @@ test('frontend package declares directly imported peer dependencies', () => {
     assert.equal(packageTemplate.dependencies['@tanstack/react-query'], '5.90.16');
 });
 
+test('command button template supports generated interaction modes', () => {
+    const commandButton = readTemplate('root/src/components/refine-ui/buttons/command.tsx');
+    const commandHook = readTemplate('root/src/hooks/command/useCommandButton.ts');
+    const resourcesTemplate = readTemplate('src/providers/resources.tsx.tpl');
+
+    assert.match(commandHook, /CommandInteractionMode/);
+    assert.match(commandHook, /useCreate/);
+    assert.match(commandHook, /interactionMode/);
+    assert.match(commandButton, /interactionMode === "confirm"/);
+    assert.match(commandButton, /interactionMode === "direct"/);
+    assert.match(commandButton, /PopoverContent/);
+    assert.match(resourcesTemplate, /uiPattern/);
+    assert.match(resourcesTemplate, /requiresPage/);
+});
+
 test('frontend extension manifest model lists resources, commands, and fields', () => {
     const { _test } = require('../index');
     const manifest = _test.buildExtensionManifestModel({

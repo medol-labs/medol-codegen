@@ -3,7 +3,7 @@
 export * from "<%= resource.listImportPath %>";
 <% } -%>
 export * from "<%= resource.showImportPath %>";
-<% if (resource.createCommand) { -%>
+<% if (resource.createCommand?.requiresPage) { -%>
 export * from "<%= resource.createCommand.importPath %>";
 <% } -%>
 <% if (resource.editCommand) { -%>

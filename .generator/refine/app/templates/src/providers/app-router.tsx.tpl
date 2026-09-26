@@ -8,7 +8,7 @@ import {
   <%= resource.component %>List,
 <% } -%>
   <%= resource.component %>Show,
-<% if (resource.createCommand) { -%>
+<% if (resource.createCommand?.requiresPage) { -%>
   <%= resource.createCommand.pageComponent %>,
 <% } -%>
 <% if (resource.editCommand) { -%>
@@ -27,7 +27,7 @@ export const contextRoutes = (
 <% if (resource.canList) { -%>
       <Route index element={resolvePageOverride("<%= resource.route %>", "list", <<%= resource.component %>List />)} />
 <% } -%>
-<% if (resource.createCommand) { -%>
+<% if (resource.createCommand?.requiresPage) { -%>
       <Route path="command/<%= resource.createCommand.route %>" element={resolvePageOverride("<%= resource.route %>", "<%= resource.createCommand.name %>", <<%= resource.createCommand.pageComponent %> />)} />
 <% } -%>
 <% if (resource.editCommand) { -%>

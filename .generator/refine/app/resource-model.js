@@ -122,7 +122,7 @@ function toReadModelResource(group, readModel, allEvents, workflow) {
         editCommand,
         deleteCommand,
         commands: [createCommand, editCommand, deleteCommand, ...itemCommands].filter(Boolean),
-        routedCommands: [deleteCommand, ...itemCommands].filter(Boolean),
+        routedCommands: [deleteCommand, ...itemCommands].filter((command) => command?.requiresPage),
         itemCommands
     };
 }
@@ -347,6 +347,10 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
     const contextRoute = contextRouteFor(commandSlice, fallbackChapter);
     const sliceRoute = sliceRouteFor(commandSlice, title);
 
+    const uiPattern = commandUiPattern(command);
+    const interactionMode = commandInteractionMode(command, formFields, uiPattern);
+    const requiresPage = interactionMode === 'form' || interactionMode === 'custom';
+
     return {
         id: commandKey(command),
         title,
@@ -368,6 +372,13 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
         targetState: stateControl.targetState,
         stateField: stateControl.stateField,
         fields: commandFields,
+        visibleInputFields: commandFields,
+        uiPattern,
+        interactionMode,
+        requiresPage,
+        confirmTitle: `${titleCase(title)}?`,
+        confirmDescription: `This action will submit ${titleCase(title)}.`,
+        confirmVariant: isDestructiveCommand(command) ? 'destructive' : 'default',
         snapshotFields,
         historyPrefillFields,
         hasHistoryPrefillFields: historyPrefillFields.length > 0,
@@ -394,6 +405,48 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
         fileUploadProducer: isFileUploadProducerCommand(command, rawFields),
         downloadCommand: isDownloadCommand(command)
     };
+}
+
+function commandUiPattern(command) {
+    const rawType = command?.ui?.type ?? command?.uiType ?? command?.uiPattern;
+    const type = typeof rawType === 'string' ? rawType.trim().toLowerCase() : '';
+    const supported = new Set([
+        'form',
+        'confirm',
+        'direct',
+        'modal',
+        'drawer',
+        'wizard',
+        'inline',
+        'upload',
+        'import',
+        'export',
+        'download',
+        'external',
+        'custom'
+    ]);
+    return supported.has(type) ? type : 'form';
+}
+
+function commandInteractionMode(command, formFields, uiPattern) {
+    if (uiPattern === 'form' && formFields.length > 0) {
+        return 'form';
+    }
+    if (uiPattern === 'confirm') {
+        return formFields.length > 0 ? 'form' : 'confirm';
+    }
+    if (uiPattern === 'direct') {
+        return formFields.length > 0 ? 'form' : 'direct';
+    }
+    if (uiPattern === 'form') {
+        return isDestructiveCommand(command) ? 'confirm' : 'confirm';
+    }
+    return 'custom';
+}
+
+function isDestructiveCommand(command) {
+    const value = `${command?.name ?? ''} ${command?.title ?? ''}`.toLowerCase();
+    return /\b(delete|remove|archive|deactivate|disable|revoke|suspend|cancel|reject|terminate)\b/.test(value);
 }
 
 function commandSnapshotFields(fields, workflow) {

@@ -246,7 +246,7 @@ const RefineGenerator = class extends Generator {
             { resource }
         );
 
-        if (resource.createCommand) {
+        if (resource.createCommand?.requiresPage) {
             this.fs.copyTpl(
                 this.templatePath('src/pages/command-form.tsx.tpl'),
                 this.destinationPath(`./src/contexts/${resource.createCommand.pagePath}/${resource.createCommand.file}.tsx`),
@@ -262,7 +262,7 @@ const RefineGenerator = class extends Generator {
             );
         }
 
-        if (resource.deleteCommand) {
+        if (resource.deleteCommand?.requiresPage) {
             this.fs.copyTpl(
                 this.templatePath('src/pages/command-form.tsx.tpl'),
                 this.destinationPath(`./src/contexts/${resource.deleteCommand.pagePath}/${resource.deleteCommand.file}.tsx`),
@@ -270,7 +270,7 @@ const RefineGenerator = class extends Generator {
             );
         }
 
-        resource.itemCommands.forEach((command) => {
+        resource.itemCommands.filter((command) => command.requiresPage).forEach((command) => {
             this.fs.copyTpl(
                 this.templatePath('src/pages/command-form.tsx.tpl'),
                 this.destinationPath(`./src/contexts/${command.pagePath}/${command.file}.tsx`),
@@ -307,16 +307,18 @@ const RefineGenerator = class extends Generator {
         if (resource.canList) {
             files.add('list.tsx');
         }
-        if (resource.createCommand) {
+        if (resource.createCommand?.requiresPage) {
             files.add(`${resource.createCommand.file}.tsx`);
         }
         if (resource.editCommand) {
             files.add('edit.tsx');
         }
-        if (resource.deleteCommand) {
+        if (resource.deleteCommand?.requiresPage) {
             files.add(`${resource.deleteCommand.file}.tsx`);
         }
-        resource.itemCommands.forEach((command) => files.add(`${command.file}.tsx`));
+        resource.itemCommands
+            .filter((command) => command.requiresPage)
+            .forEach((command) => files.add(`${command.file}.tsx`));
         return files;
     }
 
@@ -424,6 +426,14 @@ const RefineGenerator = class extends Generator {
         this.fs.copy(
             this.templatePath('root/src/components/refine-ui/fields/copyable-text.tsx'),
             this.destinationPath('./src/components/refine-ui/fields/copyable-text.tsx')
+        );
+        this.fs.copy(
+            this.templatePath('root/src/components/refine-ui/buttons/command.tsx'),
+            this.destinationPath('./src/components/refine-ui/buttons/command.tsx')
+        );
+        this.fs.copy(
+            this.templatePath('root/src/hooks/command/useCommandButton.ts'),
+            this.destinationPath('./src/hooks/command/useCommandButton.ts')
         );
     }
 

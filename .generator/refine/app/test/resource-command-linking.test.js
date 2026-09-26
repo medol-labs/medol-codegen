@@ -92,6 +92,80 @@ test('links producer create commands to catalog read models across aggregate rou
     assert.deepEqual(productCatalog?.commands.map((command) => command.title), ['Register Product']);
 });
 
+test('maps no-input confirm UI commands to non-routed command actions', () => {
+    const model = {
+        domain: 'Demo',
+        contexts: [{name: 'CatalogManagement', title: 'Catalog Management'}],
+        aggregates: [],
+        deployments: [{
+            name: 'BackOffice',
+            title: 'Back Office',
+            contexts: ['CatalogManagement']
+        }],
+        transitions: [],
+        slices: [{
+            id: 'slice-product-catalog',
+            context: 'CatalogManagement',
+            chapter: 'Catalog Management',
+            title: 'Product Catalogs',
+            commands: [],
+            events: [{
+                id: 'event-product-registered',
+                title: 'Product Registered',
+                fields: [{name: 'productId', type: 'UUID', idAttribute: true}]
+            }],
+            readmodels: [{
+                id: 'readmodel-product-catalog',
+                title: 'Product Catalog',
+                listElement: true,
+                fields: [
+                    {name: 'productId', type: 'UUID', idAttribute: true},
+                    {name: 'state', type: 'String'}
+                ],
+                dependencies: [{
+                    id: 'event-product-registered',
+                    direction: 'INBOUND',
+                    title: 'Product Registered',
+                    elementType: 'EVENT'
+                }]
+            }]
+        }, {
+            id: 'slice-archive-product',
+            context: 'CatalogManagement',
+            chapter: 'Catalog Management',
+            title: 'Archive Product',
+            concepts: ['Product'],
+            commands: [{
+                id: 'command-archive-product',
+                title: 'Archive Product',
+                concept: 'Product',
+                ui: {type: 'confirm'},
+                fields: [
+                    {name: 'productId', type: 'UUID', idAttribute: true, hidden: true}
+                ],
+                dependencies: [{
+                    id: 'event-product-registered',
+                    direction: 'INBOUND',
+                    title: 'Product Registered',
+                    elementType: 'EVENT'
+                }]
+            }],
+            events: [],
+            screens: [{name: 'ProductCatalogScreen'}],
+            readmodels: []
+        }]
+    };
+
+    const frontend = buildFrontendModel(model);
+    const productCatalog = frontend.resources.find((resource) => resource.name === 'product_catalog');
+    const archiveProduct = productCatalog?.commands.find((command) => command.name === 'archiveProduct');
+
+    assert.equal(archiveProduct?.uiPattern, 'confirm');
+    assert.equal(archiveProduct?.interactionMode, 'confirm');
+    assert.equal(archiveProduct?.requiresPage, false);
+    assert.equal(productCatalog?.routedCommands.some((command) => command.name === 'archiveProduct'), false);
+});
+
 test('projects frontend resources by frontend application without reusing backend deployment granularity', () => {
     const model = {
         domain: 'Demo',

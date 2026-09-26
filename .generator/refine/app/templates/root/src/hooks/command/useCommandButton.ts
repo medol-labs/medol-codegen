@@ -1,11 +1,15 @@
 import {
   CanReturnType,
+  useCreate,
   useGo,
+  useInvalidate,
+  useNotification,
   useParsed,
   useResourceParams,
   useTranslate,
   type IResourceItem,
 } from "@refinedev/core";
+import React from "react";
 import { useCommandButtonCanAccess } from "./useCommandButtonCanAccess";
 
 type CommandNavOpts = {
@@ -13,6 +17,21 @@ type CommandNavOpts = {
   command: string;
   id?: string | number;
   query?: Record<string, any>;
+};
+
+export type CommandInteractionMode = "form" | "confirm" | "direct" | "custom";
+
+export type CommandButtonMeta = {
+  label?: string;
+  i18nKey?: string;
+  route?: string;
+  dataProviderName?: string;
+  uiPattern?: string;
+  interactionMode?: CommandInteractionMode;
+  requiresPage?: boolean;
+  confirmTitle?: string;
+  confirmDescription?: string;
+  confirmVariant?: "default" | "destructive";
 };
 
 export const useCommandNavigation = () => {
@@ -85,8 +104,14 @@ export type CommandButtonResult = {
   label: string;
   hidden: boolean;
   disabled: boolean;
+  loading: boolean;
   canAccess: CanReturnType | undefined;
   title: string;
+  interactionMode: CommandInteractionMode;
+  confirmTitle: string;
+  confirmDescription: string;
+  confirmVariant: "default" | "destructive";
+  submit: () => Promise<unknown>;
 };
 
 export const useCommandButton = ({
@@ -103,11 +128,20 @@ export const useCommandButton = ({
   });
   const translate = useTranslate();
   const { commandUrl } = useCommandNavigation();
+  const invalidate = useInvalidate();
+  const { open } = useNotification();
+  const { mutateAsync } = useCreate();
+  const [submitting, setSubmitting] = React.useState(false);
 
-  const commandMeta = resourceItem?.meta?.commands?.[command];
+  const commandMeta = resourceItem?.meta?.commands?.[command] as CommandButtonMeta | undefined;
   const label = commandMeta?.i18nKey
     ? translate(commandMeta.i18nKey, commandMeta.label ?? command)
     : commandMeta?.label ?? command;
+  const interactionMode = commandMeta?.interactionMode ?? "form";
+  const confirmTitle = commandMeta?.confirmTitle ?? `${label}?`;
+  const confirmDescription =
+    commandMeta?.confirmDescription ?? translate("commands.confirm.description", "This action will be submitted immediately.");
+  const confirmVariant = commandMeta?.confirmVariant ?? "default";
 
   const { canAccess, title, hidden, disabled } = useCommandButtonCanAccess({
     resource: resourceItem,
@@ -116,6 +150,71 @@ export const useCommandButton = ({
     meta: meta,
     id,
   });
+  const submit = React.useCallback(async () => {
+    if (!resourceItem?.name) {
+      return undefined;
+    }
+
+    const aggregateId = id ?? paramId;
+    const idField = typeof resourceItem.meta?.idField === "string"
+      ? resourceItem.meta.idField
+      : "id";
+    const variables = {
+      ...(aggregateId && idField && !(idField in (query ?? {})) ? { [idField]: aggregateId } : {}),
+      ...(query ?? {}),
+    };
+
+    setSubmitting(true);
+    try {
+      const result = await mutateAsync({
+        resource: resourceItem.name,
+        values: variables,
+        dataProviderName: commandMeta?.dataProviderName ?? "command",
+        meta: {
+          ...resourceItem.meta,
+          ...meta,
+          command,
+          aggregateId,
+          dataProviderName: commandMeta?.dataProviderName ?? "command",
+        },
+      });
+      await invalidate({
+        resource: resourceItem.name,
+        id: aggregateId,
+        dataProviderName: resourceItem.meta?.dataProviderName as string | undefined,
+        invalidates: ["list", "many", "detail"],
+      });
+      open?.({
+        type: "success",
+        message: translate("notifications.success", "Success"),
+        description: label,
+      });
+      return result;
+    } catch (error) {
+      open?.({
+        type: "error",
+        message: translate("notifications.error", "Error"),
+        description: error instanceof Error ? error.message : label,
+      });
+      throw error;
+    } finally {
+      setSubmitting(false);
+    }
+  }, [
+    command,
+    commandMeta?.dataProviderName,
+    id,
+    invalidate,
+    label,
+    meta,
+    mutateAsync,
+    open,
+    paramId,
+    query,
+    resourceItem?.meta,
+    resourceItem?.name,
+    translate,
+  ]);
 
   return {
     to: commandUrl({
@@ -127,7 +226,13 @@ export const useCommandButton = ({
     label,
     hidden: hidden,
     disabled: disabled,
+    loading: submitting,
     canAccess,
     title,
+    interactionMode,
+    confirmTitle,
+    confirmDescription,
+    confirmVariant,
+    submit,
   };
 };

@@ -558,6 +558,15 @@ test('prefills download commands with artifact row fields', () => {
                 id: 'command-download-model-artifact',
                 title: 'Download Model Artifact',
                 concept: 'ModelArtifact',
+                ui: {type: 'confirm'},
+                clientEffect: {
+                    type: 'download',
+                    options: {
+                        uriField: 'downloadUri',
+                        filenameField: 'modelName',
+                        extensionFrom: 'modelFormat'
+                    }
+                },
                 fields: [
                     {name: 'modelId', type: 'UUID', idAttribute: true, technicalAttribute: true}
                 ],
@@ -588,7 +597,8 @@ test('prefills download commands with artifact row fields', () => {
                     {name: 'modelName', type: 'String'},
                     {name: 'modelVersion', type: 'String'},
                     {name: 'modelFormat', type: 'String'},
-                    {name: 'modelArtifactUri', type: 'String'}
+                    {name: 'modelArtifactUri', type: 'String'},
+                    {name: 'modelArtifactLocation', type: 'String'}
                 ],
                 dependencies: [{
                     id: 'event-model-artifact-downloaded',
@@ -605,14 +615,95 @@ test('prefills download commands with artifact row fields', () => {
     const command = modelArtifactCatalog?.commands.find((item) => item.name === 'downloadModelArtifact');
 
     assert.equal(command?.downloadCommand, true);
+    assert.deepEqual(command?.clientEffect, {
+        type: 'download',
+        options: {
+            uriField: 'downloadUri',
+            filenameField: 'modelName',
+            extensionFrom: 'modelFormat'
+        }
+    });
     assert.deepEqual(command?.rowPrefillFields.map((field) => field.name), [
         'modelId',
         'modelName',
         'modelVersion',
         'modelFormat',
-        'modelArtifactUri'
+        'modelArtifactUri',
+        'modelArtifactLocation'
     ]);
     assert.deepEqual(command?.hiddenPrefillFields.map((field) => field.name), ['modelId']);
+});
+
+test('supports download client effects without metadata options', () => {
+    const model = {
+        domain: 'Demo',
+        contexts: [{name: 'FileUpload', title: 'File Upload'}],
+        aggregates: [],
+        transitions: [],
+        deployments: [{
+            name: 'SupportBackend',
+            title: 'Support Backend',
+            contexts: ['FileUpload']
+        }],
+        slices: [{
+            id: 'slice-download-file',
+            context: 'FileUpload',
+            chapter: 'File Upload',
+            title: 'Download File',
+            commands: [{
+                id: 'command-download-file',
+                title: 'Download File',
+                ui: {type: 'confirm'},
+                clientEffect: {type: 'download'},
+                fields: [{name: 'fileId', type: 'UUID', idAttribute: true, technicalAttribute: true}],
+                dependencies: [{
+                    id: 'event-file-download-authorized',
+                    direction: 'OUTBOUND',
+                    title: 'File Download Authorized',
+                    elementType: 'EVENT'
+                }]
+            }],
+            events: [{
+                id: 'event-file-download-authorized',
+                title: 'File Download Authorized',
+                fields: [{name: 'fileId', type: 'UUID', idAttribute: true}],
+                dependencies: [{
+                    id: 'command-download-file',
+                    direction: 'INBOUND',
+                    title: 'Download File',
+                    elementType: 'COMMAND'
+                }]
+            }],
+            readmodels: [{
+                id: 'readmodel-uploaded-file-catalog',
+                title: 'Uploaded File Catalog',
+                listElement: true,
+                fields: [
+                    {name: 'fileId', type: 'UUID', idAttribute: true},
+                    {name: 'downloadUri', type: 'String'},
+                    {name: 'originalFileName', type: 'String'}
+                ],
+                dependencies: [{
+                    id: 'event-file-download-authorized',
+                    direction: 'INBOUND',
+                    title: 'File Download Authorized',
+                    elementType: 'EVENT'
+                }]
+            }]
+        }]
+    };
+
+    const frontend = buildFrontendModel(model);
+    const uploadedFileCatalog = frontend.resources.find((resource) => resource.name === 'uploaded_file_catalog');
+    const command = uploadedFileCatalog?.commands.find((item) => item.name === 'downloadFile');
+
+    assert.equal(command?.downloadCommand, true);
+    assert.deepEqual(command?.clientEffect, {type: 'download', options: {}});
+    assert.deepEqual(command?.rowPrefillFields.map((field) => field.name), [
+        'fileId',
+        'downloadUri',
+        'originalFileName'
+    ]);
 });
 
 test('links non-lifecycle producer commands as row actions and supports explicit catalog field selects', () => {

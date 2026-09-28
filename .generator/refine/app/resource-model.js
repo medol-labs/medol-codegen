@@ -350,6 +350,7 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
     const uiPattern = commandUiPattern(command);
     const interactionMode = commandInteractionMode(command, formFields, uiPattern);
     const requiresPage = interactionMode === 'form' || interactionMode === 'custom';
+    const clientEffect = commandClientEffect(command);
 
     return {
         id: commandKey(command),
@@ -374,6 +375,7 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
         fields: commandFields,
         visibleInputFields: commandFields,
         uiPattern,
+        clientEffect,
         interactionMode,
         requiresPage,
         confirmTitle: `${titleCase(title)}?`,
@@ -421,11 +423,15 @@ function commandUiPattern(command) {
         'upload',
         'import',
         'export',
-        'download',
         'external',
         'custom'
     ]);
     return supported.has(type) ? type : 'form';
+}
+
+function hasCommandUiPattern(command, type) {
+    const expected = String(type ?? '').toLowerCase();
+    return commandUiPattern(command) === expected;
 }
 
 function commandInteractionMode(command, formFields, uiPattern) {
@@ -545,8 +551,22 @@ function withPrefillFields(commands, resourceFields) {
 }
 
 function isDownloadCommand(command) {
-    const name = `${command?.name ?? ''} ${command?.title ?? ''}`.toLowerCase();
-    return /\bdownload\b/.test(name) || name.includes('download');
+    return commandClientEffect(command)?.type === 'download';
+}
+
+function commandClientEffect(command) {
+    if (!command?.clientEffect || typeof command.clientEffect !== 'object') {
+        return undefined;
+    }
+    const type = typeof command.clientEffect.type === 'string' ? command.clientEffect.type.trim() : '';
+    if (!type) return undefined;
+    const options = command.clientEffect.options && typeof command.clientEffect.options === 'object'
+        ? command.clientEffect.options
+        : {};
+    return {
+        type,
+        options
+    };
 }
 
 function downloadCommandQueryFields(resourceFields) {
@@ -554,6 +574,8 @@ function downloadCommandQueryFields(resourceFields) {
         const name = String(field.name ?? '').toLowerCase();
         return name.endsWith('uri')
             || name.endsWith('url')
+            || name.endsWith('location')
+            || name.endsWith('path')
             || name.endsWith('format')
             || name.endsWith('id')
             || name.endsWith('filename')

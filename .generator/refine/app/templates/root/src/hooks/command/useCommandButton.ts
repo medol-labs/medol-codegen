@@ -10,6 +10,7 @@ import {
   type IResourceItem,
 } from "@refinedev/core";
 import React from "react";
+import { useFileDownload } from "@/components/download/file-download";
 import { useCommandButtonCanAccess } from "./useCommandButtonCanAccess";
 
 type CommandNavOpts = {
@@ -29,9 +30,107 @@ export type CommandButtonMeta = {
   uiPattern?: string;
   interactionMode?: CommandInteractionMode;
   requiresPage?: boolean;
+  clientEffect?: {
+    type?: string;
+    options?: Record<string, string>;
+  };
+  downloadCommand?: boolean;
   confirmTitle?: string;
   confirmDescription?: string;
   confirmVariant?: "default" | "destructive";
+};
+
+const readPath = (value: unknown, path?: string): unknown => {
+  if (!path || !value || typeof value !== "object") return undefined;
+  return path.split(".").reduce<unknown>((current, segment) => {
+    if (!current || typeof current !== "object") return undefined;
+    return (current as Record<string, unknown>)[segment];
+  }, value);
+};
+
+const dataPath = (path?: string): string | undefined => path ? `data.${path}` : undefined;
+
+const findDownloadUri = (value: unknown): string | undefined => {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  for (const [key, item] of Object.entries(record)) {
+    const normalized = key.toLowerCase();
+    if (
+      typeof item === "string" &&
+      item.trim().length > 0 &&
+      (normalized.endsWith("uri") ||
+        normalized.endsWith("url") ||
+        normalized.endsWith("location") ||
+        normalized.endsWith("path"))
+    ) {
+      return item;
+    }
+  }
+  return findDownloadUri(record.data);
+};
+
+const resolveDownloadUri = (
+  result: unknown,
+  query?: Record<string, any>,
+  options?: Record<string, string>,
+): string | undefined => {
+  const configured =
+    readPath(result, options?.uriField) ??
+    readPath(result, dataPath(options?.uriField)) ??
+    readPath(query, options?.uriField);
+  if (typeof configured === "string" && configured.trim()) return configured;
+  return findDownloadUri(result) ?? findDownloadUri(query);
+};
+
+const extensionByFormat = (format?: unknown): string => {
+  const normalized = String(format ?? "").toUpperCase();
+  if (normalized === "JSON") return ".json";
+  if (normalized === "PYTORCH_STATE_DICT") return ".pt";
+  if (normalized === "ONNX") return ".onnx";
+  if (normalized === "CSV") return ".csv";
+  return "";
+};
+
+const safeFilenamePart = (value: unknown): string =>
+  String(value ?? "").replace(/[^A-Za-z0-9._-]+/gu, "-");
+
+const downloadFilename = (
+  query?: Record<string, any>,
+  result?: unknown,
+  options?: Record<string, string>,
+): string | undefined => {
+  const configured = readPath(result, options?.filenameField)
+    ?? readPath(result, dataPath(options?.filenameField))
+    ?? readPath(query, options?.filenameField);
+  if (configured) {
+    const extension = extensionByFormat(
+      readPath(result, options?.extensionFrom)
+        ?? readPath(result, dataPath(options?.extensionFrom))
+        ?? readPath(query, options?.extensionFrom),
+    );
+    const filename = safeFilenamePart(configured);
+    return extension && !filename.endsWith(extension) ? `${filename}${extension}` : filename;
+  }
+
+  const explicit =
+    query?.filename ??
+    query?.fileName ??
+    query?.originalFileName ??
+    query?.name;
+  if (explicit) {
+    return safeFilenamePart(explicit);
+  }
+
+  const modelName = query?.modelName;
+  if (modelName) {
+    const parts = [
+      safeFilenamePart(modelName),
+      safeFilenamePart(query?.modelVersion ?? query?.version),
+    ].filter(Boolean);
+    return `${parts.join("-")}${extensionByFormat(query?.modelFormat ?? query?.format)}`;
+  }
+
+  return undefined;
 };
 
 export const useCommandNavigation = () => {
@@ -131,6 +230,7 @@ export const useCommandButton = ({
   const invalidate = useInvalidate();
   const { open } = useNotification();
   const { mutateAsync } = useCreate();
+  const { download } = useFileDownload();
   const [submitting, setSubmitting] = React.useState(false);
 
   const commandMeta = resourceItem?.meta?.commands?.[command] as CommandButtonMeta | undefined;
@@ -184,6 +284,16 @@ export const useCommandButton = ({
         dataProviderName: resourceItem.meta?.dataProviderName as string | undefined,
         invalidates: ["list", "many", "detail"],
       });
+      if (commandMeta?.downloadCommand) {
+        const clientEffectOptions = commandMeta.clientEffect?.type === "download"
+          ? commandMeta.clientEffect.options
+          : undefined;
+        await download({
+          uri: resolveDownloadUri(result, query, clientEffectOptions),
+          filename: downloadFilename(query, result, clientEffectOptions),
+        });
+        return result;
+      }
       open?.({
         type: "success",
         message: translate("notifications.success", "Success"),
@@ -203,6 +313,9 @@ export const useCommandButton = ({
   }, [
     command,
     commandMeta?.dataProviderName,
+    commandMeta?.downloadCommand,
+    commandMeta?.clientEffect,
+    download,
     id,
     invalidate,
     label,

@@ -269,14 +269,33 @@ export const <%= command.pageComponent %> = () => {
 <% } -%>
 
 <% if (command.downloadCommand) { -%>
+  const downloadClientEffectOptions = <%- JSON.stringify(command.clientEffect?.options ?? {}) %> as Record<string, string>;
+
+  function readPath(value: unknown, path?: string): unknown {
+    if (!path || !value || typeof value !== "object") return undefined;
+    return path.split(".").reduce<unknown>((current, segment) => {
+      if (!current || typeof current !== "object") return undefined;
+      return (current as Record<string, unknown>)[segment];
+    }, value);
+  }
+
+  function dataPath(path?: string): string | undefined {
+    return path ? `data.${path}` : undefined;
+  }
+
   function resolveDownloadUri(data: unknown) {
+    const configured = readPath(data, downloadClientEffectOptions.uriField)
+      ?? readPath(data, dataPath(downloadClientEffectOptions.uriField))
+      ?? (downloadClientEffectOptions.uriField ? searchParams.get(downloadClientEffectOptions.uriField) : undefined);
+    if (typeof configured === "string" && configured.trim()) return configured;
+
     const resultUri = findDownloadUri(data);
     if (resultUri) return resultUri;
 
     const searchKeys = Array.from(searchParams.keys());
     const uriKey = searchKeys.find((key) => {
       const normalized = key.toLowerCase();
-      return normalized.endsWith("uri") || normalized.endsWith("url");
+      return normalized.endsWith("uri") || normalized.endsWith("url") || normalized.endsWith("location") || normalized.endsWith("path");
     });
     return uriKey ? searchParams.get(uriKey) : undefined;
   }
@@ -289,7 +308,7 @@ export const <%= command.pageComponent %> = () => {
       if (
         typeof item === "string" &&
         item.trim().length > 0 &&
-        (normalized.endsWith("uri") || normalized.endsWith("url"))
+        (normalized.endsWith("uri") || normalized.endsWith("url") || normalized.endsWith("location") || normalized.endsWith("path"))
       ) {
         return item;
       }
@@ -297,7 +316,23 @@ export const <%= command.pageComponent %> = () => {
     return findDownloadUri(record.data);
   }
 
-  function downloadFilename(values: <%= command.inputTypeName %>) {
+  function downloadFilename(values: <%= command.inputTypeName %>, result?: unknown) {
+    const configured = readPath(result, downloadClientEffectOptions.filenameField)
+      ?? readPath(result, dataPath(downloadClientEffectOptions.filenameField))
+      ?? readPath(values, downloadClientEffectOptions.filenameField)
+      ?? (downloadClientEffectOptions.filenameField ? searchParams.get(downloadClientEffectOptions.filenameField) : undefined);
+    if (configured) {
+      const configuredFormat = readPath(result, downloadClientEffectOptions.extensionFrom)
+        ?? readPath(result, dataPath(downloadClientEffectOptions.extensionFrom))
+        ?? readPath(values, downloadClientEffectOptions.extensionFrom)
+        ?? (downloadClientEffectOptions.extensionFrom ? searchParams.get(downloadClientEffectOptions.extensionFrom) : undefined);
+      const configuredName = safeFilenamePart(String(configured));
+      const configuredExtension = extensionByFormat(String(configuredFormat ?? ""));
+      return configuredExtension && !configuredName.endsWith(configuredExtension)
+        ? `${configuredName}${configuredExtension}`
+        : configuredName;
+    }
+
     const format = searchParams.get("modelFormat") ?? searchParams.get("format");
     const extension = extensionByFormat(format);
     const name =
@@ -385,7 +420,7 @@ export const <%= command.pageComponent %> = () => {
 <% if (command.downloadCommand) { -%>
     await download({
       uri: resolveDownloadUri(result),
-      filename: downloadFilename(nextValues),
+      filename: downloadFilename(nextValues, result),
     });
 <% } -%>
     navigate("/<%= resource.route %>");
@@ -411,7 +446,7 @@ export const <%= command.pageComponent %> = () => {
 <% if (command.downloadCommand) { -%>
     await download({
       uri: resolveDownloadUri(data ?? result),
-      filename: downloadFilename(values),
+      filename: downloadFilename(values, data ?? result),
     });
 <% } -%>
     return result;
@@ -428,7 +463,7 @@ export const <%= command.pageComponent %> = () => {
 <% if (command.downloadCommand) { -%>
     await download({
       uri: resolveDownloadUri(result),
-      filename: downloadFilename(values),
+      filename: downloadFilename(values, result),
     });
 <% } -%>
     navigate("/<%= resource.route %>");

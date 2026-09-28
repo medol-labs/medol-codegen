@@ -428,6 +428,10 @@ const RefineGenerator = class extends Generator {
             this.destinationPath('./src/components/refine-ui/fields/copyable-text.tsx')
         );
         this.fs.copy(
+            this.templatePath('root/src/components/download/file-download.tsx'),
+            this.destinationPath('./src/components/download/file-download.tsx')
+        );
+        this.fs.copy(
             this.templatePath('root/src/components/refine-ui/buttons/command.tsx'),
             this.destinationPath('./src/components/refine-ui/buttons/command.tsx')
         );

@@ -67,12 +67,18 @@ test('command button template supports generated interaction modes', () => {
 
     assert.match(commandHook, /CommandInteractionMode/);
     assert.match(commandHook, /useCreate/);
+    assert.match(commandHook, /useFileDownload/);
+    assert.match(commandHook, /findDownloadUri/);
+    assert.match(commandHook, /resolveDownloadUri/);
+    assert.match(commandHook, /filenameField/);
     assert.match(commandHook, /interactionMode/);
     assert.match(commandButton, /interactionMode === "confirm"/);
     assert.match(commandButton, /interactionMode === "direct"/);
     assert.match(commandButton, /PopoverContent/);
     assert.match(resourcesTemplate, /uiPattern/);
+    assert.match(resourcesTemplate, /clientEffect/);
     assert.match(resourcesTemplate, /requiresPage/);
+    assert.match(resourcesTemplate, /downloadCommand/);
 });
 
 test('frontend extension manifest model lists resources, commands, and fields', () => {

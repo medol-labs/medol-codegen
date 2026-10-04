@@ -21,6 +21,10 @@ let config = {};
 let codegenModel = {};
 const GENERATED_MARKER = '// Generated from config.json by the refine generator.';
 
+function logGenerationWarnings(generator, warnings = []) {
+    [...new Set(warnings)].forEach((warning) => generator.log(`Warning: ${warning}`));
+}
+
 function toDisplayName(value) {
     const normalized = `${value ?? ''}`
         .replace(/[_-]+/g, ' ')
@@ -177,6 +181,7 @@ const RefineGenerator = class extends Generator {
         if (this.answers.generatorType === 'Skeleton') {
             this._writeSkeleton(frontendApp);
             const model = buildFrontendModel(codegenModel, undefined, { frontendApp });
+            logGenerationWarnings(this, model.generationWarnings);
             this._writeDomainModel(buildDomainModel(model.frontendSource));
             this._writeI18n(model.i18n);
             this._writeExtensionManifest(model);
@@ -187,6 +192,7 @@ const RefineGenerator = class extends Generator {
             ? undefined
             : normalizeSelectedCommands(this.answers.commands);
         const model = buildFrontendModel(codegenModel, selectedCommandKeys, { frontendApp });
+        logGenerationWarnings(this, model.generationWarnings);
         this._writeFrameworkComponents();
         this._writeDomainModel(buildDomainModel(model.frontendSource));
         this._writeI18n(model.i18n);

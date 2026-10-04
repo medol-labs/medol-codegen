@@ -35,6 +35,8 @@ function buildWorkflowModel(
     transitions = [],
     backendModuleForSlice = (slice) => backendModuleForContext(slice.context ?? slice.chapter, backendModules)
 ) {
+    const warnings = [];
+    const seenWarnings = new Set();
     const selectableReadModels = new Map();
     const selectableReadModelsByFieldSource = new Map();
     let dictionaryProviderSelect = null;
@@ -110,16 +112,28 @@ function buildWorkflowModel(
 
             const deployment = backendModuleForSlice(slice);
             const optionLabel = optionLabelField(readModel);
+            const eligibility = eligibilityForReadModel(readModel);
+            const fields = normalizeFields(readModel.fields);
             const baseSelectModel = {
                 resource: snake(cleanTitle(readModel.title)),
                 dataProviderName: deployment.dataProviderName,
                 optionLabel,
+                ...(eligibility.length ? {eligibility} : {}),
                 meta: {
                     idField: id,
                     label: cleanTitle(readModel.title),
                     aggregateRoute: axonRoute(aggregate.title),
                     queryRoute: axonRoute(readModel.title),
-                    queryFields: queryFieldsForReadModel(readModel)
+                    queryFields: queryFieldsForReadModel(readModel),
+                    fields: fields.map((field) => field.name).filter(Boolean),
+                    fieldDefinitions: fields
+                        .filter((field) => field?.name)
+                        .map((field) => ({
+                            name: field.name,
+                            type: field.type,
+                            options: field.options,
+                            enumOptions: field.enumOptions
+                        }))
                 }
             };
             const selectModel = {
@@ -130,7 +144,7 @@ function buildWorkflowModel(
             readModelFieldSourceKeys(readModel, id).forEach((key) => {
                 selectableReadModelsByFieldSource.set(key, selectModel);
             });
-            normalizeFields(readModel.fields)
+            fields
                 .filter((field) => !isJsonField(field))
                 .forEach((field) => {
                     const fieldSelectModel = {
@@ -211,6 +225,14 @@ function buildWorkflowModel(
     });
 
     return {
+        warnings,
+        reportEligibilityWarning(message) {
+            if (!message || seenWarnings.has(message)) {
+                return;
+            }
+            seenWarnings.add(message);
+            warnings.push(message);
+        },
         selectableReadModels,
         commandsForReadModel(readModel) {
             return uniqueElements([
@@ -265,7 +287,7 @@ function buildWorkflowModel(
                 filters.push({
                     field: dictionaryProviderSelect.stateField,
                     operator: 'eq',
-                    value: 'ACTIVE'
+                    value: activeDictionaryStateValue(dictionaryProviderSelect)
                 });
             } else if (dictionaryProviderSelect.activeField) {
                 filters.push({
@@ -297,6 +319,19 @@ function buildWorkflowModel(
             };
         }
     };
+}
+
+function activeDictionaryStateValue(dictionaryProviderSelect) {
+    const stateField = dictionaryProviderSelect?.meta?.fieldDefinitions
+        ?.find((field) => field.name === dictionaryProviderSelect.stateField);
+    const values = normalizeArray(stateField?.enumOptions)
+        .map((option) => option.value ?? option.name ?? option.label)
+        .filter(Boolean)
+        .map(String);
+    const preferred = ['Active', 'Enabled', 'Available']
+        .map((candidate) => values.find((value) => value.toLowerCase() === candidate.toLowerCase()))
+        .find(Boolean);
+    return preferred ?? 'Active';
 }
 
 function preferredReadModelForCommand(
@@ -624,7 +659,12 @@ function commandWorkflowFields(command, readModel, allEvents, workflow) {
                 prefill.add(field.name);
             }
 
-            const select = workflow.selectForField(field) ?? workflow.selectableReadModels.get(field.name);
+            const select = eligibilitySelectForCommand(
+                workflow.selectForField(field) ?? workflow.selectableReadModels.get(field.name),
+                command,
+                workflow.commandSliceFor(command),
+                workflow
+            );
             if (select && !field.idAttribute && (hasExplicitReadModelSource(field) || isReferenceSelectField(field))) {
                 selects.set(field.name, select);
             }
@@ -636,6 +676,184 @@ function commandWorkflowFields(command, readModel, allEvents, workflow) {
         });
 
     return { prefill, selects };
+}
+
+function eligibilityForReadModel(readModel) {
+    return normalizeArray(readModel?.eligibility)
+        .filter((eligibility) => normalizeArray(eligibility?.conditions).length > 0)
+        .map((eligibility) => ({
+            ...(eligibility.profile ? {profile: String(eligibility.profile)} : {}),
+            operator: eligibility.operator ?? 'AND',
+            conditions: normalizeArray(eligibility.conditions)
+                .filter((condition) => condition?.left && condition?.operator)
+                .map((condition) => ({
+                    left: String(condition.left),
+                    operator: condition.operator,
+                    value: condition.right
+                }))
+        }))
+        .filter((eligibility) => eligibility.conditions.length > 0);
+}
+
+function eligibilitySelectForCommand(select, command, slice, workflow) {
+    if (!select?.eligibility?.length) {
+        return select;
+    }
+
+    const eligibility = eligibilityForCommand(select.eligibility, command, slice);
+    const {filters, unmappedConditions} = eligibilityFiltersForSelect(eligibility, select);
+    if (unmappedConditions.length > 0) {
+        workflow?.reportEligibilityWarning?.(
+            `Projection eligibility for ${select.meta?.label ?? select.resource}${eligibility?.profile ? ` profile ${eligibility.profile}` : ''} cannot be generated for command ${cleanTitle(command?.title ?? command?.name)} selector: unmapped condition(s) ${unmappedConditions.map(eligibilityConditionText).join(', ')}. Materialize these fields on the projection or enforce the rule in command policy.`
+        );
+    }
+    if (filters.length === 0) {
+        return select;
+    }
+
+    return {
+        ...select,
+        filters: uniqueCrudFilters([
+            ...(select.filters ?? []),
+            ...filters
+        ]),
+        meta: {
+            ...select.meta,
+            queryFields: unique([
+                ...(select.meta?.queryFields ?? []),
+                ...filters.map((filter) => filter.field)
+            ])
+        }
+    };
+}
+
+function eligibilityForCommand(eligibilities, command, slice) {
+    const profileKeys = commandEligibilityProfileKeys(command, slice);
+    return eligibilities.find((eligibility) =>
+        eligibility.profile && profileKeys.has(normalizeEligibilityKey(eligibility.profile))
+    ) ?? eligibilities.find((eligibility) => !eligibility.profile) ?? null;
+}
+
+function commandEligibilityProfileKeys(command, slice) {
+    return new Set([
+        command?.id,
+        command?.name,
+        command?.title,
+        cleanTitle(command?.title),
+        slice?.id,
+        slice?.name,
+        slice?.title,
+        cleanTitle(slice?.title)
+    ].filter(Boolean).map(normalizeEligibilityKey));
+}
+
+function normalizeEligibilityKey(value) {
+    return cleanTitle(String(value)).replace(/[^a-zA-Z0-9]+/g, '').toLowerCase();
+}
+
+function eligibilityFiltersForSelect(eligibility, select) {
+    if (!eligibility) {
+        return {filters: [], unmappedConditions: []};
+    }
+
+    const conditions = normalizeArray(eligibility.conditions);
+    if (conditions.length === 0) {
+        return {filters: [], unmappedConditions: []};
+    }
+
+    const selectableFields = new Set([
+        ...(select.meta?.fields ?? []),
+        select.meta?.idField,
+        select.optionLabel,
+        select.optionValue
+    ].filter(Boolean));
+    const fieldDefinitionsByName = new Map(normalizeArray(select.meta?.fieldDefinitions)
+        .filter((field) => field?.name)
+        .map((field) => [field.name, field]));
+
+    const filters = conditions
+        .map((condition) => eligibilityConditionToFilter(condition, selectableFields, fieldDefinitionsByName, select));
+    const unmappedConditions = conditions.filter((condition, index) => !filters[index]);
+    return filters.every(Boolean)
+        ? {filters, unmappedConditions: []}
+        : {filters: [], unmappedConditions};
+}
+
+function eligibilityConditionToFilter(condition, selectableFields, fieldDefinitionsByName, select) {
+    const field = eligibilityConditionField(condition?.left, selectableFields, select);
+    const operator = eligibilityConditionOperator(condition?.operator);
+    if (!field || !operator) {
+        return null;
+    }
+    return {
+        field,
+        operator,
+        value: eligibilityConditionValue(condition.value, fieldDefinitionsByName.get(field))
+    };
+}
+
+function eligibilityConditionValue(value, field) {
+    if (typeof value !== 'string') {
+        return value;
+    }
+    return value;
+}
+
+function eligibilityConditionField(left, selectableFields, select) {
+    const parts = String(left ?? '').split('.').filter(Boolean);
+    if (parts.length > 1 && !eligibilityOwnerMatchesSelect(parts[0], select)) {
+        return selectableFields.has(String(left ?? '')) ? String(left ?? '') : null;
+    }
+    const candidates = unique([
+        String(left ?? ''),
+        parts.at(-1)
+    ].filter(Boolean));
+    return candidates.find((candidate) => selectableFields.has(candidate)) ?? null;
+}
+
+function eligibilityOwnerMatchesSelect(owner, select) {
+    const ownerKey = normalizeEligibilityKey(owner);
+    const selectKeys = [
+        select?.resource,
+        select?.meta?.label,
+        select?.meta?.queryRoute,
+        select?.meta?.aggregateRoute
+    ].filter(Boolean).map(normalizeEligibilityKey);
+    return selectKeys.some((key) =>
+        key === ownerKey
+        || key.startsWith(ownerKey)
+        || key.endsWith(ownerKey)
+        || ownerKey.startsWith(key)
+        || ownerKey.endsWith(key)
+    );
+}
+
+function eligibilityConditionOperator(operator) {
+    switch (operator) {
+        case '==': return 'eq';
+        case '!=': return 'ne';
+        case '>': return 'gt';
+        case '>=': return 'gte';
+        case '<': return 'lt';
+        case '<=': return 'lte';
+        default: return null;
+    }
+}
+
+function uniqueCrudFilters(filters) {
+    const seen = new Set();
+    return filters.filter((filter) => {
+        const key = JSON.stringify([filter.field, filter.operator, filter.value]);
+        if (seen.has(key)) {
+            return false;
+        }
+        seen.add(key);
+        return true;
+    });
+}
+
+function eligibilityConditionText(condition) {
+    return `${condition?.left ?? '?'} ${condition?.operator ?? '?'} ${JSON.stringify(condition?.value)}`;
 }
 
 function hasExplicitReadModelSource(field) {

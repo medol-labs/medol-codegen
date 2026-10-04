@@ -5,8 +5,10 @@ const path = require("path");
 const { pathToFileURL } = require("url");
 
 const DEFAULT_NAMESPACE = "event-modeling:app";
+const localGeneratorRoot = path.join(__dirname, ".generator");
 const generatorRoot = path.resolve(
-  process.env.CODEGEN_GENERATOR_ROOT || "/opt/codegen/.generator",
+  process.env.CODEGEN_GENERATOR_ROOT
+    || (fs.existsSync(localGeneratorRoot) ? localGeneratorRoot : "/opt/codegen/.generator"),
 );
 
 function camelCaseFlag(flag) {

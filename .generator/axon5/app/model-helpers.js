@@ -284,9 +284,13 @@ function eventTagFieldsFor(slice, event, selection, includeMissing = false) {
 
 function injectEntityExpression(selection) {
     if ((selection.fields ?? []).length === 1) {
-        return `(idProperty = "${escapeKotlin(selection.fields[0].alias)}")`;
+        return `(idProperty = "${escapeKotlin(selectionEntityIdProperty(selection.fields[0]))}")`;
     }
     return '(idProperty = "selection")';
+}
+
+function selectionEntityIdProperty(field) {
+    return field?.derived ? `${field.alias}EntityId` : field.alias;
 }
 
 function uniqueTags(tags) {
@@ -487,6 +491,10 @@ function conceptStateEnumName(conceptName) {
     return `${pascal(conceptName)}StateEnum`;
 }
 
+function stateEnumEntry(state) {
+    return pascal(state);
+}
+
 function conceptHasState(model, context, conceptName, stateName) {
     const concept = (model.concepts ?? []).find((candidate) =>
         candidate.name === conceptName && (!context || candidate.context === context)
@@ -511,7 +519,7 @@ function renderStateGuard(model, transition) {
     }
     const stateType = conceptStateEnumName(transition.owner.name);
     return [
-        `        require(state.currentState == ${stateType}.${constant(transition.from)}) {`,
+        `        require(state.currentState == ${stateType}.${stateEnumEntry(transition.from)}) {`,
         `            "${escapeKotlin(transition.command?.name ?? 'Command')} requires ${escapeKotlin(transition.owner.name)} to be ${escapeKotlin(transition.from)}."`,
         '        }'
     ].join('\n');
@@ -927,6 +935,7 @@ module.exports = {
     eventFieldsWithTags,
     eventTagFieldsFor,
     injectEntityExpression,
+    selectionEntityIdProperty,
     uniqueTags,
     commandIdFields,
     fallbackTags,
@@ -946,6 +955,7 @@ module.exports = {
     transitionForCommand,
     commandStartsLifecycle,
     conceptStateEnumName,
+    stateEnumEntry,
     conceptHasState,
     transitionUsesConceptState,
     renderStateGuard,

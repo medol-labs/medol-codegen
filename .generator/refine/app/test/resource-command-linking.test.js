@@ -3,6 +3,7 @@ const test = require('node:test');
 
 const {buildDomainModel} = require('../domain-model');
 const {buildFrontendModel} = require('../model-builder');
+const {buildWorkflowModel, commandWorkflowFields} = require('../workflow-model');
 
 test('links producer create commands to catalog read models across aggregate routes', () => {
     const model = {
@@ -1243,6 +1244,149 @@ test('uses sync read models as local selectors for shadow-side commands', () => 
     assert.deepEqual(command?.snapshotFields.map((field) => field.name), ['organizationName', 'featureSchemaVersion']);
 });
 
+test('applies projection eligibility filters to command resource selectors', () => {
+    const trainingCommand = {
+        id: 'command-training-selection',
+        title: 'Training Selection',
+        fields: [
+            {name: 'datasetId', type: 'UUID', source: {kind: 'direct', from: ['DatasetCatalog.datasetId']}}
+        ]
+    };
+    const evaluationCommand = {
+        id: 'command-evaluation-selection',
+        title: 'Evaluation Selection',
+        fields: [
+            {name: 'datasetId', type: 'UUID', source: {kind: 'direct', from: ['DatasetCatalog.datasetId']}}
+        ]
+    };
+    const slices = [{
+        id: 'slice-training-selection',
+        context: 'Training',
+        chapter: 'Training',
+        title: 'Training Selection',
+        commands: [trainingCommand],
+        events: [],
+        readmodels: []
+    }, {
+        id: 'slice-evaluation-selection',
+        context: 'Training',
+        chapter: 'Training',
+        title: 'Evaluation Selection',
+        commands: [evaluationCommand],
+        events: [],
+        readmodels: []
+    }, {
+        id: 'slice-dataset-catalog',
+        context: 'Training',
+        chapter: 'Training',
+        title: 'Dataset Catalog',
+        commands: [],
+        events: [],
+        readmodels: [{
+            id: 'readmodel-dataset-catalog',
+            title: 'Dataset Catalog',
+            listElement: true,
+            fields: [
+                {name: 'datasetId', type: 'UUID', idAttribute: true},
+                {name: 'datasetName', type: 'String', display: true},
+                {name: 'status', type: 'Dataset.State', query: true},
+                {name: 'score', type: 'Int', query: true}
+            ],
+            eligibility: [{
+                operator: 'AND',
+                conditions: [
+                    {left: 'Dataset.status', operator: '==', right: 'Approved'},
+                    {left: 'Runtime.status', operator: '==', right: 'Online'}
+                ]
+            }, {
+                profile: 'EvaluationSelection',
+                operator: 'AND',
+                conditions: [
+                    {left: 'Dataset.score', operator: '>=', right: 5}
+                ]
+            }]
+        }]
+    }];
+    const workflow = buildWorkflowModel(
+        slices,
+        [],
+        [{name: 'Training', title: 'Training'}],
+        null,
+        [{dataProviderName: 'command', contexts: new Set(['Training'])}]
+    );
+
+    const trainingFields = commandWorkflowFields(trainingCommand, null, [], workflow);
+    const evaluationFields = commandWorkflowFields(evaluationCommand, null, [], workflow);
+
+    assert.equal(trainingFields.selects.get('datasetId')?.filters, undefined);
+    assert.deepEqual(evaluationFields.selects.get('datasetId')?.filters, [{
+        field: 'score',
+        operator: 'gte',
+        value: 5
+    }]);
+    assert.deepEqual(evaluationFields.selects.get('datasetId')?.meta.queryFields, ['status', 'score']);
+    assert.equal(workflow.warnings.length, 1);
+    assert.match(workflow.warnings[0], /Runtime\.status == "Online"/);
+    assert.match(workflow.warnings[0], /Materialize these fields on the projection/);
+});
+
+test('keeps projection state eligibility values aligned with modeled state values', () => {
+    const command = {
+        id: 'command-define-training',
+        title: 'Define Training',
+        fields: [
+            {name: 'federationId', type: 'UUID', source: {kind: 'direct', from: ['FederationOverview.federationId']}}
+        ]
+    };
+    const slices = [{
+        id: 'slice-define-training',
+        context: 'Training',
+        chapter: 'Training',
+        title: 'Define Training',
+        commands: [command],
+        events: [],
+        readmodels: []
+    }, {
+        id: 'slice-federation-overview',
+        context: 'Training',
+        chapter: 'Training',
+        title: 'Federation Overview',
+        commands: [],
+        events: [],
+        readmodels: [{
+            id: 'readmodel-federation-overview',
+            title: 'Federation Overview',
+            listElement: true,
+            fields: [
+                {name: 'federationId', type: 'UUID', idAttribute: true},
+                {name: 'federationName', type: 'String', display: true},
+                {name: 'state', type: 'Federation.State', query: true}
+            ],
+            eligibility: [{
+                operator: 'AND',
+                conditions: [
+                    {left: 'Federation.state', operator: '==', right: 'Active'}
+                ]
+            }]
+        }]
+    }];
+    const workflow = buildWorkflowModel(
+        slices,
+        [],
+        [{name: 'Training', title: 'Training'}],
+        null,
+        [{dataProviderName: 'command', contexts: new Set(['Training'])}]
+    );
+
+    const fields = commandWorkflowFields(command, null, [], workflow);
+
+    assert.deepEqual(fields.selects.get('federationId')?.filters, [{
+        field: 'state',
+        operator: 'eq',
+        value: 'Active'
+    }]);
+});
+
 test('prefers command owner catalog over relation projection catalog for row actions', () => {
     const model = {
         domain: 'Demo',
@@ -1365,4 +1509,62 @@ test('prefers command owner catalog over relation projection catalog for row act
     assert.equal(command?.title, 'Link Role To Account');
     assert.deepEqual(accountRoleCatalog?.itemCommands.map((item) => item.name), []);
     assert.equal(command?.fields.find((field) => field.name === 'roleCodes')?.select?.resource, 'role_catalog');
+});
+
+test('keeps dictionary state filters aligned with modeled state values', () => {
+    const command = {
+        id: 'command-register-model',
+        title: 'Register Model',
+        fields: [
+            {name: 'modelId', type: 'UUID', idAttribute: true, technicalAttribute: true},
+            {name: 'modelFormat', type: 'String', dictionary: 'MODEL_FORMAT'}
+        ]
+    };
+    const workflow = buildWorkflowModel(
+        [{
+            id: 'slice-register-model',
+            context: 'ModelRepository',
+            chapter: 'Model Repository',
+            title: 'Register Model',
+            commands: [command],
+            events: [],
+            readmodels: []
+        }, {
+            id: 'slice-dictionary-values',
+            context: 'ModelRepository',
+            chapter: 'Model Repository',
+            title: 'Dictionary Values',
+            commands: [],
+            events: [],
+            readmodels: [{
+                id: 'readmodel-dictionary-value-catalog',
+                title: 'Dictionary Value Catalog',
+                listElement: true,
+                dictionaryProvider: {
+                    code: 'dictionaryCode',
+                    value: 'value',
+                    label: 'label',
+                    state: 'state'
+                },
+                fields: [
+                    {name: 'dictionaryValueId', type: 'UUID', idAttribute: true},
+                    {name: 'dictionaryCode', type: 'String'},
+                    {name: 'value', type: 'String'},
+                    {name: 'label', type: 'String', display: true},
+                    {name: 'state', type: 'DictionaryValue.State', enumOptions: ['Draft', 'Active', 'Disabled']}
+                ]
+            }]
+        }],
+        [],
+        [{name: 'ModelRepository', title: 'Model Repository'}],
+        null,
+        [{dataProviderName: 'command', contexts: new Set(['ModelRepository'])}]
+    );
+
+    const fields = commandWorkflowFields(command, null, [], workflow);
+
+    assert.deepEqual(fields.selects.get('modelFormat')?.filters, [
+        {field: 'dictionaryCode', operator: 'eq', value: 'MODEL_FORMAT'},
+        {field: 'state', operator: 'eq', value: 'Active'}
+    ]);
 });

@@ -19,6 +19,7 @@ const {
     eventFieldsWithTags,
     eventTagFieldsFor,
     injectEntityExpression,
+    selectionEntityIdProperty,
     uniqueTags,
     commandIdFields,
     fallbackTags,
@@ -38,6 +39,7 @@ const {
     transitionForCommand,
     commandStartsLifecycle,
     conceptStateEnumName,
+    stateEnumEntry,
     conceptHasState,
     transitionUsesConceptState,
     renderStateGuard,
@@ -95,6 +97,10 @@ function lowerCamel(value) {
     return safeIdentifier(name.charAt(0).toLowerCase() + name.slice(1));
 }
 
+function cleanTitle(value) {
+    return String(value ?? '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 function permissionCode(name) {
     return kebab(name)
         .replace(/-/g, '_')
@@ -108,6 +114,202 @@ function uploadFileFields(command) {
 
 function hasUploadFile(command) {
     return uploadFileFields(command).length > 0;
+}
+
+function normalizeArray(value) {
+    if (!value) return [];
+    return Array.isArray(value) ? value : [value];
+}
+
+function reportGenerationWarning(target, message) {
+    if (!target || !message) return;
+    const warnings = target.generationWarnings ?? [];
+    if (!warnings.includes(message)) {
+        warnings.push(message);
+        target.generationWarnings = warnings;
+        target.log?.(`Warning: ${message}`);
+    }
+}
+
+function eligibilityGuardsForCommand(model, command, slice, warningsTarget) {
+    const readModels = (model.slices ?? [])
+        .flatMap((candidateSlice) => (candidateSlice.readmodels ?? []).map((readmodel) => ({
+            readmodel,
+            slice: candidateSlice,
+            context: candidateSlice.context ?? candidateSlice.chapter
+        })));
+    return (command.fields ?? [])
+        .filter((field) => field?.source?.kind === 'direct')
+        .flatMap((field) => normalizeArray(field?.source?.from).map((source) => ({field, source: String(source)})))
+        .map(({field, source}) => eligibilityGuardForField(model, command, slice, field, source, readModels, warningsTarget))
+        .filter(Boolean);
+}
+
+function eligibilityGuardForField(model, command, slice, field, source, readModels, warningsTarget) {
+    const [sourceOwner, sourceField] = source.split('.').filter(Boolean);
+    if (!sourceOwner || !sourceField) return null;
+    const info = readModels.find(({readmodel}) =>
+        readModelMatchesSource(readmodel, sourceOwner)
+        && (readmodel.fields ?? []).some((candidate) => candidate.name === sourceField)
+    );
+    if (!info) return null;
+    const eligibility = eligibilityForCommand(info.readmodel.eligibility, command, slice);
+    if (!eligibility) return null;
+    const fieldByName = new Map((info.readmodel.fields ?? []).map((candidate) => [candidate.name, candidate]));
+    const eligibilityConditions = normalizeArray(eligibility.conditions);
+    const conditions = eligibilityConditions
+        .map((condition) => eligibilityConditionForReadModel(condition, info.readmodel, fieldByName, model.rootPackage));
+    if (conditions.length === 0 || !conditions.every(Boolean)) {
+        const unmappedConditions = eligibilityConditions.filter((condition, index) => !conditions[index]);
+        reportGenerationWarning(
+            warningsTarget,
+            `Projection eligibility for ${cleanTitle(info.readmodel.title)}${eligibility.profile ? ` profile ${cleanTitle(eligibility.profile)}` : ''} cannot be generated as backend guard for command ${cleanTitle(command?.title ?? command?.name)} field ${field.name}: unmapped condition(s) ${unmappedConditions.map(eligibilityConditionText).join(', ')}. Materialize these fields on the projection or enforce the rule in command policy.`
+        );
+        return null;
+    }
+    const readModelName = _readmodelTitle(info.readmodel.title);
+    const repositoryName = `${readModelName}Repository`;
+    const repositoryVariable = lowerCamel(repositoryName);
+    const projectionVariable = `${lowerCamel(readModelName)}Selection`;
+    const packageName = `${model.rootPackage}.${contextPackage(info.context)}.${_sliceTitle(info.slice.title)}`;
+    return {
+        field,
+        readmodel: info.readmodel,
+        repositoryName,
+        repositoryVariable,
+        repositoryImport: `import ${packageName}.${repositoryName}`,
+        typeImports: uniqueImportLines([
+            kotlinFieldImports(conditions.map((condition) => condition.field), model.rootPackage),
+            ...conditions.map((condition) => eligibilityConditionTypeImport(model, info.context, condition.field))
+        ].filter(Boolean).join('\n')),
+        projectionVariable,
+        conditions,
+        profile: eligibility.profile,
+        message: `${cleanTitle(info.readmodel.title)} selection is not eligible${eligibility.profile ? ` for ${cleanTitle(eligibility.profile)}` : ''}.`
+    };
+}
+
+function uniqueImportLines(value) {
+    return uniqueBy(String(value ?? '')
+        .split('\n')
+        .map((line) => line.trim().replace(/;$/, ''))
+        .filter(Boolean), (line) => line)
+        .join('\n');
+}
+
+function eligibilityConditionTypeImport(model, context, field) {
+    if (field.type?.endsWith('.State')) {
+        const concept = field.type.split('.')[0];
+        return `import ${model.rootPackage}.${contextPackage(context)}.domain.states.${conceptStateEnumName(concept)}`;
+    }
+    return '';
+}
+
+function readModelMatchesSource(readmodel, sourceOwner) {
+    const sourceKey = normalizeEligibilityKey(sourceOwner);
+    return [
+        readmodel.id,
+        readmodel.name,
+        readmodel.title,
+        cleanTitle(readmodel.title)
+    ].filter(Boolean).map(normalizeEligibilityKey)
+        .some((key) =>
+            key === sourceKey
+            || key.startsWith(sourceKey)
+            || key.endsWith(sourceKey)
+            || sourceKey.startsWith(key)
+            || sourceKey.endsWith(key)
+        );
+}
+
+function eligibilityForCommand(eligibilities, command, slice) {
+    const normalized = normalizeArray(eligibilities);
+    if (normalized.length === 0) return null;
+    const keys = commandEligibilityProfileKeys(command, slice);
+    return normalized.find((eligibility) =>
+        eligibility.profile && keys.has(normalizeEligibilityKey(eligibility.profile))
+    ) ?? normalized.find((eligibility) => !eligibility.profile) ?? null;
+}
+
+function commandEligibilityProfileKeys(command, slice) {
+    return new Set([
+        command?.id,
+        command?.name,
+        command?.title,
+        cleanTitle(command?.title),
+        slice?.id,
+        slice?.name,
+        slice?.title,
+        cleanTitle(slice?.title)
+    ].filter(Boolean).map(normalizeEligibilityKey));
+}
+
+function normalizeEligibilityKey(value) {
+    return cleanTitle(String(value ?? '')).replace(/[^a-zA-Z0-9]+/g, '').toLowerCase();
+}
+
+function eligibilityConditionForReadModel(condition, readmodel, fieldByName, rootPackage) {
+    const field = eligibilityConditionField(condition?.left, readmodel, fieldByName);
+    const operator = eligibilityConditionOperator(condition?.operator);
+    if (!field || !operator) return null;
+    return {
+        field,
+        expression: `${field.name} ${operator} ${eligibilityConditionValue(condition?.right, field, rootPackage)}`
+    };
+}
+
+function eligibilityConditionField(left, readmodel, fieldByName) {
+    const parts = String(left ?? '').split('.').filter(Boolean);
+    if (parts.length > 1 && !readModelMatchesSource(readmodel, parts[0])) {
+        return fieldByName.get(String(left ?? '')) ?? null;
+    }
+    const candidates = [
+        String(left ?? ''),
+        parts.at(-1)
+    ].filter(Boolean);
+    return candidates.map((candidate) => fieldByName.get(candidate)).find(Boolean) ?? null;
+}
+
+function eligibilityConditionOperator(operator) {
+    switch (operator) {
+        case '==': return '==';
+        case '!=': return '!=';
+        case '>': return '>';
+        case '>=': return '>=';
+        case '<': return '<';
+        case '<=': return '<=';
+        default: return null;
+    }
+}
+
+function eligibilityConditionValue(value, field) {
+    if (value === null) return 'null';
+    if (typeof value === 'number' || typeof value === 'boolean') return literal(value, field.type);
+    if (field.type === 'String' || !field.type) return literal(value, 'String');
+    if (field.type.endsWith('.State')) {
+        return `${conceptStateEnumName(field.type.split('.')[0])}.${stateEnumEntry(value)}`;
+    }
+    return `${pascal(field.type)}.${constant(value)}`;
+}
+
+function eligibilityConditionText(condition) {
+    return `${condition?.left ?? '?'} ${condition?.operator ?? '?'} ${JSON.stringify(condition?.right)}`;
+}
+
+function renderEligibilityGuard(guard) {
+    const checks = guard.conditions
+        .map((condition) => `${guard.projectionVariable}.${condition.expression}`)
+        .join(' && ');
+    const lookup = guard.field.optional
+        ? `command.${guard.field.name}?.let { ${guard.repositoryVariable}.findById(it) }`
+        : `${guard.repositoryVariable}.findById(command.${guard.field.name})`;
+    const requireExpression = guard.field.optional
+        ? `command.${guard.field.name} == null || (${guard.projectionVariable} != null && ${checks})`
+        : `${guard.projectionVariable} != null && ${checks}`;
+    return `        val ${guard.projectionVariable} = ${lookup}
+        require(${requireExpression}) {
+            "${escapeKotlin(guard.message)}"
+        }`;
 }
 
 function uploadMetadataExpression(field, storedVariable) {
@@ -146,6 +348,10 @@ const commandWriterMethods = {
             return `    val ${field.name}: ${mappedType(field, field.optional)}${defaultValue}`;
         }).join(',\n');
         const selectionArgs = selection.fields.map((field) => `${field.alias} = ${field.commandExpression}`).join(', ');
+        const selectionEntityIds = selection.fields
+            .filter((field) => field.derived)
+            .map((field) => `    val ${selectionEntityIdProperty(field)}: String = ${field.commandExpression}`)
+            .join('\n');
         const reservationSelections = commandReservations.map((reservation) =>
             `    val ${reservation.selectionProperty}: ${reservation.selectionName} = ${reservation.selectionName}(${reservation.selectionArgs.join(', ')})`
         ).join('\n');
@@ -161,6 +367,7 @@ ${properties}
 ) {
     @TargetEntityId
     val selection: ${selection.name} = ${selection.name}(${selectionArgs})
+${selectionEntityIds ? `\n${selectionEntityIds}` : ''}
 ${reservationSelections ? `\n${reservationSelections}` : ''}
 }
 `);
@@ -178,6 +385,8 @@ ${reservationSelections ? `\n${reservationSelections}` : ''}
             const capability = port?.capability;
             const inputFields = port?.inputFields ?? [];
             const returnsPortResult = commandResultFields(command).length > 0 && usePort;
+            const eligibilityGuards = eligibilityGuardsForCommand(this.model, command, slice, this);
+            const eligibilityStatements = eligibilityGuards.map(renderEligibilityGuard).join('\n');
             const commandReservations = commandStartsLifecycle(command) ? reservations : [];
             const relatedState = relatedStateForCommand(this.model, slice, command, events);
             const includeState = !commandStartsLifecycle(command) || Boolean(relatedState);
@@ -224,6 +433,7 @@ ${port?.failureEvent ? '        val now = java.time.LocalDateTime.now()\n' : ''}
     fun handle(
 ${methodParameters}
     )${returnType} {
+${eligibilityStatements ? `${eligibilityStatements}\n` : ''}\
 ${portStatements}\
 ${bodyEnd}
     }`;
@@ -239,6 +449,13 @@ ${bodyEnd}
         const portConstructorParams = ports.map((port) =>
             `,\n    private val ${lowerCamel(port.capability.portName)}: ${port.capability.portName}`
         ).join('');
+        const eligibilityGuards = slice.commands.flatMap((command) => eligibilityGuardsForCommand(this.model, command, slice, this));
+        const eligibilityRepositories = uniqueBy(eligibilityGuards, (guard) => guard.repositoryVariable);
+        const eligibilityConstructorParams = eligibilityRepositories.map((guard) =>
+            `,\n    private val ${guard.repositoryVariable}: ${guard.repositoryName}`
+        ).join('');
+        const eligibilityRepositoryImports = uniqueBy(eligibilityRepositories.map((guard) => guard.repositoryImport), (value) => value).join('\n');
+        const eligibilityTypeImports = uniqueImportLines(eligibilityGuards.map((guard) => guard.typeImports).filter(Boolean).join('\n'));
         const stateImports = uniqueBy(slice.commands
             .map((command) => relatedStateForCommand(this.model, slice, command, events)?.stateTarget
                 ?? (!commandStartsLifecycle(command) ? stateTarget : undefined))
@@ -269,13 +486,15 @@ ${injectEntityImport}\
 import org.springframework.stereotype.Component
 ${commandImports}
 ${portImports}
+${eligibilityRepositoryImports}
+${eligibilityTypeImports}
 ${stateImports}
 ${stateEnumImports}
 ${reservationStateImports}
 
 @Component
 class ${pascal(slice.name)}CommandHandler(
-    private val decision: ${decisionName}${portConstructorParams}
+    private val decision: ${decisionName}${portConstructorParams}${eligibilityConstructorParams}
 ) {
 ${handlers}
 }

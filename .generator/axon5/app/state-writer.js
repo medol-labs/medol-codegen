@@ -38,6 +38,7 @@ const {
     transitionForCommand,
     commandStartsLifecycle,
     conceptStateEnumName,
+    stateEnumEntry,
     conceptHasState,
     transitionUsesConceptState,
     renderStateGuard,
@@ -278,8 +279,8 @@ ${properties}
                     ?? [])
                 : undefined;
             const assignments = [
-                ...(concept && stateTransition && stateTransition.from !== stateTransition.to && !transition && conceptHasState(this.model, slice.context, concept, stateTransition.to) ? [`        currentState = ${stateEnumName}.${constant(stateTransition.to)}`] : []),
-                ...(concept && inferredState && !transition ? [`        currentState = ${stateEnumName}.${constant(inferredState)}`] : []),
+                ...(concept && stateTransition && stateTransition.from !== stateTransition.to && !transition && conceptHasState(this.model, slice.context, concept, stateTransition.to) ? [`        currentState = ${stateEnumName}.${stateEnumEntry(stateTransition.to)}`] : []),
+                ...(concept && inferredState && !transition ? [`        currentState = ${stateEnumName}.${stateEnumEntry(inferredState)}`] : []),
                 ...event.fields
                     .filter((field) => !(transition?.keyField && field.name === transition.keyField))
                     .map((field) => `        ${field.name} = event.${field.name}`),

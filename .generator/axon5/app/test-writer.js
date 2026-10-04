@@ -21,7 +21,8 @@ const {
     eventFieldsWithTags,
     eventTagFieldsFor,
     primaryConcept,
-    relatedEventsForSlice
+    relatedEventsForSlice,
+    stateEnumEntry
 } = require('./model-helpers');
 const {infrastructurePortForCommand, resultFieldsForEvent} = require('./infrastructure-port-writer');
 const {_commandTitle, _eventTitle} = require('../../common/util/naming');
@@ -124,7 +125,7 @@ function testValue(field) {
     }
     const stateMatch = String(field.type ?? '').match(/^(.+)\.State$/);
     if (stateMatch && field.example !== undefined && field.example !== '') {
-        return `${pascal(stateMatch[1])}StateEnum.${constant(field.example)}`;
+        return `${pascal(stateMatch[1])}StateEnum.${stateEnumEntry(field.example)}`;
     }
     if (field.optional) return 'null';
     const valueType = valueTypeForField(field);

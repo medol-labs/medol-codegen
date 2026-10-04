@@ -48,6 +48,7 @@ function buildFrontendModel(source, selectedCommandKeys, options = {}) {
         appName: frontendApplication?.title ?? source.domain ?? 'Event Sourcing App',
         frontendApplication,
         frontendSource,
+        generationWarnings: workflow.warnings,
         backendModules: modules,
         authBackendModule,
         fileUploadCapability,
@@ -244,7 +245,7 @@ function buildStateOptionsByType(source) {
         .filter((concept) => concept?.name && (concept.states ?? []).length > 0)
         .forEach((concept) => {
             const options = concept.states.map((state) => ({
-                value: constant(state),
+                value: state,
                 label: titleCase(state)
             }));
             [

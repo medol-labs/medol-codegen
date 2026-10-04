@@ -7,6 +7,7 @@ const {collectFieldOptionEnums} = require('../../common/core/field-options');
 const {contextPackage, resolvedBaseType} = require('../../common/util/value-types');
 const {
     conceptStateEnumName,
+    stateEnumEntry,
     groupByMap,
     stringList,
     pascal,
@@ -54,7 +55,7 @@ const domainWriterMethods = {
         for (const concept of this.model.concepts.filter((candidate) => candidate.states?.length)) {
             const packageName = `${this.model.rootPackage}.${contextPackage(concept.context)}.domain.states`;
             const typeName = conceptStateEnumName(concept.name);
-            const values = concept.states.map((state) => `    ${constant(state)}`).join(',\n');
+            const values = concept.states.map((state) => `    ${stateEnumEntry(state)}`).join(',\n');
             this.fs.write(
                 this._rootKotlinPath(`${contextPackage(concept.context)}/domain/states/${typeName}.kt`),
                 `package ${packageName}\n\nenum class ${typeName} {\n${values}\n}\n`

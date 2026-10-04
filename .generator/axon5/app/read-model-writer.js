@@ -36,6 +36,7 @@ const {
     outboundEvents,
     transitionForCommand,
     conceptStateEnumName,
+    stateEnumEntry,
     conceptHasState,
     transitionUsesConceptState,
     renderStateGuard,
@@ -2069,7 +2070,7 @@ ${eventHandlers}
             && conceptHasState(this.model, ownerSlice.context, concept, stateChange.to)) {
             assignments.push({
                 fieldName: field.name,
-                code: `entity.${field.name} = ${conceptStateEnumName(concept)}.${constant(stateChange.to)}`
+                code: `entity.${field.name} = ${conceptStateEnumName(concept)}.${stateEnumEntry(stateChange.to)}`
             });
         }
 
@@ -2233,7 +2234,7 @@ ${eventHandlers}
             const failedState = concept ? bestSemanticStateMatch(event, conceptStates(this.model, ownerSlice.context, concept)
                 .filter((state) => semanticWords(state).includes('failed'))) : undefined;
             if (stateField && failedState) {
-                addAssignment(stateField, `entity.${stateField.name} = ${conceptStateEnumName(concept)}.${constant(failedState)}`);
+                addAssignment(stateField, `entity.${stateField.name} = ${conceptStateEnumName(concept)}.${stateEnumEntry(failedState)}`);
             }
         }
 

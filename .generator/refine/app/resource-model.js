@@ -12,7 +12,6 @@ const {
     normalizeFields,
     defaultValueExpression,
     hasNestedArrayField,
-    isEditCommand,
     isCreateCommand,
     isDeleteCommand,
     cleanTitle,
@@ -81,7 +80,7 @@ function toReadModelResource(group, readModel, allEvents, workflow) {
     const primaryRowCommands = rowCommands.filter((command) =>
         command.matchingFields.some((field) => field.name === primaryIdField)
     );
-    const editCommand = primaryRowCommands.find((command) => isEditCommand(command));
+    const editCommand = undefined;
     const deleteCommand = primaryRowCommands.find((command) => isDeleteCommand(command));
     const reservedCommandNames = [createCommand, editCommand, deleteCommand].filter(Boolean).map((command) => command.name);
     const itemCommands = rowCommands

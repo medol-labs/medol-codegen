@@ -828,10 +828,6 @@ function isBooleanField(field) {
     return (field.valueType?.resolvedBaseType ?? field.type)?.toLowerCase() === 'boolean';
 }
 
-function isEditCommand(command) {
-    return /^(edit|update|change|modify)/i.test(command.name);
-}
-
 function isCreateCommand(command) {
     return /^(create|register|submit|add|new)/i.test(command.name);
 }
@@ -1110,7 +1106,6 @@ module.exports = {
     hasNestedArrayField,
     scalarListItemDefaultExpression,
     isBooleanField,
-    isEditCommand,
     isCreateCommand,
     isDeleteCommand,
     tsType,

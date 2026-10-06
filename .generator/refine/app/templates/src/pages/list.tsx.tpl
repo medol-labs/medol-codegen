@@ -7,7 +7,6 @@ import React from "react";
 import { frontendComposition } from "@/app/composition/composition.resolved";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { CommandButton } from "@/components/refine-ui/buttons/command";
-import { EditButton } from "@/components/refine-ui/buttons/edit";
 import { ShowButton } from "@/components/refine-ui/buttons/show";
 import { RefineDataTable } from "@/components/refine-ui/data-table/refine-data-table";
 import { RowActionMenu } from "@/components/refine-ui/row-action-menu";
@@ -164,11 +163,6 @@ export const <%= resource.component %>List = () => {
                 "rowActions.before",
                 { resource: "<%= resource.route %>", record: row.original },
               )}
-<% if (resource.editCommand) { -%>
-                {isCommandVisible(row.original, <%- JSON.stringify(resource.editCommand.enabledField ?? '') %>, <%- JSON.stringify(resource.editCommand.stateField ?? '') %>, <%- JSON.stringify(resource.editCommand.allowedStates ?? []) %>) && (
-                  <EditButton variant="ghost" recordItemId={row.original.<%= resource.idField %>} size="sm" />
-                )}
-<% } -%>
 <% resource.itemCommands.forEach((command) => { -%>
                 {isCommandVisible(row.original, <%- JSON.stringify(command.enabledField ?? '') %>, <%- JSON.stringify(command.stateField ?? '') %>, <%- JSON.stringify(command.allowedStates ?? []) %>) && (
                   <CommandButton

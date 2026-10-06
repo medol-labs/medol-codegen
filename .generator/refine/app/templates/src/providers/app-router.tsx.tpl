@@ -11,9 +11,6 @@ import {
 <% if (resource.createCommand?.requiresPage) { -%>
   <%= resource.createCommand.pageComponent %>,
 <% } -%>
-<% if (resource.editCommand) { -%>
-  <%= resource.editCommand.pageComponent %>,
-<% } -%>
 <% resource.routedCommands.forEach((command) => { -%>
   <%= command.pageComponent %>,
 <% }) -%>
@@ -29,9 +26,6 @@ export const contextRoutes = (
 <% } -%>
 <% if (resource.createCommand?.requiresPage) { -%>
       <Route path="command/<%= resource.createCommand.route %>" element={resolvePageOverride("<%= resource.route %>", "<%= resource.createCommand.name %>", <<%= resource.createCommand.pageComponent %> />)} />
-<% } -%>
-<% if (resource.editCommand) { -%>
-      <Route path="edit/:id" element={resolvePageOverride("<%= resource.route %>", "edit", <<%= resource.editCommand.pageComponent %> />)} />
 <% } -%>
       <Route path="show/:id" element={resolvePageOverride("<%= resource.route %>", "show", <<%= resource.component %>Show />)} />
 <% resource.routedCommands.forEach((command) => { -%>

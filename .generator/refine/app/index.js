@@ -288,14 +288,6 @@ const RefineGenerator = class extends Generator {
             );
         }
 
-        if (resource.editCommand) {
-            this.fs.copyTpl(
-                this.templatePath('src/pages/command-form.tsx.tpl'),
-                this.destinationPath(`./src/contexts/${resource.editCommand.pagePath}/${resource.editCommand.file}.tsx`),
-                { resource, command: resource.editCommand }
-            );
-        }
-
         if (resource.deleteCommand?.requiresPage) {
             this.fs.copyTpl(
                 this.templatePath('src/pages/command-form.tsx.tpl'),
@@ -343,9 +335,6 @@ const RefineGenerator = class extends Generator {
         }
         if (resource.createCommand?.requiresPage) {
             files.add(`${resource.createCommand.file}.tsx`);
-        }
-        if (resource.editCommand) {
-            files.add('edit.tsx');
         }
         if (resource.deleteCommand?.requiresPage) {
             files.add(`${resource.deleteCommand.file}.tsx`);

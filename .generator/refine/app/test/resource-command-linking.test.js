@@ -424,6 +424,142 @@ test('places lifecycle create command on the catalog named by its modeled screen
     assert.equal(currentRecommendedCatalog?.createCommand, undefined);
 });
 
+test('keeps update commands as business row actions instead of generic edit routes', () => {
+    const model = {
+        domain: 'Demo',
+        contexts: [{name: 'TrainingOrchestration', title: 'Training Orchestration'}],
+        aggregates: [],
+        transitions: [],
+        deployments: [{
+            name: 'PlatformBackend',
+            title: 'Platform Backend',
+            contexts: ['TrainingOrchestration']
+        }],
+        slices: [{
+            id: 'slice-register-training-run-configuration',
+            context: 'TrainingOrchestration',
+            chapter: 'Training Orchestration',
+            title: 'Register Training Run Configuration',
+            commands: [{
+                id: 'command-register-training-run-configuration',
+                name: 'RegisterTrainingRunConfiguration',
+                title: 'Register Training Run Configuration',
+                startsLifecycle: true,
+                concept: 'TrainingRunConfiguration',
+                fields: [
+                    {name: 'trainingRunConfigurationId', type: 'UUID', idAttribute: true, generated: true},
+                    {name: 'configurationName', type: 'String'}
+                ],
+                dependencies: [{
+                    id: 'event-training-run-configuration-registered',
+                    direction: 'OUTBOUND',
+                    title: 'Training Run Configuration Registered',
+                    elementType: 'EVENT'
+                }]
+            }],
+            events: [{
+                id: 'event-training-run-configuration-registered',
+                title: 'Training Run Configuration Registered',
+                fields: [
+                    {name: 'trainingRunConfigurationId', type: 'UUID', idAttribute: true},
+                    {name: 'configurationName', type: 'String'}
+                ],
+                dependencies: [{
+                    id: 'command-register-training-run-configuration',
+                    direction: 'INBOUND',
+                    title: 'Register Training Run Configuration',
+                    elementType: 'COMMAND'
+                }, {
+                    id: 'command-update-training-run-configuration',
+                    direction: 'OUTBOUND',
+                    title: 'Update Training Run Configuration',
+                    elementType: 'COMMAND'
+                }, {
+                    id: 'readmodel-training-run-configuration-catalog',
+                    direction: 'OUTBOUND',
+                    title: 'Training Run Configuration Catalog',
+                    elementType: 'READMODEL'
+                }]
+            }],
+            readmodels: []
+        }, {
+            id: 'slice-update-training-run-configuration',
+            context: 'TrainingOrchestration',
+            chapter: 'Training Orchestration',
+            title: 'Update Training Run Configuration',
+            commands: [{
+                id: 'command-update-training-run-configuration',
+                name: 'UpdateTrainingRunConfiguration',
+                title: 'Update Training Run Configuration',
+                concept: 'TrainingRunConfiguration',
+                fields: [
+                    {name: 'trainingRunConfigurationId', type: 'UUID', idAttribute: true},
+                    {name: 'configurationName', type: 'String'}
+                ],
+                dependencies: [{
+                    id: 'event-training-run-configuration-updated',
+                    direction: 'OUTBOUND',
+                    title: 'Training Run Configuration Updated',
+                    elementType: 'EVENT'
+                }]
+            }],
+            events: [{
+                id: 'event-training-run-configuration-updated',
+                title: 'Training Run Configuration Updated',
+                fields: [
+                    {name: 'trainingRunConfigurationId', type: 'UUID', idAttribute: true},
+                    {name: 'configurationName', type: 'String'}
+                ],
+                dependencies: [{
+                    id: 'command-update-training-run-configuration',
+                    direction: 'INBOUND',
+                    title: 'Update Training Run Configuration',
+                    elementType: 'COMMAND'
+                }, {
+                    id: 'readmodel-training-run-configuration-catalog',
+                    direction: 'OUTBOUND',
+                    title: 'Training Run Configuration Catalog',
+                    elementType: 'READMODEL'
+                }]
+            }],
+            readmodels: []
+        }, {
+            id: 'slice-training-run-configuration-catalog',
+            context: 'TrainingOrchestration',
+            chapter: 'Training Orchestration',
+            title: 'Training Run Configuration Catalog',
+            commands: [],
+            events: [],
+            readmodels: [{
+                id: 'readmodel-training-run-configuration-catalog',
+                title: 'Training Run Configuration Catalog',
+                listElement: true,
+                fields: [
+                    {name: 'trainingRunConfigurationId', type: 'UUID', idAttribute: true},
+                    {name: 'configurationName', type: 'String', display: true}
+                ],
+                dependencies: [{
+                    id: 'event-training-run-configuration-registered',
+                    direction: 'INBOUND',
+                    title: 'Training Run Configuration Registered',
+                    elementType: 'EVENT'
+                }, {
+                    id: 'event-training-run-configuration-updated',
+                    direction: 'INBOUND',
+                    title: 'Training Run Configuration Updated',
+                    elementType: 'EVENT'
+                }]
+            }]
+        }]
+    };
+
+    const frontend = buildFrontendModel(model);
+    const resource = frontend.resources.find((item) => item.name === 'training_run_configuration_catalog');
+
+    assert.equal(resource?.editCommand, undefined);
+    assert(resource?.itemCommands.some((command) => command.name === 'updateTrainingRunConfiguration'));
+});
+
 test('prefills concept selection fields for row commands addressed by technical ids', () => {
     const model = {
         domain: 'Demo',

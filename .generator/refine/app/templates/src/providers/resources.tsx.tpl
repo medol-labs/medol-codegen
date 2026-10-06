@@ -52,9 +52,6 @@ export const resources: IResourceItem[] = [
 <% if (resource.createCommand?.requiresPage) { -%>
     create: "/<%= resource.route %>/command/<%= resource.createCommand.route %>",
 <% } -%>
-<% if (resource.editCommand) { -%>
-    edit: "/<%= resource.route %>/edit/:id",
-<% } -%>
     show: "/<%= resource.route %>/show/:id",
     meta: {
 <% if (resource.chapter) { -%>

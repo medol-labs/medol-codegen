@@ -81,7 +81,13 @@ export const useCommandForm = <
       try {
         result = await form.refineCore.onFinish(values);
       } catch (error) {
-        const translatedError = new Error(problemDetailDescription(error, translate, "Command failed."));
+        const translatedError = new Error(
+          problemDetailDescription(
+            error,
+            translate,
+            translate("errors.commandFailed", "Command failed."),
+          ),
+        );
         if (error && typeof error === "object") {
           Object.assign(translatedError, error);
         }

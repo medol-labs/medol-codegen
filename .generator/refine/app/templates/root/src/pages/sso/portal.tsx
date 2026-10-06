@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useTranslate } from "@refinedev/core";
 import { Loader2 } from "lucide-react";
 import { useSearchParams } from "react-router";
 
@@ -15,6 +16,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { problemDetailDescription } from "@/lib/problem-detail";
 import {
   clearLocalAuth,
   exchangePortalJwtForSystemSession,
@@ -40,9 +42,15 @@ const readSystemSource = (searchParams: URLSearchParams): string | null => {
 };
 
 export const PortalSso = () => {
+  const t = useTranslate();
+  const tRef = useRef(t);
   const [searchParams] = useSearchParams();
   const [result, setResult] = useState<PortalSsoExchangeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
 
   useEffect(() => {
     const portalJwt = readPortalJwt(searchParams);
@@ -50,7 +58,7 @@ export const PortalSso = () => {
     const systemSource = readSystemSource(searchParams);
 
     if (!portalJwt) {
-      setError("Portal token is missing.");
+      setError(tRef.current("errors.portalTokenMissing", "Portal token is missing."));
       return;
     }
 
@@ -68,7 +76,8 @@ export const PortalSso = () => {
       })
       .catch((reason) => {
         if (!active) return;
-        setError(reason instanceof Error ? reason.message : "Portal sign-in failed.");
+        const translate = tRef.current;
+        setError(problemDetailDescription(reason, translate, translate("errors.portalSignInFailed", "Portal sign-in failed.")));
       });
 
     return () => {
@@ -80,29 +89,29 @@ export const PortalSso = () => {
     <div className={cn("bg-background", "flex", "min-h-svh", "items-center", "justify-center", "px-6", "py-10")}>
       <Card className={cn("w-full", "max-w-[420px]", "p-8")}>
         <CardHeader className={cn("px-0")}>
-          <CardTitle className={cn("text-2xl", "font-semibold")}>Portal sign in</CardTitle>
+          <CardTitle className={cn("text-2xl", "font-semibold")}>{t("sso.portal.title", "Portal sign in")}</CardTitle>
           <CardDescription className={cn("text-muted-foreground", "font-medium")}>
-            Verifying your portal session.
+            {t("sso.portal.description", "Verifying your portal session.")}
           </CardDescription>
         </CardHeader>
         <CardContent className={cn("px-0")}>
           {!result && !error && (
             <div className={cn("flex", "items-center", "gap-3", "text-sm", "text-muted-foreground")}>
               <Loader2 className={cn("size-4", "animate-spin")} />
-              Signing you in...
+              {t("sso.portal.signingIn", "Signing you in...")}
             </div>
           )}
           {result && (
             <Alert>
-              <AlertTitle>Account awaiting permissions</AlertTitle>
+              <AlertTitle>{t("sso.portal.awaitingPermissionsTitle", "Account awaiting permissions")}</AlertTitle>
               <AlertDescription>
-                {result.notice || "Please contact an administrator to assign permissions before using the system."}
+                {result.notice || t("sso.portal.awaitingPermissionsDescription", "Please contact an administrator to assign permissions before using the system.")}
               </AlertDescription>
             </Alert>
           )}
           {error && (
             <Alert variant="destructive">
-              <AlertTitle>Portal sign-in failed</AlertTitle>
+              <AlertTitle>{t("sso.portal.failedTitle", "Portal sign-in failed")}</AlertTitle>
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
@@ -117,7 +126,7 @@ export const PortalSso = () => {
               window.location.assign("/login");
             }}
           >
-            Back to sign in
+            {t("sso.portal.backToSignIn", "Back to sign in")}
           </Button>
         </CardFooter>
       </Card>

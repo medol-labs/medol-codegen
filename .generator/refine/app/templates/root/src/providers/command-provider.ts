@@ -542,7 +542,7 @@ export const commandDataProvider = (
       if (!res.ok) {
         const { message, problem } = await commandErrorMessage(
           res,
-          `Command failed: ${resource}.${command}`,
+          `${resource}.${command}`,
         );
         const error = new Error(
           message,

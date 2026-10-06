@@ -1,6 +1,7 @@
 "use client";
 
 import type { ColumnDef, TableMeta } from "@tanstack/react-table";
+import { useTranslate } from "@refinedev/core";
 import { CopyIcon, EraserIcon, ScissorsIcon, Trash2Icon } from "lucide-react";
 import * as React from "react";
 import { toast } from "sonner";
@@ -94,6 +95,7 @@ function ContextMenuImpl<TData>({
   onCellsCopy,
   onCellsCut,
 }: ContextMenuProps<TData>) {
+  const t = useTranslate();
   const propsRef = useAsRef({
     dataGridRef,
     selectionState,
@@ -176,9 +178,9 @@ function ContextMenuImpl<TData>({
     onDataUpdate?.(updates);
 
     toast.success(
-      `${updates.length} cell${updates.length !== 1 ? "s" : ""} cleared`,
+      t("dataGrid.context.cellsCleared", { count: updates.length }, `${updates.length} cell(s) cleared`),
     );
-  }, [propsRef]);
+  }, [propsRef, t]);
 
   const onDelete = React.useCallback(async () => {
     const { selectionState, onRowsDelete } = propsRef.current;
@@ -200,8 +202,8 @@ function ContextMenuImpl<TData>({
 
     await onRowsDelete?.(rowIndicesArray);
 
-    toast.success(`${rowCount} row${rowCount !== 1 ? "s" : ""} deleted`);
-  }, [propsRef]);
+    toast.success(t("dataGrid.context.rowsDeleted", { count: rowCount }, `${rowCount} row(s) deleted`));
+  }, [propsRef, t]);
 
   return (
     <DropdownMenu
@@ -217,22 +219,22 @@ function ContextMenuImpl<TData>({
       >
         <DropdownMenuItem onSelect={onCopy}>
           <CopyIcon />
-          Copy
+          {t("dataGrid.context.copy", "Copy")}
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={onCut} disabled={tableMeta?.readOnly}>
           <ScissorsIcon />
-          Cut
+          {t("dataGrid.context.cut", "Cut")}
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={onClear} disabled={tableMeta?.readOnly}>
           <EraserIcon />
-          Clear
+          {t("dataGrid.context.clear", "Clear")}
         </DropdownMenuItem>
         {onRowsDelete && (
           <>
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onSelect={onDelete}>
               <Trash2Icon />
-              Delete rows
+              {t("dataGrid.context.deleteRows", "Delete rows")}
             </DropdownMenuItem>
           </>
         )}

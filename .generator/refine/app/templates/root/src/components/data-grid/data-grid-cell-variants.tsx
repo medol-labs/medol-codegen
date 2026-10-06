@@ -1,6 +1,7 @@
 "use client";
 
 import { Check, Upload, X } from "lucide-react";
+import { useTranslate } from "@refinedev/core";
 import * as React from "react";
 import { toast } from "sonner";
 import { DataGridCellWrapper } from "@/components/data-grid/data-grid-cell-wrapper";
@@ -43,6 +44,7 @@ import {
   getUrlHref,
   parseLocalDate,
 } from "@/lib/data-grid";
+import { problemDetailDescription } from "@/lib/problem-detail";
 import { cn } from "@/lib/utils";
 import type { DataGridCellProps, FileCellData } from "@/types/data-grid";
 
@@ -542,6 +544,7 @@ export function UrlCell<TData>({
   isActiveSearchMatch,
   readOnly,
 }: DataGridCellProps<TData>) {
+  const t = useTranslate();
   const initialValue = cell.getValue() as string;
   const [value, setValue] = React.useState(initialValue ?? "");
   const cellRef = React.useRef<HTMLDivElement>(null);
@@ -654,9 +657,11 @@ export function UrlCell<TData>({
       const href = getUrlHref(value);
       if (!href) {
         event.preventDefault();
-        toast.error("Invalid URL", {
-          description:
-            "URL contains a dangerous protocol (javascript:, data:, vbscript:, or file:)",
+        toast.error(t("dataGrid.url.invalid", "Invalid URL"), {
+          description: t(
+            "dataGrid.url.dangerousProtocol",
+            "URL contains a dangerous protocol.",
+          ),
         });
         return;
       }
@@ -664,7 +669,7 @@ export function UrlCell<TData>({
       // Stop propagation to prevent grid from interfering with link navigation
       event.stopPropagation();
     },
-    [isEditing, value],
+    [isEditing, value, t],
   );
 
   React.useEffect(() => {
@@ -1394,6 +1399,7 @@ export function FileCell<TData>({
   isActiveSearchMatch,
   readOnly,
 }: DataGridCellProps<TData>) {
+  const t = useTranslate();
   const cellValue = React.useMemo(
     () => (cell.getValue() as FileCellData[]) ?? [],
     [cell],
@@ -1559,8 +1565,20 @@ export function FileCell<TData>({
             } catch (error) {
               toast.error(
                 error instanceof Error
-                  ? error.message
-                  : `Failed to upload ${filesToValidate.length} file${filesToValidate.length !== 1 ? "s" : ""}`,
+                  ? problemDetailDescription(
+                      error,
+                      t,
+                      t(
+                        "dataGrid.files.uploadFailed",
+                        { count: filesToValidate.length },
+                        `Failed to upload ${filesToValidate.length} file(s)`,
+                      ),
+                    )
+                  : t(
+                      "dataGrid.files.uploadFailed",
+                      { count: filesToValidate.length },
+                      `Failed to upload ${filesToValidate.length} file(s)`,
+                    ),
               );
               setFiles((prev) => prev.filter((f) => !uploadingIds.has(f.id)));
               setUploadingFiles(new Set());
@@ -1615,6 +1633,7 @@ export function FileCell<TData>({
       columnId,
       readOnly,
       isPending,
+      t,
     ],
   );
 
@@ -1638,8 +1657,12 @@ export function FileCell<TData>({
         } catch (error) {
           toast.error(
             error instanceof Error
-              ? error.message
-              : `Failed to delete ${fileToRemove.name}`,
+              ? problemDetailDescription(
+                  error,
+                  t,
+                  t("dataGrid.files.deleteFailed", { name: fileToRemove.name }, `Failed to delete ${fileToRemove.name}`),
+                )
+              : t("dataGrid.files.deleteFailed", { name: fileToRemove.name }, `Failed to delete ${fileToRemove.name}`),
           );
           setDeletingFiles((prev) => {
             const next = new Set(prev);
@@ -1663,7 +1686,7 @@ export function FileCell<TData>({
       });
       tableMeta?.onDataUpdate?.({ rowIndex, columnId, value: updatedFiles });
     },
-    [files, tableMeta, rowIndex, columnId, readOnly, isPending],
+    [files, tableMeta, rowIndex, columnId, readOnly, isPending, t],
   );
 
   const clearAll = React.useCallback(async () => {
@@ -1682,7 +1705,9 @@ export function FileCell<TData>({
         });
       } catch (error) {
         toast.error(
-          error instanceof Error ? error.message : "Failed to delete files",
+          error instanceof Error
+            ? problemDetailDescription(error, t, t("dataGrid.files.deleteFilesFailed", "Failed to delete files"))
+            : t("dataGrid.files.deleteFilesFailed", "Failed to delete files"),
         );
         setDeletingFiles(new Set());
         return;
@@ -1697,7 +1722,7 @@ export function FileCell<TData>({
     setFiles([]);
     setDeletingFiles(new Set());
     tableMeta?.onDataUpdate?.({ rowIndex, columnId, value: [] });
-  }, [files, tableMeta, rowIndex, columnId, readOnly, isPending]);
+  }, [files, tableMeta, rowIndex, columnId, readOnly, isPending, t]);
 
   const onCellDragEnter = React.useCallback((event: React.DragEvent) => {
     event.preventDefault();

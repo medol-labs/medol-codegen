@@ -15,6 +15,7 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
+import { useTranslate } from "@refinedev/core";
 import * as React from "react";
 import { toast } from "sonner";
 
@@ -149,6 +150,7 @@ function useDataGrid<TData>({
   initialState,
   ...props
 }: UseDataGridProps<TData>) {
+  const t = useTranslate();
   const dir = useDirection(dirProp);
   const dataGridRef = React.useRef<HTMLDivElement>(null);
   const tableRef = React.useRef<ReturnType<typeof useReactTable<TData>>>(null);
@@ -620,16 +622,14 @@ function useDataGrid<TData>({
       }
 
       toast.success(
-        `${selectedCellsArray.length} cell${
-          selectedCellsArray.length !== 1 ? "s" : ""
-        } copied`,
+        t("dataGrid.clipboard.cellsCopied", { count: selectedCellsArray.length }, `${selectedCellsArray.length} cell(s) copied`),
       );
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Failed to copy to clipboard",
+        error instanceof Error ? error.message : t("dataGrid.clipboard.copyFailed", "Failed to copy to clipboard"),
       );
     }
-  }, [store]);
+  }, [store, t]);
 
   const onCellsCut = React.useCallback(async () => {
     if (propsRef.current.readOnly) return;
@@ -722,16 +722,14 @@ function useDataGrid<TData>({
       store.setState("cutCells", new Set(selectedCellsArray));
 
       toast.success(
-        `${selectedCellsArray.length} cell${
-          selectedCellsArray.length !== 1 ? "s" : ""
-        } cut`,
+        t("dataGrid.clipboard.cellsCut", { count: selectedCellsArray.length }, `${selectedCellsArray.length} cell(s) cut`),
       );
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Failed to cut to clipboard",
+        error instanceof Error ? error.message : t("dataGrid.clipboard.cutFailed", "Failed to cut to clipboard"),
       );
     }
-  }, [store, propsRef]);
+  }, [store, propsRef, t]);
 
   const restoreFocus = React.useCallback((element: HTMLDivElement | null) => {
     if (element && document.activeElement !== element) {
@@ -1082,13 +1080,15 @@ function useDataGrid<TData>({
 
           if (cellsSkipped > 0) {
             toast.success(
-              `${cellsUpdated} cell${
-                cellsUpdated !== 1 ? "s" : ""
-              } pasted, ${cellsSkipped} skipped`,
+              t(
+                "dataGrid.clipboard.cellsPastedWithSkipped",
+                { count: cellsUpdated, skipped: cellsSkipped },
+                `${cellsUpdated} cell(s) pasted, ${cellsSkipped} skipped`,
+              ),
             );
           } else {
             toast.success(
-              `${cellsUpdated} cell${cellsUpdated !== 1 ? "s" : ""} pasted`,
+              t("dataGrid.clipboard.cellsPasted", { count: cellsUpdated }, `${cellsUpdated} cell(s) pasted`),
             );
           }
 
@@ -1106,9 +1106,11 @@ function useDataGrid<TData>({
           restoreFocus(dataGridRef.current);
         } else if (cellsSkipped > 0) {
           toast.error(
-            `${cellsSkipped} cell${
-              cellsSkipped !== 1 ? "s" : ""
-            } skipped pasting for invalid data`,
+            t(
+              "dataGrid.clipboard.cellsSkippedInvalid",
+              { count: cellsSkipped },
+              `${cellsSkipped} cell(s) skipped pasting for invalid data`,
+            ),
           );
         }
 
@@ -1123,7 +1125,7 @@ function useDataGrid<TData>({
         toast.error(
           error instanceof Error
             ? error.message
-            : "Failed to paste. Please try again.",
+            : t("dataGrid.clipboard.pasteFailed", "Failed to paste. Please try again."),
         );
       }
     },
@@ -1134,6 +1136,7 @@ function useDataGrid<TData>({
       onDataUpdate,
       selectRange,
       restoreFocus,
+      t,
     ],
   );
 

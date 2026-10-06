@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useTranslate } from "@refinedev/core";
 import { toast } from "sonner";
 
 import { useAsRef } from "@/hooks/use-as-ref";
@@ -96,6 +97,7 @@ function useDataGridUndoRedo<TData>({
   maxHistory = DEFAULT_MAX_HISTORY,
   enabled = true,
 }: UseDataGridUndoRedoProps<TData>): UseDataGridUndoRedoReturn<TData> {
+  const t = useTranslate();
   const propsRef = useAsRef({
     data,
     onDataChange,
@@ -274,7 +276,7 @@ function useDataGridUndoRedo<TData>({
 
     const entry = store.undo();
     if (!entry) {
-      toast.info("No actions to undo");
+      toast.info(t("dataGrid.undo.noActions", "No actions to undo"));
       return;
     }
 
@@ -282,9 +284,9 @@ function useDataGridUndoRedo<TData>({
     propsRef.current.onDataChange(newData);
 
     toast.success(
-      `${entry.count} action${entry.count !== 1 ? "s" : ""} undone`,
+      t("dataGrid.undo.actionsUndone", { count: entry.count }, `${entry.count} action(s) undone`),
     );
-  }, [store, propsRef, onCommit]);
+  }, [store, propsRef, onCommit, t]);
 
   const onRedo = React.useCallback(() => {
     if (!propsRef.current.enabled) return;
@@ -293,7 +295,7 @@ function useDataGridUndoRedo<TData>({
 
     const entry = store.redo();
     if (!entry) {
-      toast.info("No actions to redo");
+      toast.info(t("dataGrid.redo.noActions", "No actions to redo"));
       return;
     }
 
@@ -301,9 +303,9 @@ function useDataGridUndoRedo<TData>({
     propsRef.current.onDataChange(newData);
 
     toast.success(
-      `${entry.count} action${entry.count !== 1 ? "s" : ""} redone`,
+      t("dataGrid.redo.actionsRedone", { count: entry.count }, `${entry.count} action(s) redone`),
     );
-  }, [store, propsRef, onCommit]);
+  }, [store, propsRef, onCommit, t]);
 
   const onClear = React.useCallback(() => {
     const pending = pendingBatchRef.current;

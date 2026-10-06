@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import type React from "react";
-import { useNotification } from "@refinedev/core";
+import { useNotification, useTranslate } from "@refinedev/core";
 import { Download, Loader2 } from "lucide-react";
 
 import { useAppExtensions } from "@/domain/app-extensions";
@@ -13,6 +13,7 @@ import {
 import { backendModules } from "@/contexts/resources";
 import type { BackendModule } from "@/providers/app-extension-contract";
 import { authFetch } from "@/providers/api-auth";
+import { problemDetailDescription } from "@/lib/problem-detail";
 
 export type DownloadFileOptions = {
   uri?: string | null;
@@ -25,6 +26,13 @@ type ResolvedDownloadTarget = {
   url: string;
   filename?: string | null;
 };
+
+const localizedError = (
+  message: string,
+  i18nKey: string,
+  args: Record<string, unknown> = {},
+): Error & { i18nKey: string; args: Record<string, unknown> } =>
+  Object.assign(new Error(message), { i18nKey, args });
 
 const trimTrailingSlash = (value: string) => value.replace(/\/+$/u, "");
 
@@ -76,7 +84,7 @@ const resolveDownloadTarget = (
 ): ResolvedDownloadTarget => {
   const rawUri = options.uri?.trim();
   if (!rawUri) {
-    throw new Error("Download URI is empty.");
+    throw localizedError("Download URI is empty.", "errors.downloadUriEmpty");
   }
 
   const normalizedBaseUrl = toAbsoluteBaseUrl(baseUrl);
@@ -110,7 +118,11 @@ export async function downloadFile(
   const target = resolveDownloadTarget(options, baseUrl);
   const response = await authFetch(target.url);
   if (!response.ok) {
-    throw new Error(`Download failed with HTTP ${response.status}.`);
+    throw localizedError(
+      `Download failed with HTTP ${response.status}.`,
+      "errors.downloadHttpFailed",
+      { status: response.status },
+    );
   }
 
   const blob = await response.blob();
@@ -134,6 +146,7 @@ export async function downloadFile(
 
 export function useFileDownload(options: DownloadFileOptions = {}) {
   const { open } = useNotification();
+  const t = useTranslate();
   const appExtensions = useAppExtensions();
   const [downloading, setDownloading] = useState(false);
 
@@ -152,7 +165,7 @@ export function useFileDownload(options: DownloadFileOptions = {}) {
         ...overrides,
       };
       if (!isDownloadableUri(nextOptions.uri)) {
-        throw new Error("Download URI is not available.");
+        throw localizedError("Download URI is not available.", "errors.downloadUriUnavailable");
       }
 
       setDownloading(true);
@@ -160,22 +173,22 @@ export function useFileDownload(options: DownloadFileOptions = {}) {
         const filename = await downloadFile(nextOptions, baseUrl);
         open?.({
           type: "success",
-          message: "Download started",
+          message: t("download.started", "Download started"),
           description: filename,
         });
         return filename;
       } catch (error) {
         open?.({
           type: "error",
-          message: "Download failed",
-          description: error instanceof Error ? error.message : String(error),
+          message: t("download.failed", "Download failed"),
+          description: problemDetailDescription(error, t, t("download.failed", "Download failed")),
         });
         throw error;
       } finally {
         setDownloading(false);
       }
     },
-    [baseUrl, open, options],
+    [baseUrl, open, options, t],
   );
 
   return {
@@ -202,7 +215,7 @@ export function DownloadFileButton({
   backendModuleName,
   fallbackBaseUrl,
   label,
-  tooltip = "Download",
+  tooltip,
   disabled,
   onDownloaded,
   children,
@@ -216,6 +229,8 @@ export function DownloadFileButton({
     backendModuleName,
     fallbackBaseUrl,
   });
+  const t = useTranslate();
+  const resolvedTooltip = tooltip ?? t("download.tooltip", "Download");
 
   const button = (
     <Button
@@ -224,7 +239,7 @@ export function DownloadFileButton({
       variant={variant}
       size={size}
       disabled={disabled || !canDownload || downloading}
-      aria-label={buttonProps["aria-label"] ?? label ?? tooltip}
+      aria-label={buttonProps["aria-label"] ?? label ?? resolvedTooltip}
       onClick={async () => {
         const downloadedFilename = await download();
         onDownloaded?.(downloadedFilename);
@@ -246,7 +261,7 @@ export function DownloadFileButton({
   return (
     <Tooltip>
       <TooltipTrigger asChild>{button}</TooltipTrigger>
-      <TooltipContent>{tooltip}</TooltipContent>
+      <TooltipContent>{resolvedTooltip}</TooltipContent>
     </Tooltip>
   );
 }

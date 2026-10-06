@@ -17,6 +17,13 @@ export type PendingFileUpload = {
   uploadId: string;
 };
 
+const localizedError = (
+  message: string,
+  i18nKey: string,
+  args: Record<string, unknown> = {},
+): Error & { i18nKey: string; args: Record<string, unknown> } =>
+  Object.assign(new Error(message), { i18nKey, args });
+
 const fileUploadApiUrl = (): string => {
   const capability = fileUploadCapability as unknown as FileUploadCapability | null;
   const uploadModule = capability
@@ -24,7 +31,10 @@ const fileUploadApiUrl = (): string => {
     : undefined;
 
   if (!uploadModule) {
-    throw new Error("A file upload capability must be modeled before generated file fields can upload files.");
+    throw localizedError(
+      "A file upload capability must be modeled before generated file fields can upload files.",
+      "errors.fileUploadCapabilityMissing",
+    );
   }
 
   return uploadModule.apiUrl.replace(/\/$/, "");
@@ -38,7 +48,10 @@ export async function uploadFile(params: {
 }): Promise<string> {
   const capability = fileUploadCapability as unknown as FileUploadCapability | null;
   if (!capability) {
-    throw new Error("A file upload capability must be modeled before generated file fields can upload files.");
+    throw localizedError(
+      "A file upload capability must be modeled before generated file fields can upload files.",
+      "errors.fileUploadCapabilityMissing",
+    );
   }
 
   const formData = new FormData();
@@ -68,7 +81,11 @@ export async function uploadFile(params: {
 
   if (!response.ok) {
     const message = await response.text().catch(() => "");
-    throw new Error(message || `Failed to upload file: ${response.status}`);
+    throw localizedError(
+      message || `Failed to upload file: ${response.status}`,
+      "errors.fileUploadFailed",
+      { status: response.status },
+    );
   }
 
   const payload = await response.json().catch(() => ({})) as Record<string, unknown>;

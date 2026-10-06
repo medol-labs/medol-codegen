@@ -153,25 +153,26 @@ test('writes shared sync read model support with switchable adapters and checkpo
     assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /SYNC READMODEL snapshot stored/);
     assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /SYNC READMODEL delta pull/);
     assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /SYNC READMODEL delta stored/);
-    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /medol_sync_read_model_outbox/);
-    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /uk_sync_read_model_outbox_event/);
-    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /idx_sync_read_model_outbox_channel_sequence/);
-    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /idx_sync_read_model_outbox_source_sequence/);
-    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /idx_sync_read_model_outbox_queue_available/);
-    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /object SyncOutboxStatus/);
-    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /class SyncOutboxQueue/);
-    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /LockModeType\.PESSIMISTIC_WRITE/);
-    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /fun findAvailableForClaim/);
-    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /fun findExpiredClaimsForClaim/);
-    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /fun claimAvailable/);
-    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /fun markProcessed/);
-    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /fun markFailed/);
-    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /fun purgeProcessedBefore/);
-    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /existsByChannelAndMessageKeyAndEventIdAndOperation/);
-    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /existsBySourceContextAndSourceReadModelAndMessageKeyAndEventIdAndOperation/);
-    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /SYNC OUTBOX stored/);
-    assert.match(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /@JdbcTypeCode\(SqlTypes\.LONGVARCHAR\)/);
-    assert.doesNotMatch(writes.get('shared/shared/application/sync/SyncReadModelOutbox.kt'), /@Lob/);
+    const outbox = writes.get('shared/shared/application/outbox/MedolOutbox.kt');
+    assert.match(outbox, /medol_outbox/);
+    assert.match(outbox, /uk_medol_outbox_event/);
+    assert.match(outbox, /idx_medol_outbox_channel_sequence/);
+    assert.match(outbox, /idx_medol_outbox_source_sequence/);
+    assert.match(outbox, /idx_medol_outbox_queue_available/);
+    assert.match(outbox, /object MedolOutboxStatus/);
+    assert.match(outbox, /class MedolOutboxQueue/);
+    assert.match(outbox, /LockModeType\.PESSIMISTIC_WRITE/);
+    assert.match(outbox, /fun findAvailableForClaim/);
+    assert.match(outbox, /fun findExpiredClaimsForClaim/);
+    assert.match(outbox, /fun claimAvailable/);
+    assert.match(outbox, /fun markProcessed/);
+    assert.match(outbox, /fun markFailed/);
+    assert.match(outbox, /fun purgeProcessedBefore/);
+    assert.match(outbox, /existsByChannelAndMessageKeyAndEventIdAndOperation/);
+    assert.match(outbox, /existsBySourceContextAndSourceNameAndMessageKeyAndEventIdAndOperation/);
+    assert.match(outbox, /MEDOL OUTBOX stored/);
+    assert.match(outbox, /@JdbcTypeCode\(SqlTypes\.LONGVARCHAR\)/);
+    assert.doesNotMatch(outbox, /@Lob/);
     assert.match(writes.get('shared/shared/application/sync/OutboxDeltaSyncReadModelAdapter.kt'), /requires medol\.sync\.source-base-url/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelScheduler.kt'), /adapters\.firstOrNull \{ it\.supports\(properties\.mode\) \}/);
     assert.match(writes.get('shared/shared/application/sync/SyncReadModelScheduler.kt'), /adapter\.syncOnce\(target, checkpoint\)/);
@@ -280,8 +281,8 @@ test('writes sync read model source resource for referenced source read models',
     assert.match(sourceResource, /highWatermarkSequence/);
     assert.match(sourceResource, /page\.hasNext\(\)/);
     assert.match(sourceResource, /@GetMapping\("\/deltas"\)/);
-    assert.match(sourceResource, /SyncOutboxRepository/);
-    assert.match(sourceResource, /findBySourceContextAndSourceReadModelAndSequenceGreaterThanOrderBySequenceAsc/);
+    assert.match(sourceResource, /MedolOutboxRepository/);
+    assert.match(sourceResource, /findBySourceContextAndSourceNameAndSequenceGreaterThanOrderBySequenceAsc/);
     assert.match(sourceResource, /afterSequence/);
     assert.match(sourceResource, /"items" to items/);
 });
@@ -345,7 +346,7 @@ test('writes read model projector as overridable projection updater', () => {
     assert.match(projector, /class OrganizationDirectoryProjector\(\n    private val updater: OrganizationDirectoryProjectionUpdater\n\)/);
     assert.match(projector, /updater\.update\(event, message\)/);
     assert.doesNotMatch(projector, /outbox\.append/);
-    assert.doesNotMatch(projector, /SyncOutboxAppender/);
+    assert.doesNotMatch(projector, /MedolOutboxAppender/);
 });
 
 test('writes sync source read model updater with transactional outbox append', () => {
@@ -406,8 +407,8 @@ test('writes sync source read model updater with transactional outbox append', (
     );
 
     const projector = writes.get('kotlin/datasetgovernance/featureschemacatalog/FeatureSchemaCatalogProjector.kt');
-    assert.match(projector, /SyncOutboxAppender/);
-    assert.match(projector, /private val outbox: SyncOutboxAppender/);
+    assert.match(projector, /MedolOutboxAppender/);
+    assert.match(projector, /private val outbox: MedolOutboxAppender/);
     assert.match(projector, /outbox\.appendReadModel/);
     assert.match(projector, /sourceContext = "DatasetGovernance"/);
     assert.match(projector, /sourceReadModel = "FeatureSchemaCatalog"/);
@@ -435,6 +436,95 @@ test('does not write sync registration for read models without sync source or a 
     );
 
     assert.equal(writes.size, 0);
+});
+
+test('writes export support for exportable read models', () => {
+    const writes = new Map();
+    const writer = syncWriter(writes);
+    writer.model.slices = [{
+        name: 'DataExportJob',
+        processors: [{
+            name: 'ExecuteDataExport',
+            metadata: {
+                on: 'DataExportRequested',
+                onKind: 'event',
+                uses: 'PlatformDataExchange.export',
+                emits: 'MarkDataExportProcessing',
+                emits2: 'CompleteDataExport',
+                emits3: 'FailDataExport'
+            }
+        }]
+    }];
+    const slice = {
+        name: 'RuntimeNodeInventory',
+        concepts: [{name: 'RuntimeNodeInventory'}]
+    };
+    const readmodel = {
+        name: 'RuntimeNodeInventoryCatalog',
+        title: 'Runtime Node Inventory Catalog',
+        exportable: {capability: 'PlatformDataExchange'},
+        fields: [
+            {name: 'runtimeNodeInventoryId', type: 'UUID', idAttribute: true},
+            {name: 'runtimeName', type: 'String', label: 'Runtime Name'},
+            {name: 'nodeReady', type: 'Boolean'},
+            {name: 'version', type: 'Long'}
+        ]
+    };
+
+    readModelWriterMethods._writeDataExportSupport.call(writer);
+    readModelWriterMethods._writeReadModelResource.call(
+        writer,
+        'tech.medo.context.runtimegovernance.runtimenodeinventory',
+        'runtimegovernance',
+        'runtimenodeinventory',
+        slice,
+        readmodel,
+        'RuntimeNodeInventoryCatalog',
+        [readmodel.fields[0]]
+    );
+
+    const service = writes.get('shared/shared/application/export/DataExportService.kt');
+    const ports = writes.get('shared/shared/application/export/DataExportPorts.kt');
+    const registry = writes.get('shared/shared/application/export/DataExportResourceExecutorRegistry.kt');
+    const jobResource = writes.get('shared/shared/application/export/DataExportJobResource.kt');
+    const processor = writes.get('kotlin/dataexchange/dataexportjob/ExecuteDataExportProcessor.kt');
+    const resource = writes.get('kotlin/runtimegovernance/runtimenodeinventory/RuntimeNodeInventoryCatalogResource.kt');
+
+    assert.match(service, /fun <T : Any> export\(/);
+    assert.match(service, /DataExportJobRequestMessage/);
+    assert.doesNotMatch(service, /outbox\.appendExternal/);
+    assert.match(service, /DataExportJobResponse\(jobId, "REQUESTED", fileName\) as Any/);
+    assert.match(service, /ByteArrayResource\(content\) as Any/);
+    assert.match(ports, /interface DataExportJobRequestPort/);
+    assert.match(ports, /interface DataExportJobLifecyclePort/);
+    assert.match(ports, /interface DataExportResourceExecutor/);
+    assert.match(registry, /class DataExportResourceExecutorRegistry/);
+    assert.match(registry, /executorsByResourceName/);
+    assert.match(jobResource, /@PreAuthorize\("isAuthenticated\(\)"\)/);
+    assert.match(jobResource, /Files\.readAllBytes\(path\)/);
+    assert.match(processor, /class ExecuteDataExportProcessor/);
+    assert.match(processor, /fun on\(event: DataExportRequestedEvent\)/);
+    assert.match(processor, /@Namespace\("automation-data-exchange-execute-data-export"\)/);
+    assert.match(processor, /lifecyclePort\.markProcessing\(event\.dataExportJobId\)/);
+    assert.match(processor, /registry\.executor\(event\.resourceName\)\.execute\(task\)/);
+    assert.match(processor, /lifecyclePort\.complete\(event\.dataExportJobId, result\.fileName, result\.filePath, result\.rowCount\)/);
+    assert.doesNotMatch(processor, /outbox|DataExportWorker|DataExportJobWorkPort/);
+    assert.match(resource, /private val exportColumns = listOf\(/);
+    assert.match(resource, /DataExportColumn\("runtimeNodeInventoryId", "runtimeNodeInventoryId"\)/);
+    assert.match(resource, /DataExportColumn\("runtimeName", "Runtime Name"\)/);
+    assert.doesNotMatch(resource, /DataExportColumn\("version"/);
+    assert.match(resource, /@PostMapping\("\/export"\)/);
+    assert.match(resource, /dataExportService\.validatedColumns\(request\?\.columns, exportColumns\)/);
+    assert.match(resource, /val snapshotUpperBound = LocalDateTime\.now\(ZoneOffset\.UTC\)/);
+    assert.match(resource, /val snapshotCriteria = applyExportSnapshot\(criteria, snapshotUpperBound\)/);
+    assert.match(resource, /PageRequest\.of\(0, dataExportService\.pageSize\(\), pageable\.sort\)/);
+    assert.match(resource, /findPage\(snapshotCriteria, nextPage\)/);
+    assert.match(resource, /snapshotUpperBound = snapshotUpperBound\.toInstant\(ZoneOffset\.UTC\)/);
+    assert.match(resource, /class RuntimeNodeInventoryCatalogDataExportExecutor/);
+    assert.match(resource, /criteria\.projectionUpdatedAt/);
+    assert.match(resource, /projectionUpdatedAt\.getLessThanOrEqual\(\)/);
+    assert.match(resource, /requestedUpperBound == null \|\| requestedUpperBound\.isAfter\(snapshotUpperBound\)/);
+    assert.match(resource, /applyExportSnapshot\(criteria, snapshotUpperBound\)/);
 });
 
 function syncWriter(writes) {

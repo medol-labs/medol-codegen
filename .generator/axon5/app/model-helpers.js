@@ -716,6 +716,7 @@ function valueTypeForField(field) {
 }
 
 const METADATA_FIELD_DEFINITIONS = [
+    {name: 'projectionUpdatedAt', key: undefined, type: 'LocalDateTime?'},
     {name: 'userId', key: 'USER_ID', type: 'String?'},
     {name: 'sessionId', key: 'SESSION_ID', type: 'String?'},
     {name: 'correlationId', key: 'CORRELATION_ID', type: 'String?'},

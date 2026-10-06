@@ -59,6 +59,19 @@ function findReadModel(generator, readmodelId) {
     return null;
 }
 
+function isDataExportExecutionAutomation(processor) {
+    const metadata = processor.metadata ?? {};
+    const uses = String(metadata.uses ?? '').toLowerCase();
+    const emits = Object.entries(metadata)
+        .filter(([key]) => /^emits\d*$/.test(key))
+        .map(([, value]) => String(value).toLowerCase());
+    return metadata.on === 'DataExportRequested'
+        && (uses === 'platformdataexchange.export' || uses.endsWith('dataexchange.export'))
+        && emits.includes('markdataexportprocessing')
+        && emits.includes('completedataexport')
+        && emits.includes('faildataexport');
+}
+
 function dependency(processor, direction, elementType) {
     return (processor.dependencies ?? []).find((candidate) =>
         candidate.direction === direction && candidate.elementType === elementType
@@ -197,6 +210,9 @@ const processorWriterMethods = {
     },
 
     _writeProcessor(slice, processor) {
+        if (isDataExportExecutionAutomation(processor)) {
+            return;
+        }
         if (processor.metadata?.onKind === 'todo') {
             this._writeTodoProcessor(slice, processor);
             return;

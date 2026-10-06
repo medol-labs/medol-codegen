@@ -100,8 +100,11 @@ object MetadataFactory {
         generator.fs.write(generator._sharedKernelKotlinPath('shared/application/metadata/ProjectionMetadata.kt'), `package ${generator.model.rootPackage}.shared.application.metadata
 
 import org.axonframework.messaging.eventhandling.EventMessage
+import java.time.LocalDateTime
+import java.time.ZoneOffset
 
 interface MetadataProjection {
+    var projectionUpdatedAt: LocalDateTime?
     var userId: String?
     var sessionId: String?
     var correlationId: String?
@@ -111,6 +114,7 @@ interface MetadataProjection {
 }
 
 data class MetadataSnapshot(
+    val projectionUpdatedAt: LocalDateTime?,
     val userId: String?,
     val sessionId: String?,
     val correlationId: String?,
@@ -124,6 +128,7 @@ object ProjectionMetadata {
         val metadata = message.metadata()
 
         return MetadataSnapshot(
+            projectionUpdatedAt = LocalDateTime.ofInstant(message.timestamp(), ZoneOffset.UTC),
             userId = MetadataFactory.value(metadata[MetadataKeys.USER_ID]),
             sessionId = MetadataFactory.value(metadata[MetadataKeys.SESSION_ID]),
             correlationId = MetadataFactory.value(metadata[MetadataKeys.CORRELATION_ID]),
@@ -138,6 +143,7 @@ object ProjectionMetadata {
     }
 
     fun assign(target: MetadataProjection, metadata: MetadataSnapshot) {
+        target.projectionUpdatedAt = metadata.projectionUpdatedAt
         target.userId = metadata.userId
         target.sessionId = metadata.sessionId
         target.correlationId = metadata.correlationId

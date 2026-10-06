@@ -215,8 +215,36 @@ function readModelPersistencePath(context, readmodelName) {
     return `${context}/infrastructure/secondary/persistence/${_sliceTitle(readmodelName)}`;
 }
 
+function isDataExportExecutionAutomation(processor) {
+    const metadata = processor.metadata ?? {};
+    const uses = String(metadata.uses ?? '').toLowerCase();
+    const emits = Object.entries(metadata)
+        .filter(([key]) => /^emits\d*$/.test(key))
+        .map(([, value]) => String(value).toLowerCase());
+    return metadata.on === 'DataExportRequested'
+        && (uses === 'platformdataexchange.export' || uses.endsWith('dataexchange.export'))
+        && emits.includes('markdataexportprocessing')
+        && emits.includes('completedataexport')
+        && emits.includes('faildataexport');
+}
+
+function dataExportExecutionAutomation(model) {
+    return (model.slices ?? [])
+        .flatMap((slice) => slice.processors ?? [])
+        .find(isDataExportExecutionAutomation);
+}
+
 function readModelRepositoryMethodName(filterFields) {
     return filterFields.length > 0 ? 'findAllByFilter' : 'findAll';
+}
+
+function exportColumns(readmodel) {
+    const metadataFieldNames = new Set(METADATA_FIELD_DEFINITIONS.map((field) => field.name));
+    return (readmodel.fields ?? [])
+        .filter((field) => field?.name)
+        .filter((field) => !metadataFieldNames.has(field.name))
+        .filter((field) => !field.generated && !field.excludeFromApi && !field.technicalAttribute)
+        .filter((field) => !['version'].includes(String(field.name).toLowerCase()));
 }
 
 function isJsonJpaField(field) {
@@ -254,6 +282,7 @@ function isCriteriaField(field) {
 }
 
 function criteriaFilterType(field) {
+    if (field.name === 'projectionUpdatedAt') return 'RangeFilter<LocalDateTime>';
     const type = readModelStorageType(field, false);
     switch (type) {
         case 'String': return 'StringFilter';
@@ -276,6 +305,9 @@ function criteriaFilterImports(fields) {
 }
 
 function queryServiceSpecificationBuilder(field, entityName) {
+    if (field.name === 'projectionUpdatedAt') {
+        return `            criteria.projectionUpdatedAt?.let { specification = specification.and(buildLocalDateTimeRangeSpecification(it, Function<Root<${entityName}>, Expression<LocalDateTime>> { root -> root.get("projectionUpdatedAt") })) }`;
+    }
     const type = readModelStorageType(field, false);
     const expression = type === 'UUID'
         ? `Function<Root<${entityName}>, Expression<String>> { root -> (root.get<UUID>("${field.name}") as JpaExpression<UUID>).cast(String::class.java) }`
@@ -306,8 +338,11 @@ const readModelWriterMethods = {
         const entityImports = jpaEntityImports(readmodel.fields, this.model.rootPackage);
         const hasJsonJpaFields = (readmodel.fields ?? []).some(isJsonJpaField);
         const metadataFields = readModelMetadataFields(readmodel);
-        const allImports = [imports].filter(Boolean).join('\n');
-        const allEntityImports = [entityImports].filter(Boolean).join('\n');
+        const metadataImports = metadataFields.some((field) => field.type.startsWith('LocalDateTime'))
+            ? 'import java.time.LocalDateTime'
+            : '';
+        const allImports = [imports, metadataImports].filter(Boolean).join('\n');
+        const allEntityImports = [entityImports, metadataImports].filter(Boolean).join('\n');
         const ids = readmodel.fields.filter((field) => field.idAttribute);
         const idFields = ids.length > 0 ? ids : readmodel.fields.slice(0, 1);
         const id = idFields[0];
@@ -343,7 +378,10 @@ const readModelWriterMethods = {
             : `data class ${name}Query(val ${id.name}: ${readModelStorageType(id, false)})`;
         const idType = compositeId ? keyName : readModelStorageType(id, false);
         const filterFields = readModelFilterFields(readmodel);
-        const criteriaFields = (readmodel.fields ?? []).filter(isCriteriaField);
+        const criteriaFields = [
+            ...((readmodel.fields ?? []).filter(isCriteriaField)),
+            ...metadataFields.filter((field) => field.name === 'projectionUpdatedAt')
+        ];
         const criteriaDeclaration = criteriaFields.length > 0
             ? `
 class ${name}Criteria {
@@ -410,6 +448,9 @@ ${entityFields}
 `);
         if (id) {
             this._writeReadModelJpaRepository(packageName, context, slicePackage, slice, readmodel, name, idFields, hasJsonJpaFields);
+            if (readmodel.exportable) {
+                this._writeDataExportSupport();
+            }
             this._writeReadModelResource(packageName, context, slicePackage, slice, readmodel, name, idFields);
             this._writeReadModelProjector(packageName, context, slicePackage, slice, readmodel, name, idFields);
             if (readmodel.sync) {
@@ -419,6 +460,458 @@ ${entityFields}
         }
     },
 
+    _writeDataExportSupport() {
+        if (this._dataExportSupportWritten) {
+            return;
+        }
+        this._dataExportSupportWritten = true;
+        const basePath = 'shared/application/export';
+        const basePackage = `${this.model.rootPackage}.shared.application.export`;
+        this.fs.write(this._sharedKernelKotlinPath(`${basePath}/DataExportModels.kt`), `package ${basePackage}
+
+import java.time.Instant
+import java.util.UUID
+
+data class DataExportColumn(
+    val field: String,
+    val label: String? = null
+)
+
+data class DataExportRequest(
+    val columns: List<DataExportColumn>? = null
+)
+
+data class DataExportSortOrder(
+    val property: String,
+    val direction: String = "ASC"
+)
+
+data class DataExportJobResponse(
+    val jobId: UUID,
+    val status: String,
+    val fileName: String? = null,
+    val errorMessage: String? = null
+)
+
+data class DataExportJobRequestMessage(
+    val dataExportJobId: UUID,
+    val resourceName: String,
+    val criteriaJson: String,
+    val sortJson: String,
+    val columnsJson: String,
+    val requestedLocale: String?,
+    val requestedAt: Instant,
+    val snapshotUpperBound: Instant,
+    val requestHash: String,
+    val fileName: String
+)
+
+data class DataExportExecutionTask(
+    val dataExportJobId: UUID,
+    val resourceName: String,
+    val criteriaJson: String,
+    val sortJson: String,
+    val columnsJson: String,
+    val requestedLocale: String?,
+    val requestedAt: Instant,
+    val snapshotUpperBound: Instant,
+    val requestHash: String,
+    val fileName: String
+)
+
+data class DataExportExecutionResult(
+    val fileName: String,
+    val filePath: String,
+    val rowCount: Long
+)
+`);
+        this.fs.write(this._sharedKernelKotlinPath(`${basePath}/DataExportProperties.kt`), `package ${basePackage}
+
+import org.springframework.boot.context.properties.ConfigurationProperties
+import org.springframework.stereotype.Component
+
+@Component
+@ConfigurationProperties(prefix = "medol.data-exchange.export")
+class DataExportProperties {
+    var pageSize: Int = 1000
+    var asyncThreshold: Long = 10000
+    var maxRows: Long = 800000
+    var storagePath: String = "build/data-exports"
+}
+`);
+        this.fs.write(this._sharedKernelKotlinPath(`${basePath}/DataExportPorts.kt`), `package ${basePackage}
+
+import java.util.UUID
+
+interface DataExportJobRequestPort {
+    fun request(message: DataExportJobRequestMessage)
+}
+
+interface DataExportJobLifecyclePort {
+    fun markProcessing(dataExportJobId: UUID)
+    fun complete(dataExportJobId: UUID, fileName: String, filePath: String, rowCount: Long)
+    fun fail(dataExportJobId: UUID, errorMessage: String)
+}
+
+interface DataExportResourceExecutor {
+    val resourceName: String
+    fun execute(task: DataExportExecutionTask): DataExportExecutionResult
+}
+`);
+        this.fs.write(this._sharedKernelKotlinPath(`${basePath}/DataExportService.kt`), `package ${basePackage}
+
+import com.fasterxml.jackson.core.type.TypeReference
+import com.fasterxml.jackson.databind.ObjectMapper
+import org.springframework.beans.factory.ObjectProvider
+import org.springframework.core.io.ByteArrayResource
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.PageRequest
+import org.springframework.data.domain.Pageable
+import org.springframework.data.domain.Sort
+import org.springframework.http.HttpHeaders
+import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
+import org.springframework.http.ResponseEntity
+import org.springframework.stereotype.Service
+import org.springframework.web.server.ResponseStatusException
+import java.net.URLEncoder
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.charset.StandardCharsets
+import java.time.Instant
+import java.time.format.DateTimeFormatter
+import java.security.MessageDigest
+import java.util.UUID
+import kotlin.io.path.createDirectories
+
+@Service
+class DataExportService(
+    private val properties: DataExportProperties,
+    private val objectMapper: ObjectMapper,
+    private val requestPort: ObjectProvider<DataExportJobRequestPort>
+) {
+    private val accessorCache = java.util.concurrent.ConcurrentHashMap<String, java.lang.reflect.Method?>()
+    private val columnsType = object : TypeReference<List<DataExportColumn>>() {}
+    private val sortType = object : TypeReference<List<DataExportSortOrder>>() {}
+
+    fun pageSize(): Int = properties.pageSize.coerceAtLeast(1)
+
+    fun validatedColumns(requested: List<DataExportColumn>?, allowed: List<DataExportColumn>): List<DataExportColumn> {
+        val allowedByField = allowed.associateBy { it.field }
+        val selected = requested
+            ?.mapNotNull { requestedColumn ->
+                allowedByField[requestedColumn.field]?.copy(label = requestedColumn.label ?: allowedByField[requestedColumn.field]?.label)
+            }
+            ?.takeIf { it.isNotEmpty() }
+            ?: allowed
+        return selected
+    }
+
+    fun <T : Any> export(
+        resourceName: String,
+        columns: List<DataExportColumn>,
+        criteria: Any,
+        sort: Sort,
+        firstPage: Page<T>,
+        fetchPage: (Pageable) -> Page<T>,
+        requestedLocale: String? = null,
+        snapshotUpperBound: Instant? = null
+    ): ResponseEntity<Any> {
+        val total = firstPage.totalElements
+        if (total > properties.maxRows) {
+            throw ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "Data export exceeds the configured maximum row count.")
+        }
+        val fileName = exportFileName(resourceName)
+        return if (total > properties.asyncThreshold) {
+            val requestedAt = Instant.now()
+            val effectiveSnapshotUpperBound = snapshotUpperBound ?: requestedAt
+            val criteriaJson = objectMapper.writeValueAsString(criteria)
+            val sortJson = objectMapper.writeValueAsString(sortOrders(sort))
+            val columnsJson = objectMapper.writeValueAsString(columns)
+            val requestHash = requestHash(resourceName, criteriaJson, sortJson, columnsJson, requestedLocale, effectiveSnapshotUpperBound)
+            val jobId = UUID.nameUUIDFromBytes(requestHash.toByteArray(StandardCharsets.UTF_8))
+            val request = DataExportJobRequestMessage(
+                dataExportJobId = jobId,
+                resourceName = resourceName,
+                criteriaJson = criteriaJson,
+                sortJson = sortJson,
+                columnsJson = columnsJson,
+                requestedLocale = requestedLocale,
+                requestedAt = requestedAt,
+                snapshotUpperBound = effectiveSnapshotUpperBound,
+                requestHash = requestHash,
+                fileName = fileName
+            )
+            val port = requestPort.getIfAvailable()
+                ?: throw ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Data export job request port is not available.")
+            port.request(request)
+            ResponseEntity.accepted().body(DataExportJobResponse(jobId, "REQUESTED", fileName) as Any)
+        } else {
+            csvResponse(fileName, renderCsv(columns, firstPage, fetchPage).content)
+        }
+    }
+
+    fun csvResponse(fileName: String, content: ByteArray): ResponseEntity<Any> {
+        val encoded = URLEncoder.encode(fileName, StandardCharsets.UTF_8).replace("+", "%20")
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''$encoded")
+            .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8"))
+            .body(ByteArrayResource(content) as Any)
+    }
+
+    fun <T : Any> writeCsvFile(
+        fileName: String,
+        columns: List<DataExportColumn>,
+        firstPage: Page<T>,
+        fetchPage: (Pageable) -> Page<T>
+    ): DataExportExecutionResult {
+        val rendered = renderCsv(columns, firstPage, fetchPage)
+        val directory = Path.of(properties.storagePath).createDirectories()
+        val path = directory.resolve(fileName).normalize()
+        Files.write(path, rendered.content)
+        return DataExportExecutionResult(fileName, path.toString(), rendered.rowCount)
+    }
+
+    fun columnsFromJson(columnsJson: String, allowed: List<DataExportColumn>): List<DataExportColumn> =
+        validatedColumns(objectMapper.readValue(columnsJson, columnsType), allowed)
+
+    fun sortFromJson(sortJson: String): Sort {
+        val orders = objectMapper.readValue(sortJson, sortType)
+        if (orders.isEmpty()) return Sort.unsorted()
+        return Sort.by(orders.map {
+            Sort.Order(Sort.Direction.fromOptionalString(it.direction).orElse(Sort.Direction.ASC), it.property)
+        })
+    }
+
+    private data class RenderedCsv(val content: ByteArray, val rowCount: Long)
+
+    private fun <T : Any> renderCsv(
+        columns: List<DataExportColumn>,
+        firstPage: Page<T>,
+        fetchPage: (Pageable) -> Page<T>
+    ): RenderedCsv {
+        val builder = StringBuilder()
+        var rowCount = 0L
+        builder.append(columns.joinToString(",") { csvCell(it.label ?: it.field) }).append("\\n")
+        appendRows(builder, columns, firstPage.content)
+        rowCount += firstPage.content.size
+        var pageNumber = 1
+        while (pageNumber < firstPage.totalPages) {
+            val page = fetchPage(PageRequest.of(pageNumber, pageSize(), firstPage.pageable.sort))
+            appendRows(builder, columns, page.content)
+            rowCount += page.content.size
+            pageNumber += 1
+        }
+        return RenderedCsv(("\\uFEFF" + builder.toString()).toByteArray(StandardCharsets.UTF_8), rowCount)
+    }
+
+    private fun <T : Any> appendRows(builder: StringBuilder, columns: List<DataExportColumn>, rows: List<T>) {
+        for (row in rows) {
+            builder.append(columns.joinToString(",") { column -> csvCell(readField(row, column.field)) }).append("\\n")
+        }
+    }
+
+    private fun readField(row: Any, field: String): String {
+        val key = row.javaClass.name + "#" + field
+        val method = accessorCache.computeIfAbsent(key) {
+            val suffix = field.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+            row.javaClass.methods.firstOrNull { method ->
+                method.parameterCount == 0 && (method.name == "get$suffix" || method.name == "is$suffix")
+            }
+        }
+        return method?.invoke(row)?.toString() ?: ""
+    }
+
+    private fun csvCell(value: String): String {
+        val escaped = value.replace("\\\"", "\\\"\\\"")
+        return if (escaped.any { it == ',' || it == '"' || it == '\\n' || it == '\\r' }) "\\\"$escaped\\\"" else escaped
+    }
+
+    private fun exportFileName(resourceName: String): String {
+        val timestamp = DateTimeFormatter.ofPattern("yyyyMMddHHmmss")
+            .withZone(java.time.ZoneId.systemDefault())
+            .format(Instant.now())
+        return "${'$'}resourceName-${'$'}timestamp.csv"
+    }
+
+    private fun sortOrders(sort: Sort): List<DataExportSortOrder> =
+        sort.map { DataExportSortOrder(it.property, it.direction.name) }.toList()
+
+    private fun requestHash(
+        resourceName: String,
+        criteriaJson: String,
+        sortJson: String,
+        columnsJson: String,
+        requestedLocale: String?,
+        snapshotUpperBound: Instant
+    ): String {
+        val value = listOf(resourceName, criteriaJson, sortJson, columnsJson, requestedLocale.orEmpty(), snapshotUpperBound.toString()).joinToString("\\u001F")
+        val digest = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(StandardCharsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) }
+    }
+}
+`);
+        this.fs.write(this._sharedKernelKotlinPath(`${basePath}/DataExportResourceExecutorRegistry.kt`), `package ${basePackage}
+
+import org.springframework.stereotype.Component
+
+@Component
+class DataExportResourceExecutorRegistry(executors: List<DataExportResourceExecutor>) {
+    private val executorsByResourceName = executors.associateBy { it.resourceName }
+
+    fun executor(resourceName: String): DataExportResourceExecutor =
+        executorsByResourceName[resourceName]
+            ?: throw IllegalArgumentException("No data export executor registered for resource $resourceName.")
+}
+`);
+        this.fs.write(this._sharedKernelKotlinPath(`${basePath}/DataExportJobResource.kt`), `package ${basePackage}
+
+import org.springframework.http.ResponseEntity
+import org.springframework.security.access.prepost.PreAuthorize
+import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.RequestParam
+import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RestController
+import java.nio.file.Files
+import java.nio.file.Path
+
+@RestController
+@RequestMapping("/data-export/jobs")
+class DataExportJobResource(
+    private val dataExportService: DataExportService
+) {
+    @PreAuthorize("isAuthenticated()")
+    @GetMapping("/download")
+    fun download(
+        @RequestParam filePath: String,
+        @RequestParam fileName: String
+    ): ResponseEntity<Any> {
+        val path = Path.of(filePath).normalize()
+        if (!Files.exists(path)) return ResponseEntity.notFound().build()
+        return dataExportService.csvResponse(fileName, Files.readAllBytes(path))
+    }
+}
+`);
+        this._writeDataExportJobAxonPorts();
+    },
+
+    _writeDataExportJobAxonPorts() {
+        const hasDataExportJobSlice = (this.model.slices ?? []).some((slice) =>
+            String(slice.name ?? slice.title ?? '').toLowerCase() === 'dataexportjob'
+            || String(slice.name ?? slice.title ?? '').toLowerCase() === 'data-export-job'
+        );
+        if (!hasDataExportJobSlice) {
+            return;
+        }
+        const packageName = `${this.model.rootPackage}.dataexchange.dataexportjob`;
+        this.fs.write(this._kotlinPath('dataexchange/dataexportjob/DataExportJobPorts.kt'), `package ${packageName}
+
+import org.axonframework.messaging.commandhandling.gateway.CommandGateway
+import org.springframework.stereotype.Component
+import ${this.model.rootPackage}.shared.application.export.DataExportJobLifecyclePort
+import ${this.model.rootPackage}.shared.application.export.DataExportJobRequestMessage
+import ${this.model.rootPackage}.shared.application.export.DataExportJobRequestPort
+import java.util.UUID
+
+@Component
+class AxonDataExportJobRequestPort(
+    private val commandGateway: CommandGateway
+) : DataExportJobRequestPort {
+    override fun request(message: DataExportJobRequestMessage) {
+        commandGateway.send(
+            RequestDataExportCommand(
+                dataExportJobId = message.dataExportJobId,
+                resourceName = message.resourceName,
+                criteriaJson = message.criteriaJson,
+                sortJson = message.sortJson,
+                columnsJson = message.columnsJson,
+                requestedLocale = message.requestedLocale,
+                requestedAt = message.requestedAt,
+                snapshotUpperBound = message.snapshotUpperBound,
+                requestHash = message.requestHash,
+                fileName = message.fileName,
+                status = DataExportJobStatus.REQUESTED
+            )
+        ).resultMessage.toCompletableFuture().join()
+    }
+}
+
+@Component
+class AxonDataExportJobLifecyclePort(
+    private val commandGateway: CommandGateway
+) : DataExportJobLifecyclePort {
+    override fun markProcessing(dataExportJobId: UUID) {
+        commandGateway.send(MarkDataExportProcessingCommand(dataExportJobId, DataExportJobStatus.PROCESSING)).resultMessage.toCompletableFuture().join()
+    }
+
+    override fun complete(dataExportJobId: UUID, fileName: String, filePath: String, rowCount: Long) {
+        commandGateway.send(CompleteDataExportCommand(dataExportJobId, fileName, filePath, rowCount, DataExportJobStatus.COMPLETED)).resultMessage.toCompletableFuture().join()
+    }
+
+    override fun fail(dataExportJobId: UUID, errorMessage: String) {
+        commandGateway.send(FailDataExportCommand(dataExportJobId, errorMessage, DataExportJobStatus.FAILED)).resultMessage.toCompletableFuture().join()
+    }
+}
+
+object DataExportJobStatus {
+    const val REQUESTED = "REQUESTED"
+    const val PROCESSING = "PROCESSING"
+    const val COMPLETED = "COMPLETED"
+    const val FAILED = "FAILED"
+}
+`);
+        const automation = dataExportExecutionAutomation(this.model);
+        if (!automation) {
+            return;
+        }
+        const processorClass = `${pascal(automation.name)}Processor`;
+        const eventClass = _eventTitle(automation.metadata?.on ?? 'DataExportRequested');
+        this.fs.write(this._kotlinPath(`dataexchange/dataexportjob/${processorClass}.kt`), `package ${packageName}
+
+import org.axonframework.messaging.core.annotation.Namespace
+import org.axonframework.messaging.eventhandling.annotation.EventHandler
+import org.slf4j.LoggerFactory
+import org.springframework.stereotype.Component
+import ${this.model.rootPackage}.dataexchange.events.${eventClass}
+import ${this.model.rootPackage}.shared.application.export.DataExportExecutionTask
+import ${this.model.rootPackage}.shared.application.export.DataExportJobLifecyclePort
+import ${this.model.rootPackage}.shared.application.export.DataExportResourceExecutorRegistry
+
+@Namespace("automation-data-exchange-${kebab(automation.name)}")
+@Component
+class ${processorClass}(
+    private val registry: DataExportResourceExecutorRegistry,
+    private val lifecyclePort: DataExportJobLifecyclePort
+) {
+    private val log = LoggerFactory.getLogger(javaClass)
+
+    @EventHandler
+    fun on(event: ${eventClass}) {
+        val task = DataExportExecutionTask(
+            dataExportJobId = event.dataExportJobId,
+            resourceName = event.resourceName,
+            criteriaJson = event.criteriaJson,
+            sortJson = event.sortJson,
+            columnsJson = event.columnsJson,
+            requestedLocale = event.requestedLocale,
+            requestedAt = event.requestedAt,
+            snapshotUpperBound = event.snapshotUpperBound,
+            requestHash = event.requestHash,
+            fileName = event.fileName
+        )
+        try {
+            lifecyclePort.markProcessing(event.dataExportJobId)
+            val result = registry.executor(event.resourceName).execute(task)
+            lifecyclePort.complete(event.dataExportJobId, result.fileName, result.filePath, result.rowCount)
+        } catch (ex: Exception) {
+            log.warn("Data export job {} failed", event.dataExportJobId, ex)
+            lifecyclePort.fail(event.dataExportJobId, ex.message ?: "Data export failed.")
+        }
+    }
+}
+`);
+    },
+
     _writeSyncReadModelSupport() {
         if (this._syncReadModelSupportWritten) {
             return;
@@ -426,6 +919,8 @@ ${entityFields}
         this._syncReadModelSupportWritten = true;
         const basePath = 'shared/application/sync';
         const basePackage = `${this.model.rootPackage}.shared.application.sync`;
+        const outboxBasePath = 'shared/application/outbox';
+        const outboxBasePackage = `${this.model.rootPackage}.shared.application.outbox`;
         this.fs.write(this._sharedKernelKotlinPath(`${basePath}/SyncReadModelProperties.kt`), `package ${basePackage}
 
 import org.springframework.boot.context.properties.ConfigurationProperties
@@ -523,7 +1018,7 @@ class SyncReadModelCheckpoint {
 
 interface SyncReadModelCheckpointRepository : JpaRepository<SyncReadModelCheckpoint, String>
 `);
-        this.fs.write(this._sharedKernelKotlinPath(`${basePath}/SyncReadModelOutbox.kt`), `package ${basePackage}
+        this.fs.write(this._sharedKernelKotlinPath(`${outboxBasePath}/MedolOutbox.kt`), `package ${outboxBasePackage}
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import jakarta.persistence.Column
@@ -553,29 +1048,29 @@ import java.time.ZoneOffset
 
 @Entity
 @Table(
-    name = "medol_sync_read_model_outbox",
+    name = "medol_outbox",
     uniqueConstraints = [
         UniqueConstraint(
-            name = "uk_sync_read_model_outbox_event",
-            columnNames = ["source_context", "source_read_model", "read_model_key", "event_id", "operation"]
+            name = "uk_medol_outbox_event",
+            columnNames = ["source_context", "source_name", "message_key", "event_id", "operation"]
         )
     ],
     indexes = [
         Index(
-            name = "idx_sync_read_model_outbox_channel_sequence",
+            name = "idx_medol_outbox_channel_sequence",
             columnList = "channel, sequence"
         ),
         Index(
-            name = "idx_sync_read_model_outbox_source_sequence",
-            columnList = "source_context, source_read_model, sequence"
+            name = "idx_medol_outbox_source_sequence",
+            columnList = "source_context, source_name, sequence"
         ),
         Index(
-            name = "idx_sync_read_model_outbox_queue_available",
+            name = "idx_medol_outbox_queue_available",
             columnList = "channel, status, available_at, sequence"
         )
     ]
 )
-class SyncOutboxMessage {
+class MedolOutboxMessage {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     var sequence: Long? = null
@@ -585,10 +1080,10 @@ class SyncOutboxMessage {
     @Column(name = "source_context")
     var sourceContext: String = ""
 
-    @Column(name = "source_read_model")
-    var sourceReadModel: String = ""
+    @Column(name = "source_name")
+    var sourceName: String = ""
 
-    @Column(name = "read_model_key")
+    @Column(name = "message_key")
     var messageKey: String = ""
     var operation: String = "UPSERT"
 
@@ -612,7 +1107,7 @@ class SyncOutboxMessage {
     @Column(columnDefinition = "text")
     var headersJson: String = "{}"
 
-    var status: String? = SyncOutboxStatus.AVAILABLE
+    var status: String? = MedolOutboxStatus.AVAILABLE
 
     @Column(name = "available_at")
     var availableAt: LocalDateTime? = LocalDateTime.now()
@@ -633,26 +1128,26 @@ class SyncOutboxMessage {
     var lastError: String? = null
 }
 
-object SyncOutboxStatus {
+object MedolOutboxStatus {
     const val AVAILABLE = "AVAILABLE"
     const val PROCESSING = "PROCESSING"
     const val PROCESSED = "PROCESSED"
     const val FAILED = "FAILED"
 }
 
-interface SyncOutboxRepository : JpaRepository<SyncOutboxMessage, Long> {
+interface MedolOutboxRepository : JpaRepository<MedolOutboxMessage, Long> {
     fun findByChannelAndSequenceGreaterThanOrderBySequenceAsc(
         channel: String,
         sequence: Long,
         pageable: Pageable
-    ): List<SyncOutboxMessage>
+    ): List<MedolOutboxMessage>
 
-    fun findBySourceContextAndSourceReadModelAndSequenceGreaterThanOrderBySequenceAsc(
+    fun findBySourceContextAndSourceNameAndSequenceGreaterThanOrderBySequenceAsc(
         sourceContext: String,
-        sourceReadModel: String,
+        sourceName: String,
         sequence: Long,
         pageable: Pageable
-    ): List<SyncOutboxMessage>
+    ): List<MedolOutboxMessage>
 
     fun existsByChannelAndMessageKeyAndEventIdAndOperation(
         channel: String,
@@ -661,25 +1156,25 @@ interface SyncOutboxRepository : JpaRepository<SyncOutboxMessage, Long> {
         operation: String
     ): Boolean
 
-    fun existsBySourceContextAndSourceReadModelAndMessageKeyAndEventIdAndOperation(
+    fun existsBySourceContextAndSourceNameAndMessageKeyAndEventIdAndOperation(
         sourceContext: String,
-        sourceReadModel: String,
+        sourceName: String,
         messageKey: String,
         eventId: String,
         operation: String
     ): Boolean
 
-    fun findFirstByChannelOrderBySequenceDesc(channel: String): SyncOutboxMessage?
+    fun findFirstByChannelOrderBySequenceDesc(channel: String): MedolOutboxMessage?
 
-    fun findFirstBySourceContextAndSourceReadModelOrderBySequenceDesc(
+    fun findFirstBySourceContextAndSourceNameOrderBySequenceDesc(
         sourceContext: String,
-        sourceReadModel: String
-    ): SyncOutboxMessage?
+        sourceName: String
+    ): MedolOutboxMessage?
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query(
         """
-        select message from SyncOutboxMessage message
+        select message from MedolOutboxMessage message
         where message.channel = :channel
           and (message.status is null or message.status = :status)
           and (message.availableAt is null or message.availableAt <= :availableAt)
@@ -691,12 +1186,12 @@ interface SyncOutboxRepository : JpaRepository<SyncOutboxMessage, Long> {
         @Param("status") status: String,
         @Param("availableAt") availableAt: LocalDateTime,
         pageable: Pageable
-    ): List<SyncOutboxMessage>
+    ): List<MedolOutboxMessage>
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query(
         """
-        select message from SyncOutboxMessage message
+        select message from MedolOutboxMessage message
         where message.channel = :channel
           and message.status = :status
           and message.claimedUntil <= :claimedUntil
@@ -708,14 +1203,14 @@ interface SyncOutboxRepository : JpaRepository<SyncOutboxMessage, Long> {
         @Param("status") status: String,
         @Param("claimedUntil") claimedUntil: LocalDateTime,
         pageable: Pageable
-    ): List<SyncOutboxMessage>
+    ): List<MedolOutboxMessage>
 
     fun deleteByStatusAndProcessedAtBefore(status: String, processedAt: LocalDateTime): Long
 }
 
 @Component
-class SyncOutboxAppender(
-    private val repository: SyncOutboxRepository,
+class MedolOutboxAppender(
+    private val repository: MedolOutboxRepository,
     private val objectMapper: ObjectMapper
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -729,7 +1224,7 @@ class SyncOutboxAppender(
         message: EventMessage
     ) {
         val eventId = message.identifier()
-        if (repository.existsBySourceContextAndSourceReadModelAndMessageKeyAndEventIdAndOperation(
+        if (repository.existsBySourceContextAndSourceNameAndMessageKeyAndEventIdAndOperation(
                 sourceContext,
                 sourceReadModel,
                 readModelKey,
@@ -738,7 +1233,7 @@ class SyncOutboxAppender(
             )
         ) {
             log.debug(
-                "SYNC OUTBOX skip duplicate source={}.{} key={} operation={} eventId={}",
+                "MEDOL OUTBOX skip duplicate readmodel source={}.{} key={} operation={} eventId={}",
                 sourceContext,
                 sourceReadModel,
                 readModelKey,
@@ -748,9 +1243,9 @@ class SyncOutboxAppender(
             return
         }
         append(
-            channel = syncReadModelChannel(sourceContext, sourceReadModel),
+            channel = readModelOutboxChannel(sourceContext, sourceReadModel),
             sourceContext = sourceContext,
-            sourceReadModel = sourceReadModel,
+            sourceName = sourceReadModel,
             messageKey = readModelKey,
             operation = operation,
             payload = payload,
@@ -762,7 +1257,7 @@ class SyncOutboxAppender(
     fun append(
         channel: String,
         sourceContext: String,
-        sourceReadModel: String,
+        sourceName: String,
         messageKey: String,
         operation: String,
         payload: Any,
@@ -778,7 +1273,7 @@ class SyncOutboxAppender(
             )
         ) {
             log.debug(
-                "SYNC OUTBOX skip duplicate channel={} key={} operation={} eventId={}",
+                "MEDOL OUTBOX skip duplicate channel={} key={} operation={} eventId={}",
                 channel,
                 messageKey,
                 operation,
@@ -786,10 +1281,10 @@ class SyncOutboxAppender(
             )
             return
         }
-        val saved = repository.save(SyncOutboxMessage().also {
+        val saved = repository.save(MedolOutboxMessage().also {
             it.channel = channel
             it.sourceContext = sourceContext
-            it.sourceReadModel = sourceReadModel
+            it.sourceName = sourceName
             it.messageKey = messageKey
             it.operation = operation
             it.eventId = eventId
@@ -799,11 +1294,64 @@ class SyncOutboxAppender(
             it.headersJson = objectMapper.writeValueAsString(headers)
         })
         log.info(
-            "SYNC OUTBOX stored sequence={} channel={} source={}.{} key={} operation={} eventId={} eventType={}",
+            "MEDOL OUTBOX stored sequence={} channel={} source={}.{} key={} operation={} eventId={} eventType={}",
             saved.sequence,
             saved.channel,
             saved.sourceContext,
-            saved.sourceReadModel,
+            saved.sourceName,
+            saved.messageKey,
+            saved.operation,
+            saved.eventId,
+            saved.eventType
+        )
+    }
+
+    fun appendExternal(
+        channel: String,
+        sourceContext: String,
+        sourceName: String,
+        messageKey: String,
+        operation: String,
+        payload: Any,
+        eventId: String,
+        eventType: String,
+        occurredAt: LocalDateTime = LocalDateTime.now(),
+        headers: Map<String, Any?> = emptyMap()
+    ) {
+        if (repository.existsByChannelAndMessageKeyAndEventIdAndOperation(
+                channel,
+                messageKey,
+                eventId,
+                operation
+            )
+        ) {
+            log.debug(
+                "MEDOL OUTBOX skip duplicate channel={} key={} operation={} eventId={}",
+                channel,
+                messageKey,
+                operation,
+                eventId
+            )
+            return
+        }
+        val saved = repository.save(MedolOutboxMessage().also {
+            it.channel = channel
+            it.sourceContext = sourceContext
+            it.sourceName = sourceName
+            it.messageKey = messageKey
+            it.operation = operation
+            it.eventId = eventId
+            it.eventType = eventType
+            it.occurredAt = occurredAt
+            it.payloadJson = objectMapper.writeValueAsString(payload)
+            it.headersJson = objectMapper.writeValueAsString(headers)
+        })
+        log.info(
+            "MEDOL OUTBOX stored sequence={} channel={} source={}.{} key={} operation={} eventId={} eventType={}",
+            saved.sequence,
+            saved.channel,
+            saved.sourceContext,
+            saved.sourceName,
             saved.messageKey,
             saved.operation,
             saved.eventId,
@@ -813,8 +1361,8 @@ class SyncOutboxAppender(
 }
 
 @Component
-class SyncOutboxQueue(
-    private val repository: SyncOutboxRepository
+class MedolOutboxQueue(
+    private val repository: MedolOutboxRepository
 ) {
     @Transactional
     fun claimAvailable(
@@ -822,18 +1370,18 @@ class SyncOutboxQueue(
         consumerId: String,
         batchSize: Int,
         claimTimeout: Duration = Duration.ofMinutes(5)
-    ): List<SyncOutboxMessage> {
+    ): List<MedolOutboxMessage> {
         val now = LocalDateTime.now()
         val limit = PageRequest.of(0, batchSize.coerceIn(1, 1000))
         val available = repository.findAvailableForClaim(
             channel,
-            SyncOutboxStatus.AVAILABLE,
+            MedolOutboxStatus.AVAILABLE,
             now,
             limit
         )
         val expired = repository.findExpiredClaimsForClaim(
             channel,
-            SyncOutboxStatus.PROCESSING,
+            MedolOutboxStatus.PROCESSING,
             now,
             limit
         )
@@ -841,7 +1389,7 @@ class SyncOutboxQueue(
             .distinctBy { it.sequence }
             .take(batchSize.coerceIn(1, 1000))
             .onEach {
-                it.status = SyncOutboxStatus.PROCESSING
+                it.status = MedolOutboxStatus.PROCESSING
                 it.claimedBy = consumerId
                 it.claimedUntil = now.plus(claimTimeout)
                 it.lastError = null
@@ -852,7 +1400,7 @@ class SyncOutboxQueue(
     @Transactional
     fun markProcessed(sequence: Long) {
         repository.findById(sequence).ifPresent {
-            it.status = SyncOutboxStatus.PROCESSED
+            it.status = MedolOutboxStatus.PROCESSED
             it.processedAt = LocalDateTime.now()
             it.claimedBy = null
             it.claimedUntil = null
@@ -869,9 +1417,9 @@ class SyncOutboxQueue(
             it.claimedBy = null
             it.claimedUntil = null
             if (nextRetryCount >= maxRetries) {
-                it.status = SyncOutboxStatus.FAILED
+                it.status = MedolOutboxStatus.FAILED
             } else {
-                it.status = SyncOutboxStatus.AVAILABLE
+                it.status = MedolOutboxStatus.AVAILABLE
                 it.availableAt = LocalDateTime.now().plus(retryDelay)
             }
             repository.save(it)
@@ -880,10 +1428,10 @@ class SyncOutboxQueue(
 
     @Transactional
     fun purgeProcessedBefore(cutoff: LocalDateTime): Long =
-        repository.deleteByStatusAndProcessedAtBefore(SyncOutboxStatus.PROCESSED, cutoff)
+        repository.deleteByStatusAndProcessedAtBefore(MedolOutboxStatus.PROCESSED, cutoff)
 }
 
-fun syncReadModelChannel(sourceContext: String, sourceReadModel: String): String =
+fun readModelOutboxChannel(sourceContext: String, sourceReadModel: String): String =
     "readmodel.$sourceContext.$sourceReadModel"
 `);
         this.fs.write(this._sharedKernelKotlinPath(`${basePath}/SyncReadModelRegistry.kt`), `package ${basePackage}
@@ -1383,9 +1931,12 @@ ${assignments}
         const id = idFields[0];
         const idType = idFields.length > 1 ? `${name}Key` : readModelStorageType(id, false);
         const filterFields = readModelFilterFields(readmodel);
-        const criteriaFields = (readmodel.fields ?? []).filter(isCriteriaField);
+        const criteriaFields = [
+            ...((readmodel.fields ?? []).filter(isCriteriaField)),
+            ...readModelMetadataFields(readmodel).filter((field) => field.name === 'projectionUpdatedAt')
+        ];
         const jsonFields = (readmodel.fields ?? []).filter(isJsonJpaField);
-        const imports = readModelStorageImports([...idFields, ...filterFields, ...jsonFields, ...criteriaFields], this.model.rootPackage);
+        const imports = readModelStorageImports([...idFields, ...filterFields, ...jsonFields, ...criteriaFields.filter((field) => field.name !== 'projectionUpdatedAt')], this.model.rootPackage);
         const partialLookupMethods = idFields.length > 1
             ? idFields.map((field) =>
                 `    fun findAllBy${pascal(field.name)}(${field.name}: ${readModelStorageType(field, false)}): List<${entityName}>`
@@ -1487,9 +2038,9 @@ ${projectionToEntityAssignments}
         }
 `);
         if (criteriaFields.length > 0) {
-            const hasRangeCriteriaFields = criteriaFields.some((field) => isRangeCriteriaType(readModelStorageType(field, false)));
+            const hasRangeCriteriaFields = criteriaFields.some((field) => field.name === 'projectionUpdatedAt' || isRangeCriteriaType(readModelStorageType(field, false)));
             const hasLocalDateCriteriaFields = criteriaFields.some((field) => readModelStorageType(field, false) === 'LocalDate');
-            const hasLocalDateTimeCriteriaFields = criteriaFields.some((field) => readModelStorageType(field, false) === 'LocalDateTime');
+            const hasLocalDateTimeCriteriaFields = criteriaFields.some((field) => field.name === 'projectionUpdatedAt' || readModelStorageType(field, false) === 'LocalDateTime');
             this.fs.write(this._kotlinPath(`${readModelPersistencePath(context, name)}/${name}QueryService.kt`), `package ${packageName}
 
 import org.springframework.data.domain.Page
@@ -1501,6 +2052,7 @@ import jakarta.persistence.criteria.Root
 import org.hibernate.query.criteria.JpaExpression
 import tech.jhipster.service.QueryService
 ${hasRangeCriteriaFields ? 'import tech.jhipster.service.filter.RangeFilter\n' : ''}import java.util.function.Function
+${hasLocalDateTimeCriteriaFields ? 'import java.time.LocalDateTime\n' : ''}${hasLocalDateCriteriaFields ? 'import java.time.LocalDate\n' : ''}
 ${imports}
 import ${readModelPackageName}.${name}
 import ${readModelPackageName}.${name}Criteria
@@ -1617,6 +2169,7 @@ ${entityToProjectionAssignments}
     _writeReadModelResource(packageName, context, slicePackage, slice, readmodel, name, idFields) {
         const repositoryName = `${name}Repository`;
         const resourceName = `${name}Resource`;
+        const exportable = !!readmodel.exportable;
         const id = idFields[0];
         const idType = idFields.length > 1 ? `${name}Key` : readModelStorageType(id, false);
         const conceptRoute = httpRoute(slice.concepts[0] ?? slice.name);
@@ -1631,28 +2184,67 @@ ${entityToProjectionAssignments}
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${resourceName}.kt`), `package ${packageName}
 
 import org.springframework.data.domain.Page
-import org.springframework.data.domain.Pageable
+${exportable ? 'import org.springframework.data.domain.PageRequest\n' : ''}import org.springframework.data.domain.Pageable
 import org.springframework.data.web.PageableDefault
 import org.springframework.http.ResponseEntity
 import org.springframework.security.access.prepost.PreAuthorize
-import org.springframework.web.bind.annotation.CrossOrigin
+${exportable ? 'import org.springframework.stereotype.Component\n' : ''}import org.springframework.web.bind.annotation.CrossOrigin
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
-import org.springframework.web.bind.annotation.RequestMapping
+${exportable ? 'import org.springframework.web.bind.annotation.PostMapping\nimport org.springframework.web.bind.annotation.RequestBody\n' : ''}import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
-${imports}
+${exportable ? `import com.fasterxml.jackson.databind.ObjectMapper\nimport com.fasterxml.jackson.module.kotlin.readValue\nimport tech.jhipster.service.filter.RangeFilter\nimport ${this.model.rootPackage}.shared.application.export.DataExportColumn\nimport ${this.model.rootPackage}.shared.application.export.DataExportExecutionResult\nimport ${this.model.rootPackage}.shared.application.export.DataExportExecutionTask\nimport ${this.model.rootPackage}.shared.application.export.DataExportRequest\nimport ${this.model.rootPackage}.shared.application.export.DataExportResourceExecutor\nimport ${this.model.rootPackage}.shared.application.export.DataExportService\nimport java.time.LocalDateTime\nimport java.time.ZoneOffset\n` : ''}${imports}
 
 @CrossOrigin
 @RestController
 @RequestMapping("/${conceptRoute}/${readmodelRoute}")
-class ${resourceName}(private val repository: ${repositoryName}) {
-    @PreAuthorize("hasAuthority('*:*') or hasAuthority('${readModelPermission}:list') or hasAuthority('${readModelPermission}:read')")
+class ${resourceName}(
+    private val repository: ${repositoryName}${exportable ? ',\n    private val dataExportService: DataExportService' : ''}
+) {
+${exportable ? `    private val exportColumns = listOf(
+${exportColumns(readmodel).map((field) => `        DataExportColumn("${field.name}", "${escapeKotlin(field.label ?? field.title ?? field.name)}")`).join(',\n')}
+    )
+
+` : ''}    @PreAuthorize("hasAuthority('*:*') or hasAuthority('${readModelPermission}:list') or hasAuthority('${readModelPermission}:read')")
     @GetMapping
     fun findAll(
 ${findAllParameters}
     ): Page<${name}> =
+        findPage(criteria, pageable)
+
+${exportable ? `    @PreAuthorize("hasAuthority('*:*') or hasAuthority('${readModelPermission}:export') or hasAuthority('${readModelPermission}:list') or hasAuthority('${readModelPermission}:read')")
+    @PostMapping("/export")
+    fun export(
+        @RequestBody(required = false) request: DataExportRequest?,
+        criteria: ${name}Criteria,
+        @PageableDefault(size = 20) pageable: Pageable
+    ): ResponseEntity<Any> {
+        val columns = dataExportService.validatedColumns(request?.columns, exportColumns)
+        val snapshotUpperBound = LocalDateTime.now(ZoneOffset.UTC)
+        val snapshotCriteria = applyExportSnapshot(criteria, snapshotUpperBound)
+        val exportPageable = PageRequest.of(0, dataExportService.pageSize(), pageable.sort)
+        val firstPage = findPage(snapshotCriteria, exportPageable)
+        return dataExportService.export("${readmodelRoute}", columns, snapshotCriteria, pageable.sort, firstPage, fetchPage = { nextPage ->
+            findPage(snapshotCriteria, nextPage)
+        }, snapshotUpperBound = snapshotUpperBound.toInstant(ZoneOffset.UTC))
+    }
+
+` : ''}
+    private fun findPage(criteria: ${name}Criteria, pageable: Pageable): Page<${name}> =
         repository.findAllByCriteria(criteria, pageable)
 
+${exportable ? `    private fun applyExportSnapshot(criteria: ${name}Criteria, snapshotUpperBound: LocalDateTime): ${name}Criteria {
+        val projectionUpdatedAt = criteria.projectionUpdatedAt ?: RangeFilter<LocalDateTime>().also {
+            criteria.projectionUpdatedAt = it
+        }
+        val requestedUpperBound = projectionUpdatedAt.getLessThanOrEqual()
+        if (requestedUpperBound == null || requestedUpperBound.isAfter(snapshotUpperBound)) {
+            projectionUpdatedAt.setLessThanOrEqual(snapshotUpperBound)
+        }
+        return criteria
+    }
+
+` : ''}
 ${idFields.length === 1 ? `
     @PreAuthorize("hasAuthority('*:*') or hasAuthority('${readModelPermission}:read')")
     @GetMapping("/{id}")
@@ -1660,6 +2252,42 @@ ${idFields.length === 1 ? `
         repository.findById(id)?.let { ResponseEntity.ok(it) } ?: ResponseEntity.notFound().build()
 ` : ''}
 }
+${exportable ? `
+@Component
+class ${name}DataExportExecutor(
+    private val repository: ${repositoryName},
+    private val dataExportService: DataExportService,
+    private val objectMapper: ObjectMapper
+) : DataExportResourceExecutor {
+    override val resourceName: String = "${readmodelRoute}"
+    private val exportColumns = listOf(
+${exportColumns(readmodel).map((field) => `        DataExportColumn("${field.name}", "${escapeKotlin(field.label ?? field.title ?? field.name)}")`).join(',\n')}
+    )
+
+    override fun execute(task: DataExportExecutionTask): DataExportExecutionResult {
+        val criteria = objectMapper.readValue<${name}Criteria>(task.criteriaJson)
+        val snapshotUpperBound = LocalDateTime.ofInstant(task.snapshotUpperBound, ZoneOffset.UTC)
+        applyExportSnapshot(criteria, snapshotUpperBound)
+        val columns = dataExportService.columnsFromJson(task.columnsJson, exportColumns)
+        val sort = dataExportService.sortFromJson(task.sortJson)
+        val firstPage = repository.findAllByCriteria(criteria, PageRequest.of(0, dataExportService.pageSize(), sort))
+        return dataExportService.writeCsvFile(task.fileName, columns, firstPage) { nextPage ->
+            repository.findAllByCriteria(criteria, nextPage)
+        }
+    }
+
+    private fun applyExportSnapshot(criteria: ${name}Criteria, snapshotUpperBound: LocalDateTime): ${name}Criteria {
+        val projectionUpdatedAt = criteria.projectionUpdatedAt ?: RangeFilter<LocalDateTime>().also {
+            criteria.projectionUpdatedAt = it
+        }
+        val requestedUpperBound = projectionUpdatedAt.getLessThanOrEqual()
+        if (requestedUpperBound == null || requestedUpperBound.isAfter(snapshotUpperBound)) {
+            projectionUpdatedAt.setLessThanOrEqual(snapshotUpperBound)
+        }
+        return criteria
+    }
+}
+` : ''}
 `);
         if (this._isSyncReadModelSource(slice, readmodel)) {
             this._writeSyncReadModelSourceResource(packageName, context, slicePackage, slice, readmodel, name);
@@ -1704,14 +2332,14 @@ import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.ObjectMapper
-import ${this.model.rootPackage}.shared.application.sync.SyncOutboxRepository
+import ${this.model.rootPackage}.shared.application.outbox.MedolOutboxRepository
 
 @CrossOrigin
 @RestController
 @RequestMapping("${sourcePath}")
 class ${resourceName}(
     private val repository: ${repositoryName},
-    private val outboxRepository: SyncOutboxRepository,
+    private val outboxRepository: MedolOutboxRepository,
     private val objectMapper: ObjectMapper
 ) {
     private val mapType = object : TypeReference<Map<String, Any?>>() {}
@@ -1728,7 +2356,7 @@ class ${resourceName}(
         val pageNumber = cursor?.toIntOrNull()?.coerceAtLeast(0) ?: 0
         val page = repository.findAllByCriteria(null, PageRequest.of(pageNumber, size.coerceIn(1, 1000)))
         val highWatermark = outboxRepository
-            .findFirstBySourceContextAndSourceReadModelOrderBySequenceDesc("${sourceContext}", "${sourceReadModel}")
+            .findFirstBySourceContextAndSourceNameOrderBySequenceDesc("${sourceContext}", "${sourceReadModel}")
             ?.sequence ?: 0
         val items = page.content.mapNotNull { item ->
             val payload = objectMapper.convertValue(item, mapType)
@@ -1755,7 +2383,7 @@ class ${resourceName}(
         val reserved = setOf("afterSequence", "size", "cursor")
         val filters = parameters.filterKeys { it !in reserved }
         val rows = outboxRepository
-            .findBySourceContextAndSourceReadModelAndSequenceGreaterThanOrderBySequenceAsc(
+            .findBySourceContextAndSourceNameAndSequenceGreaterThanOrderBySequenceAsc(
                 "${sourceContext}",
                 "${sourceReadModel}",
                 afterSequence,
@@ -1771,7 +2399,7 @@ class ${resourceName}(
                     "operation" to row.operation,
                     "channel" to row.channel,
                     "sourceContext" to row.sourceContext,
-                    "sourceReadModel" to row.sourceReadModel,
+                    "sourceReadModel" to row.sourceName,
                     "readModelKey" to row.messageKey,
                     "eventId" to row.eventId,
                     "eventType" to row.eventType,
@@ -1976,7 +2604,7 @@ import org.springframework.context.annotation.Configuration
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
 ${includeMetadata ? `import ${this.model.rootPackage}.shared.application.metadata.ProjectionMetadata\n` : ''}
-${syncSource ? `import ${this.model.rootPackage}.shared.application.sync.SyncOutboxAppender\n` : ''}
+${syncSource ? `import ${this.model.rootPackage}.shared.application.outbox.MedolOutboxAppender\n` : ''}
 ${eventImports}
 ${stateImports}
 ${includeEventTime ? 'import java.time.LocalDateTime\nimport java.time.ZoneOffset\n' : ''}
@@ -1986,7 +2614,7 @@ ${interfaceMethods}
 }
 
 open class Default${name}ProjectionUpdater(
-    private val repository: ${repositoryName}${syncSource ? ',\n    private val outbox: SyncOutboxAppender' : ''}
+    private val repository: ${repositoryName}${syncSource ? ',\n    private val outbox: MedolOutboxAppender' : ''}
 ) : ${name}ProjectionUpdater {
 ${updaterHandlers}
 ${includeEventTime ? `
@@ -2000,7 +2628,7 @@ class ${name}ProjectionUpdaterConfiguration {
     @Bean
     @ConditionalOnMissingBean(${name}ProjectionUpdater::class)
     fun default${name}ProjectionUpdater(
-        repository: ${repositoryName}${syncSource ? ',\n        outbox: SyncOutboxAppender' : ''}
+        repository: ${repositoryName}${syncSource ? ',\n        outbox: MedolOutboxAppender' : ''}
     ): ${name}ProjectionUpdater =
         Default${name}ProjectionUpdater(repository${syncSource ? ', outbox' : ''})
 }

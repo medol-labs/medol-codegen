@@ -95,6 +95,11 @@ medol:
 <% } -%>
     page-size: ${MEDOL_SYNC_PAGE_SIZE:200}
     fixed-delay-ms: ${MEDOL_SYNC_FIXED_DELAY_MS:30000}
+  data-exchange:
+    export:
+      page-size: ${MEDOL_DATA_EXCHANGE_EXPORT_PAGE_SIZE:1000}
+      async-threshold: ${MEDOL_DATA_EXCHANGE_EXPORT_ASYNC_THRESHOLD:10000}
+      max-rows: ${MEDOL_DATA_EXCHANGE_EXPORT_MAX_ROWS:800000}
 <% if (externalSystems.length > 0) { -%>
 
 external:

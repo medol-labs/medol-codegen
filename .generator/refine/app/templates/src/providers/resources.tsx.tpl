@@ -67,6 +67,10 @@ export const resources: IResourceItem[] = [
 <% if (resource.capabilityProviders?.length) { -%>
       capabilityProviders: <%- JSON.stringify(resource.capabilityProviders) %>,
 <% } -%>
+<% if (resource.exportable) { -%>
+      exportable: true,
+      exportCapability: <%- JSON.stringify(resource.exportable.capability ?? null) %>,
+<% } -%>
       actionControls: <%- JSON.stringify(resource.actionControls) %>,
       aggregateRoute: "<%= resource.aggregateRoute %>",
       queryRoute: "<%= resource.queryRoute %>",

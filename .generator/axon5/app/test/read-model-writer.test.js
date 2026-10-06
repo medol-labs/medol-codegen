@@ -505,6 +505,8 @@ test('writes export support for exportable read models', () => {
     assert.match(processor, /class ExecuteDataExportProcessor/);
     assert.match(processor, /fun on\(event: DataExportRequestedEvent\)/);
     assert.match(processor, /@Namespace\("automation-data-exchange-execute-data-export"\)/);
+    assert.match(processor, /requestedAt = event\.requestedAt\.toInstant\(ZoneOffset\.UTC\)/);
+    assert.match(processor, /snapshotUpperBound = event\.snapshotUpperBound\.toInstant\(ZoneOffset\.UTC\)/);
     assert.match(processor, /lifecyclePort\.markProcessing\(event\.dataExportJobId\)/);
     assert.match(processor, /registry\.executor\(event\.resourceName\)\.execute\(task\)/);
     assert.match(processor, /lifecyclePort\.complete\(event\.dataExportJobId, result\.fileName, result\.filePath, result\.rowCount\)/);

@@ -92,6 +92,22 @@ function permissionCode(name) {
         .toLowerCase();
 }
 
+function mergeKotlinImports(...blocks) {
+    const seen = new Set();
+    return blocks
+        .filter(Boolean)
+        .flatMap((block) => String(block).split('\n'))
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => line.startsWith('import ') ? line.replace(/;$/, '') : line)
+        .filter((line) => {
+            if (seen.has(line)) return false;
+            seen.add(line);
+            return true;
+        })
+        .join('\n');
+}
+
 function conventionallyCompatibleReadModelField(readModelField, eventField) {
     if (readModelField.type === eventField.type) {
         return true;
@@ -341,8 +357,8 @@ const readModelWriterMethods = {
         const metadataImports = metadataFields.some((field) => field.type.startsWith('LocalDateTime'))
             ? 'import java.time.LocalDateTime'
             : '';
-        const allImports = [imports, metadataImports].filter(Boolean).join('\n');
-        const allEntityImports = [entityImports, metadataImports].filter(Boolean).join('\n');
+        const allImports = mergeKotlinImports(imports, metadataImports);
+        const allEntityImports = mergeKotlinImports(entityImports, metadataImports);
         const ids = readmodel.fields.filter((field) => field.idAttribute);
         const idFields = ids.length > 0 ? ids : readmodel.fields.slice(0, 1);
         const id = idFields[0];
@@ -811,6 +827,8 @@ import org.springframework.stereotype.Component
 import ${this.model.rootPackage}.shared.application.export.DataExportJobLifecyclePort
 import ${this.model.rootPackage}.shared.application.export.DataExportJobRequestMessage
 import ${this.model.rootPackage}.shared.application.export.DataExportJobRequestPort
+import java.time.LocalDateTime
+import java.time.ZoneOffset
 import java.util.UUID
 
 @Component
@@ -826,8 +844,8 @@ class AxonDataExportJobRequestPort(
                 sortJson = message.sortJson,
                 columnsJson = message.columnsJson,
                 requestedLocale = message.requestedLocale,
-                requestedAt = message.requestedAt,
-                snapshotUpperBound = message.snapshotUpperBound,
+                requestedAt = LocalDateTime.ofInstant(message.requestedAt, ZoneOffset.UTC),
+                snapshotUpperBound = LocalDateTime.ofInstant(message.snapshotUpperBound, ZoneOffset.UTC),
                 requestHash = message.requestHash,
                 fileName = message.fileName,
                 status = DataExportJobStatus.REQUESTED
@@ -876,6 +894,7 @@ import ${this.model.rootPackage}.dataexchange.events.${eventClass}
 import ${this.model.rootPackage}.shared.application.export.DataExportExecutionTask
 import ${this.model.rootPackage}.shared.application.export.DataExportJobLifecyclePort
 import ${this.model.rootPackage}.shared.application.export.DataExportResourceExecutorRegistry
+import java.time.ZoneOffset
 
 @Namespace("automation-data-exchange-${kebab(automation.name)}")
 @Component
@@ -894,8 +913,8 @@ class ${processorClass}(
             sortJson = event.sortJson,
             columnsJson = event.columnsJson,
             requestedLocale = event.requestedLocale,
-            requestedAt = event.requestedAt,
-            snapshotUpperBound = event.snapshotUpperBound,
+            requestedAt = event.requestedAt.toInstant(ZoneOffset.UTC),
+            snapshotUpperBound = event.snapshotUpperBound.toInstant(ZoneOffset.UTC),
             requestHash = event.requestHash,
             fileName = event.fileName
         )
@@ -2041,6 +2060,13 @@ ${projectionToEntityAssignments}
             const hasRangeCriteriaFields = criteriaFields.some((field) => field.name === 'projectionUpdatedAt' || isRangeCriteriaType(readModelStorageType(field, false)));
             const hasLocalDateCriteriaFields = criteriaFields.some((field) => readModelStorageType(field, false) === 'LocalDate');
             const hasLocalDateTimeCriteriaFields = criteriaFields.some((field) => field.name === 'projectionUpdatedAt' || readModelStorageType(field, false) === 'LocalDateTime');
+            const queryServiceImports = mergeKotlinImports(
+                hasRangeCriteriaFields ? 'import tech.jhipster.service.filter.RangeFilter' : '',
+                'import java.util.function.Function',
+                hasLocalDateTimeCriteriaFields ? 'import java.time.LocalDateTime' : '',
+                hasLocalDateCriteriaFields ? 'import java.time.LocalDate' : '',
+                imports
+            );
             this.fs.write(this._kotlinPath(`${readModelPersistencePath(context, name)}/${name}QueryService.kt`), `package ${packageName}
 
 import org.springframework.data.domain.Page
@@ -2051,9 +2077,7 @@ import jakarta.persistence.criteria.Expression
 import jakarta.persistence.criteria.Root
 import org.hibernate.query.criteria.JpaExpression
 import tech.jhipster.service.QueryService
-${hasRangeCriteriaFields ? 'import tech.jhipster.service.filter.RangeFilter\n' : ''}import java.util.function.Function
-${hasLocalDateTimeCriteriaFields ? 'import java.time.LocalDateTime\n' : ''}${hasLocalDateCriteriaFields ? 'import java.time.LocalDate\n' : ''}
-${imports}
+${queryServiceImports}
 import ${readModelPackageName}.${name}
 import ${readModelPackageName}.${name}Criteria
 import ${readModelPackageName}.${name}Projection
@@ -2177,6 +2201,20 @@ ${entityToProjectionAssignments}
         const readModelPermission = permissionCode(readmodel.name ?? readmodel.title);
         const filterFields = readModelFilterFields(readmodel);
         const imports = readModelStorageImports([...idFields, ...filterFields], this.model.rootPackage);
+        const resourceImports = mergeKotlinImports(
+            exportable ? `import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.kotlin.readValue
+import tech.jhipster.service.filter.RangeFilter
+import ${this.model.rootPackage}.shared.application.export.DataExportColumn
+import ${this.model.rootPackage}.shared.application.export.DataExportExecutionResult
+import ${this.model.rootPackage}.shared.application.export.DataExportExecutionTask
+import ${this.model.rootPackage}.shared.application.export.DataExportRequest
+import ${this.model.rootPackage}.shared.application.export.DataExportResourceExecutor
+import ${this.model.rootPackage}.shared.application.export.DataExportService
+import java.time.LocalDateTime
+import java.time.ZoneOffset` : '',
+            imports
+        );
         const findAllParameters = [
             `        criteria: ${name}Criteria`,
             '        @PageableDefault(size = 20) pageable: Pageable'
@@ -2193,7 +2231,7 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 ${exportable ? 'import org.springframework.web.bind.annotation.PostMapping\nimport org.springframework.web.bind.annotation.RequestBody\n' : ''}import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
-${exportable ? `import com.fasterxml.jackson.databind.ObjectMapper\nimport com.fasterxml.jackson.module.kotlin.readValue\nimport tech.jhipster.service.filter.RangeFilter\nimport ${this.model.rootPackage}.shared.application.export.DataExportColumn\nimport ${this.model.rootPackage}.shared.application.export.DataExportExecutionResult\nimport ${this.model.rootPackage}.shared.application.export.DataExportExecutionTask\nimport ${this.model.rootPackage}.shared.application.export.DataExportRequest\nimport ${this.model.rootPackage}.shared.application.export.DataExportResourceExecutor\nimport ${this.model.rootPackage}.shared.application.export.DataExportService\nimport java.time.LocalDateTime\nimport java.time.ZoneOffset\n` : ''}${imports}
+${resourceImports}
 
 @CrossOrigin
 @RestController

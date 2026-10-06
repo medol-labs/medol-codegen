@@ -17,10 +17,7 @@ function withResourceI18n(resources) {
         return {
             ...resource,
             i18nKey: `${resourceKey}.label`,
-            fields: resource.fields.map((field) => ({
-                ...field,
-                i18nKey: `${resourceKey}.fields.${field.name}.label`
-            })),
+            fields: resource.fields.map((field) => withFieldI18n(field, `${resourceKey}.fields.${field.name}`)),
             createCommand: withCommand(resource.createCommand),
             editCommand: withCommand(resource.editCommand),
             deleteCommand: withCommand(resource.deleteCommand),

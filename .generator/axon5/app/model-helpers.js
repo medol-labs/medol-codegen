@@ -518,11 +518,31 @@ function renderStateGuard(model, transition) {
         return '        // TODO: validate child/member state before appending events.';
     }
     const stateType = conceptStateEnumName(transition.owner.name);
+    const commandName = transition.command?.name ?? 'Command';
+    const ownerName = transition.owner.name;
+    const expectedState = transition.from;
+    const i18nKey = `errors.${contextPackage(transition.context)}.${lowerCamel(commandName)}.requiresState`;
+    const fallback = `${commandName} requires ${ownerName} to be ${expectedState}.`;
     return [
-        `        require(state.currentState == ${stateType}.${stateEnumEntry(transition.from)}) {`,
-        `            "${escapeKotlin(transition.command?.name ?? 'Command')} requires ${escapeKotlin(transition.owner.name)} to be ${escapeKotlin(transition.from)}."`,
+        `        if (state.currentState != ${stateType}.${stateEnumEntry(transition.from)}) {`,
+        `            throw ${model.rootPackage}.shared.domain.CommandRejectedException(`,
+        `                code = "COMMAND_REQUIRES_STATE",`,
+        `                i18nKey = "${escapeKotlin(i18nKey)}",`,
+        `                args = mapOf(`,
+        `                    "command" to "${escapeKotlin(commandName)}",`,
+        `                    "aggregate" to "${escapeKotlin(ownerName)}",`,
+        `                    "expectedState" to "${escapeKotlin(expectedState)}",`,
+        `                    "actualState" to state.currentState.toString()`,
+        `                ),`,
+        `                message = "${escapeKotlin(fallback)}"`,
+        `            )`,
         '        }'
     ].join('\n');
+}
+
+function lowerCamel(value) {
+    const text = pascal(value);
+    return text ? text[0].toLowerCase() + text.slice(1) : text;
 }
 
 function sourceNameOf(name) {

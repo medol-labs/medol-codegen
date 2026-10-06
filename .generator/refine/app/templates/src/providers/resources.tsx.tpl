@@ -67,6 +67,9 @@ export const resources: IResourceItem[] = [
       idField: "<%= resource.idField %>",
       idFields: <%- JSON.stringify(resource.idFields) %>,
       queryFields: <%- JSON.stringify(resource.queryFields) %>,
+<% if (resource.capabilityProviders?.length) { -%>
+      capabilityProviders: <%- JSON.stringify(resource.capabilityProviders) %>,
+<% } -%>
       actionControls: <%- JSON.stringify(resource.actionControls) %>,
       aggregateRoute: "<%= resource.aggregateRoute %>",
       queryRoute: "<%= resource.queryRoute %>",

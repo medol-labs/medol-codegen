@@ -88,7 +88,9 @@ function buildI18nModel(source, chapters, resources) {
         ['breadcrumb.actions.show', 'Show'],
         ['breadcrumb.actions.list', 'List'],
         ['values.boolean.true', 'True'],
-        ['values.boolean.false', 'False']
+        ['values.boolean.false', 'False'],
+        ['errors.commandRejected', 'Command rejected'],
+        ['errors.commandFailed', 'Command failed']
     ];
 
     chapters.forEach((chapter) => {
@@ -104,7 +106,11 @@ function buildI18nModel(source, chapters, resources) {
         });
     });
 
+    addDictionaryI18nEntries(entries, source);
+    addGeneratedErrorI18nEntries(entries, source);
+
     const translations = normalizeTranslations(source.translations ?? source.i18n?.translations ?? {});
+    addDictionaryTranslations(translations, source);
     const defaultLocale = source.defaultLocale ?? source.i18n?.defaultLocale ?? 'en';
     const locales = unique(['en', defaultLocale, ...(source.locales ?? source.i18n?.locales ?? []), ...Object.keys(translations)]);
     const messages = Object.fromEntries(locales.map((locale) => [locale, {}]));
@@ -134,6 +140,87 @@ function buildI18nModel(source, chapters, resources) {
     };
 }
 
+function addGeneratedErrorI18nEntries(entries, source) {
+    (source.transitions ?? []).forEach((transition) => {
+        if (!transition?.from || transition.owner?.type !== 'concept') return;
+        const commandName = transition.command?.name ?? transition.command?.title ?? 'Command';
+        const ownerName = transition.owner.name;
+        entries.push([
+            `errors.${i18nContextKey(transition.context)}.${camel(commandName)}.requiresState`,
+            `${titleCase(commandName)} requires ${titleCase(ownerName)} to be ${transition.from}.`
+        ]);
+    });
+
+    const commands = (source.slices ?? []).flatMap((slice) =>
+        (slice.commands ?? []).map((command) => ({command, slice}))
+    );
+    (source.slices ?? []).forEach((slice) => {
+        (slice.readmodels ?? []).forEach((readmodel) => {
+            normalizeArray(readmodel.eligibility).forEach((eligibility) => {
+                commands
+                    .filter(({command, slice: commandSlice}) =>
+                        commandUsesReadModel(command, readmodel)
+                        && eligibilityMatchesCommand(eligibility, command, commandSlice)
+                    )
+                    .forEach(({command, slice: commandSlice}) => {
+                        entries.push([
+                            `errors.${i18nContextKey(commandSlice.context ?? commandSlice.chapter)}.${camel(command.title ?? command.name)}.${camel(readmodel.title ?? readmodel.name)}.notEligible`,
+                            `${cleanTitle(readmodel.title ?? readmodel.name)} selection is not eligible${eligibility.profile ? ` for ${cleanTitle(eligibility.profile)}` : ''}.`
+                        ]);
+                    });
+            });
+        });
+    });
+}
+
+function i18nContextKey(value) {
+    const context = contextName(value)?.name;
+    return context ? context.replace(/[-_]/g, '').toLowerCase() : 'eventmodel';
+}
+
+function eligibilityMatchesCommand(eligibility, command, commandSlice) {
+    const commandRefs = normalizeArray(
+        eligibility.command ?? eligibility.commands ?? eligibility.for ?? eligibility.useCase ?? eligibility.profile
+    ).map((value) => String(value ?? '').toLowerCase());
+    if (commandRefs.length === 0) return true;
+    const candidates = [
+        command.id,
+        command.name,
+        command.title,
+        cleanTitle(command.name),
+        cleanTitle(command.title),
+        `${commandSlice.context}.${command.name}`,
+        `${commandSlice.context}.${command.title}`
+    ].filter(Boolean).map((value) => String(value).toLowerCase());
+    return commandRefs.some((ref) => candidates.includes(ref));
+}
+
+function commandUsesReadModel(command, readmodel) {
+    return (command.fields ?? []).some((field) =>
+        field?.source?.kind === 'direct'
+        && normalizeArray(field?.source?.from).some((source) => {
+            const [sourceOwner] = String(source ?? '').split('.').filter(Boolean);
+            return sourceOwner && readModelMatchesSource(readmodel, sourceOwner);
+        })
+    );
+}
+
+function readModelMatchesSource(readmodel, sourceOwner) {
+    const sourceKey = normalizedEligibilityKey(sourceOwner);
+    return [
+        readmodel.name,
+        readmodel.title,
+        readmodel.label,
+        cleanTitle(readmodel.name),
+        cleanTitle(readmodel.title),
+        cleanTitle(readmodel.label)
+    ].filter(Boolean).some((value) => normalizedEligibilityKey(value) === sourceKey);
+}
+
+function normalizedEligibilityKey(value) {
+    return String(value ?? '').replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+}
+
 function addFieldI18nEntries(entries, field) {
     entries.push([field.i18nKey, field.label]);
     entries.push([field.placeholderKey, field.placeholder]);
@@ -142,6 +229,51 @@ function addFieldI18nEntries(entries, field) {
         entries.push([option.i18nKey, option.label]);
     });
     (field.nestedFields ?? []).forEach((nestedField) => addFieldI18nEntries(entries, nestedField));
+}
+
+function addDictionaryI18nEntries(entries, source) {
+    normalizeArray(source.dictionaries ?? source.i18n?.dictionaries).forEach((dictionary) => {
+        const dictionaryCode = dictionary.dictionaryCode ?? dictionary.code ?? dictionary.name;
+        if (!dictionaryCode) {
+            return;
+        }
+        normalizeArray(dictionary.values ?? dictionary.dictionaryValues).forEach((value) => {
+            const valueCode = value.valueCode ?? value.code ?? value.value ?? value.name;
+            if (valueCode) {
+                entries.push([`dictionaries.${dictionaryCode}.${valueCode}`, dictionaryEnglishLabel(value)]);
+            }
+        });
+    });
+    normalizeArray(source.dictionaryValues ?? source.i18n?.dictionaryValues).forEach((value) => {
+        const dictionaryCode = value.dictionaryCode ?? value.dictionary ?? value.code;
+        const valueCode = value.valueCode ?? value.value ?? value.name;
+        if (dictionaryCode && valueCode) {
+            entries.push([`dictionaries.${dictionaryCode}.${valueCode}`, dictionaryEnglishLabel(value)]);
+        }
+    });
+}
+
+function addDictionaryTranslations(translations, source) {
+    const addTranslation = (dictionaryCode, value) => {
+        const valueCode = value.valueCode ?? value.code ?? value.value ?? value.name;
+        const label = value.displayNameZh ?? value.labelZh ?? value.displayName ?? value.label;
+        if (!dictionaryCode || !valueCode || !label) {
+            return;
+        }
+        translations['zh-CN'] = translations['zh-CN'] ?? {};
+        translations['zh-CN'][`dictionaries.${dictionaryCode}.${valueCode}`] = String(label);
+    };
+    normalizeArray(source.dictionaries ?? source.i18n?.dictionaries).forEach((dictionary) => {
+        const dictionaryCode = dictionary.dictionaryCode ?? dictionary.code ?? dictionary.name;
+        normalizeArray(dictionary.values ?? dictionary.dictionaryValues).forEach((value) => addTranslation(dictionaryCode, value));
+    });
+    normalizeArray(source.dictionaryValues ?? source.i18n?.dictionaryValues).forEach((value) => {
+        addTranslation(value.dictionaryCode ?? value.dictionary ?? value.code, value);
+    });
+}
+
+function dictionaryEnglishLabel(value) {
+    return String(value.displayNameEn ?? value.labelEn ?? value.titleEn ?? optionLabel(value.valueCode ?? value.code ?? value.value ?? value.name));
 }
 
 function normalizeTranslations(translations) {
@@ -184,7 +316,24 @@ function translatedDefaultValue(defaultValue, locale, translations) {
         return `${translations[requiredMatch[1]]}为必填项`;
     }
 
+    const stateRequirementMatch = /^(.+) requires (.+) to be (.+)\.$/.exec(defaultValue);
+    if (stateRequirementMatch) {
+        return `${translatedTerm(stateRequirementMatch[1], translations)}要求${translatedTerm(stateRequirementMatch[2], translations)}处于${translatedTerm(stateRequirementMatch[3], translations)}状态。`;
+    }
+
+    const eligibilityMatch = /^(.+) selection is not eligible(?: for (.+))?\.$/.exec(defaultValue);
+    if (eligibilityMatch) {
+        const projection = translatedTerm(eligibilityMatch[1], translations);
+        const profile = eligibilityMatch[2] ? translatedTerm(eligibilityMatch[2], translations) : undefined;
+        return profile ? `${projection}当前不可用，不能用于${profile}。` : `${projection}当前不可用。`;
+    }
+
     return undefined;
+}
+
+function translatedTerm(value, translations) {
+    const text = cleanTitle(value);
+    return translations[text] ?? translations[titleCase(text)] ?? titleCase(text);
 }
 
 function builtinTranslations(locale) {
@@ -219,6 +368,8 @@ function builtinTranslations(locale) {
         'Is not null': '不为空',
         'True': '是',
         'False': '否',
+        'values.boolean.true': '是',
+        'values.boolean.false': '否',
         'pagination': '分页'
     };
 }
@@ -328,6 +479,15 @@ function optionLabelFieldScore(name, primaryWord) {
 function dictionaryProviderFor(readModel) {
     if (readModel?.dictionaryProvider?.code && readModel?.dictionaryProvider?.value) {
         return readModel.dictionaryProvider;
+    }
+
+    const provider = (readModel?.capabilityProviders ?? [])
+        .find((item) => item?.kind === 'dictionaryValues' && item?.mappings?.code && item?.mappings?.value);
+    if (provider) {
+        return {
+            name: provider.source ?? readModel?.name,
+            ...provider.mappings
+        };
     }
 
     return null;
@@ -694,7 +854,7 @@ function cellValue(field) {
         return '<CopyableText value={getValue()} compact />';
     }
     if (lower === 'boolean') {
-        return 'getValue() ? "Yes" : "No"';
+        return 'formatValue(getValue(), t, dictionaryLabel)';
     }
     if (lower === 'date' || lower === 'datetime') {
         return 'getValue() ? new Date(String(getValue())).toLocaleString() : "-"';

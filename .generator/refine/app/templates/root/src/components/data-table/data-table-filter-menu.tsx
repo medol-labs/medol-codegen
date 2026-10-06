@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslate } from "@refinedev/core";
 import type { Column, Table } from "@tanstack/react-table";
 import {
   BadgeCheck,
@@ -64,6 +65,7 @@ export function DataTableFilterMenu<TData>({
   disabled,
   ...props
 }: DataTableFilterMenuProps<TData>) {
+  const t = useTranslate();
   const id = React.useId();
   void throttleMs;
   void shallow;
@@ -224,6 +226,7 @@ export function DataTableFilterMenu<TData>({
           columns={columns}
           onFilterUpdate={onFilterUpdate}
           onFilterRemove={onFilterRemove}
+          t={t}
         />
       ))}
       {filters.length > 0 && (
@@ -278,6 +281,7 @@ export function DataTableFilterMenu<TData>({
                     column={selectedColumn}
                     value={inputValue}
                     onSelect={(value) => onFilterAdd(selectedColumn, value)}
+                    t={t}
                   />
                 </>
               ) : (
@@ -324,6 +328,7 @@ interface DataTableFilterItemProps<TData> {
     updates: Partial<Omit<ExtendedColumnFilter<TData>, "filterId">>,
   ) => void;
   onFilterRemove: (filterId: string) => void;
+  t: ReturnType<typeof useTranslate>;
 }
 
 function DataTableFilterItem<TData>({
@@ -332,6 +337,7 @@ function DataTableFilterItem<TData>({
   columns,
   onFilterUpdate,
   onFilterRemove,
+  t,
 }: DataTableFilterItemProps<TData>) {
   {
     const [showFieldSelector, setShowFieldSelector] = React.useState(false);
@@ -478,6 +484,7 @@ function DataTableFilterItem<TData>({
           onFilterUpdate,
           showValueSelector,
           setShowValueSelector,
+          t,
         })}
         <Button
           aria-controls={filterItemId}
@@ -497,12 +504,14 @@ interface FilterValueSelectorProps<TData> {
   column: Column<TData>;
   value: string;
   onSelect: (value: string) => void;
+  t: ReturnType<typeof useTranslate>;
 }
 
 function FilterValueSelector<TData>({
   column,
   value,
   onSelect,
+  t,
 }: FilterValueSelectorProps<TData>) {
   const variant = column.columnDef.meta?.variant ?? "text";
 
@@ -511,10 +520,10 @@ function FilterValueSelector<TData>({
       return (
         <CommandGroup>
           <CommandItem value="true" onSelect={() => onSelect("true")}>
-            True
+            {t("values.boolean.true", "True")}
           </CommandItem>
           <CommandItem value="false" onSelect={() => onSelect("false")}>
-            False
+            {t("values.boolean.false", "False")}
           </CommandItem>
         </CommandGroup>
       );
@@ -588,6 +597,7 @@ function onFilterInputRender<TData>({
   onFilterUpdate,
   showValueSelector,
   setShowValueSelector,
+  t,
 }: {
   filter: ExtendedColumnFilter<TData>;
   column: Column<TData>;
@@ -598,6 +608,7 @@ function onFilterInputRender<TData>({
   ) => void;
   showValueSelector: boolean;
   setShowValueSelector: (value: boolean) => void;
+  t: ReturnType<typeof useTranslate>;
 }) {
   if (filter.operator === "isEmpty" || filter.operator === "isNotEmpty") {
     return (
@@ -667,11 +678,11 @@ function onFilterInputRender<TData>({
             aria-controls={inputListboxId}
             className="rounded-none bg-transparent px-1.5 py-0.5 [&_svg]:hidden"
           >
-            <SelectValue placeholder={filter.value ? "True" : "False"} />
+            <SelectValue placeholder={filter.value ? t("values.boolean.true", "True") : t("values.boolean.false", "False")} />
           </SelectTrigger>
           <SelectContent id={inputListboxId}>
-            <SelectItem value="true">True</SelectItem>
-            <SelectItem value="false">False</SelectItem>
+            <SelectItem value="true">{t("values.boolean.true", "True")}</SelectItem>
+            <SelectItem value="false">{t("values.boolean.false", "False")}</SelectItem>
           </SelectContent>
         </Select>
       );

@@ -1567,4 +1567,5 @@ test('keeps dictionary state filters aligned with modeled state values', () => {
         {field: 'dictionaryCode', operator: 'eq', value: 'MODEL_FORMAT'},
         {field: 'state', operator: 'eq', value: 'Active'}
     ]);
+    assert.equal(fields.selects.get('modelFormat')?.optionI18nPrefix, 'dictionaries.MODEL_FORMAT.');
 });

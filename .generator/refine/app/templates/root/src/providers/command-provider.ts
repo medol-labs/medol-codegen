@@ -63,7 +63,7 @@ const routeSegment = (value: string): string =>
 const commandErrorMessage = async (
   response: Response,
   fallback: string,
-): Promise<string> => {
+): Promise<{ message: string; problem?: Record<string, unknown> }> => {
   const contentType = response.headers.get("content-type") ?? "";
 
   if (contentType.includes("application/json") || contentType.includes("+json")) {
@@ -72,13 +72,13 @@ const commandErrorMessage = async (
       const error = payload as Record<string, unknown>;
       const message = error.detail ?? error.message ?? error.title;
       if (typeof message === "string" && message.trim()) {
-        return message;
+        return { message, problem: error };
       }
     }
   }
 
   const text = await response.text().catch(() => "");
-  return text.trim() || fallback;
+  return { message: text.trim() || fallback };
 };
 
 const idField = (meta?: AxonMeta): string =>
@@ -372,12 +372,15 @@ export const commandDataProvider = (
     resource: string,
     meta?: AxonMeta,
     sorters?: CrudSorting,
+    filters?: CrudFilter[],
   ): Promise<TData[]> => {
     const pageSize = 200;
+    const firstQuery = pageQuery(1, pageSize, sorters);
+    appendFilters(firstQuery, filters);
     const firstPage = await getCatalogPage<TData>(
       resource,
       meta,
-      pageQuery(1, pageSize, sorters),
+      firstQuery,
     );
 
     if (!firstPage.page) {
@@ -393,10 +396,12 @@ export const commandDataProvider = (
         : Math.ceil(firstPage.total / pageSize);
 
     while (nextPage <= totalPages && !reachedLastPage) {
+      const query = pageQuery(nextPage, pageSize, sorters);
+      appendFilters(query, filters);
       const page = await getCatalogPage<TData>(
         resource,
         meta,
-        pageQuery(nextPage, pageSize, sorters),
+        query,
       );
       records.push(...page.data);
       reachedLastPage = page.page?.last === true;
@@ -454,6 +459,7 @@ export const commandDataProvider = (
         resource,
         meta,
         sorters,
+        useServerFilters ? filters : undefined,
       );
       const filtered = applyFilters(allRecords, filters);
       const sorted = applySorting(filtered, sorters);
@@ -534,13 +540,32 @@ export const commandDataProvider = (
       );
 
       if (!res.ok) {
+        const { message, problem } = await commandErrorMessage(
+          res,
+          `Command failed: ${resource}.${command}`,
+        );
         const error = new Error(
-          await commandErrorMessage(
-            res,
-            `Command failed: ${resource}.${command}`,
-          ),
-        ) as Error & { statusCode?: number };
+          message,
+        ) as Error & {
+          statusCode?: number;
+          code?: string;
+          i18nKey?: string;
+          args?: Record<string, unknown>;
+          detail?: string;
+          title?: string;
+          problem?: Record<string, unknown>;
+        };
         error.statusCode = res.status;
+        error.problem = problem;
+        if (problem) {
+          error.code = typeof problem.code === "string" ? problem.code : undefined;
+          error.i18nKey = typeof problem.i18nKey === "string" ? problem.i18nKey : undefined;
+          error.args = typeof problem.args === "object" && problem.args !== null
+            ? problem.args as Record<string, unknown>
+            : undefined;
+          error.detail = typeof problem.detail === "string" ? problem.detail : undefined;
+          error.title = typeof problem.title === "string" ? problem.title : undefined;
+        }
         throw error;
       }
 

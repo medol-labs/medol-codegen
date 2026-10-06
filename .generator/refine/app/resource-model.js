@@ -111,6 +111,7 @@ function toReadModelResource(group, readModel, allEvents, workflow) {
         idField: idField?.name ?? 'id',
         idFields: (idFields.length > 0 ? idFields : [idField]).filter(Boolean).map((field) => field.name),
         queryFields: criteriaQueryFields(queryFields),
+        capabilityProviders: readModel?.capabilityProviders ?? [],
         rowIdExpression: rowIdExpression((idFields.length > 0 ? idFields : [idField]).filter(Boolean)),
         readModelId: readModel?.id,
         canList: readModel ? !!readModel.listElement : true,

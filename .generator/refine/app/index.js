@@ -25,6 +25,34 @@ function logGenerationWarnings(generator, warnings = []) {
     [...new Set(warnings)].forEach((warning) => generator.log(`Warning: ${warning}`));
 }
 
+function withExternalDictionaryI18n(model, cwd) {
+    const dictionaryFile = path.join(cwd, 'dictionary-init', 'dictionaries.json');
+    if (!fs.existsSync(dictionaryFile)) {
+        return model;
+    }
+    try {
+        const dictionarySource = JSON.parse(fs.readFileSync(dictionaryFile, 'utf8'));
+        const dictionaries = Array.isArray(dictionarySource?.dictionaries)
+            ? dictionarySource.dictionaries
+            : [];
+        if (dictionaries.length === 0) {
+            return model;
+        }
+        return {
+            ...model,
+            i18n: {
+                ...(model.i18n ?? {}),
+                dictionaries: [
+                    ...((model.i18n?.dictionaries ?? model.dictionaries ?? [])),
+                    ...dictionaries
+                ]
+            }
+        };
+    } catch (error) {
+        throw new Error(`Failed to load dictionary i18n source from ${dictionaryFile}: ${error.message}`);
+    }
+}
+
 function toDisplayName(value) {
     const normalized = `${value ?? ''}`
         .replace(/[_-]+/g, ' ')
@@ -97,7 +125,7 @@ const RefineGenerator = class extends Generator {
         this.workspace = loadMedolWorkspace(this.env.cwd, this.opts);
         const loaded = loadGeneratorModel(this.env.cwd, this.opts);
         config = loaded.config;
-        codegenModel = loaded.codegenModel;
+        codegenModel = withExternalDictionaryI18n(loaded.codegenModel, this.env.cwd);
 
         const outputRoot = this._resolveOutputRoot();
         if (outputRoot && outputRoot !== '.') {
@@ -444,6 +472,26 @@ const RefineGenerator = class extends Generator {
         this.fs.copy(
             this.templatePath('root/src/hooks/command/useCommandButton.ts'),
             this.destinationPath('./src/hooks/command/useCommandButton.ts')
+        );
+        this.fs.copy(
+            this.templatePath('root/src/hooks/command/useCommandForm.ts'),
+            this.destinationPath('./src/hooks/command/useCommandForm.ts')
+        );
+        this.fs.copy(
+            this.templatePath('root/src/providers/command-provider.ts'),
+            this.destinationPath('./src/providers/command-provider.ts')
+        );
+        this.fs.copy(
+            this.templatePath('root/src/lib/problem-detail.ts'),
+            this.destinationPath('./src/lib/problem-detail.ts')
+        );
+        this.fs.copy(
+            this.templatePath('root/src/lib/dictionary-i18n.ts'),
+            this.destinationPath('./src/lib/dictionary-i18n.ts')
+        );
+        this.fs.copy(
+            this.templatePath('root/src/components/refine-ui/form/resource-select.tsx'),
+            this.destinationPath('./src/components/refine-ui/form/resource-select.tsx')
         );
     }
 

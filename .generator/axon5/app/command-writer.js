@@ -173,6 +173,7 @@ function eligibilityGuardForField(model, command, slice, field, source, readMode
     const projectionVariable = `${lowerCamel(readModelName)}Selection`;
     const packageName = `${model.rootPackage}.${contextPackage(info.context)}.${_sliceTitle(info.slice.title)}`;
     return {
+        rootPackage: model.rootPackage,
         field,
         readmodel: info.readmodel,
         repositoryName,
@@ -185,6 +186,9 @@ function eligibilityGuardForField(model, command, slice, field, source, readMode
         projectionVariable,
         conditions,
         profile: eligibility.profile,
+        commandName: cleanTitle(command?.title ?? command?.name),
+        projectionName: cleanTitle(info.readmodel.title),
+        i18nKey: `errors.${contextPackage(slice.context ?? slice.chapter)}.${lowerCamel(command?.title ?? command?.name)}.${lowerCamel(info.readmodel.title)}.notEligible`,
         message: `${cleanTitle(info.readmodel.title)} selection is not eligible${eligibility.profile ? ` for ${cleanTitle(eligibility.profile)}` : ''}.`
     };
 }
@@ -307,8 +311,18 @@ function renderEligibilityGuard(guard) {
         ? `command.${guard.field.name} == null || (${guard.projectionVariable} != null && ${checks})`
         : `${guard.projectionVariable} != null && ${checks}`;
     return `        val ${guard.projectionVariable} = ${lookup}
-        require(${requireExpression}) {
-            "${escapeKotlin(guard.message)}"
+        if (!(${requireExpression})) {
+            throw ${guard.rootPackage}.shared.domain.CommandRejectedException(
+                code = "SELECTION_NOT_ELIGIBLE",
+                i18nKey = "${escapeKotlin(guard.i18nKey)}",
+                args = mapOf(
+                    "command" to "${escapeKotlin(guard.commandName)}",
+                    "projection" to "${escapeKotlin(guard.projectionName)}",
+                    "field" to "${escapeKotlin(guard.field.name)}",
+                    "profile" to ${guard.profile ? `"${escapeKotlin(cleanTitle(guard.profile))}"` : 'null'}
+                ),
+                message = "${escapeKotlin(guard.message)}"
+            )
         }`;
 }
 

@@ -12,17 +12,31 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { useDictionaryTranslation } from "@/lib/dictionary-i18n";
 import { Separator } from "@/components/ui/separator";
 import { renderFieldOverride } from "@/platform/composition";
 
-const formatValue = (value: unknown, t: ReturnType<typeof useTranslate>) => {
+const formatValue = (
+  value: unknown,
+  t: ReturnType<typeof useTranslate>,
+  dictionaryLabel: ReturnType<typeof useDictionaryTranslation>["dictionaryLabel"],
+  options?: Array<{ label: string; value: string }>,
+  dictionaryCode?: string,
+): string => {
   if (value === null || value === undefined || value === "") return "-";
+  if (Array.isArray(value)) {
+    const formatted: string[] = value.map((item) => formatValue(item, t, dictionaryLabel, options, dictionaryCode)).filter((item) => item !== "-");
+    return formatted.length > 0 ? formatted.join(", ") : "-";
+  }
   if (typeof value === "boolean") return value ? t("values.boolean.true", "True") : t("values.boolean.false", "False");
-  return String(value);
+  const stringValue = String(value);
+  if (dictionaryCode) return dictionaryLabel(dictionaryCode, stringValue, t(`dictionaries.${dictionaryCode}.${stringValue}`, stringValue));
+  return options?.find((option) => option.value === stringValue)?.label ?? stringValue;
 };
 
 export const <%= resource.component %>Show = () => {
   const t = useTranslate();
+  const { dictionaryLabel } = useDictionaryTranslation();
   const { result: record } = useShow({
     dataProviderName: "<%= resource.dataProviderName %>",
     meta: {
@@ -50,7 +64,11 @@ export const <%= resource.component %>Show = () => {
 <% if (field.longText) { -%>
               {renderFieldOverride(frontendComposition, "field:<%= resource.route %>:display:<%= field.name %>", { value: record?.<%= field.name %>, record, resource: "<%= resource.route %>", field: "<%= field.name %>", view: "display" }) ?? <CopyableText value={record?.<%= field.name %>} />}
 <% } else { -%>
-              {renderFieldOverride(frontendComposition, "field:<%= resource.route %>:display:<%= field.name %>", { value: record?.<%= field.name %>, record, resource: "<%= resource.route %>", field: "<%= field.name %>", view: "display" }) ?? <p className="text-sm text-muted-foreground">{formatValue(record?.<%= field.name %>, t)}</p>}
+              {renderFieldOverride(frontendComposition, "field:<%= resource.route %>:display:<%= field.name %>", { value: record?.<%= field.name %>, record, resource: "<%= resource.route %>", field: "<%= field.name %>", view: "display" }) ?? <p className="text-sm text-muted-foreground">{formatValue(record?.<%= field.name %>, t, dictionaryLabel<% if (field.enumOptions.length > 0) { -%>, [
+<% field.enumOptions.forEach((option) => { -%>
+                { label: t("<%= option.i18nKey %>", <%- JSON.stringify(option.label) %>), value: <%- JSON.stringify(option.value) %> },
+<% }) -%>
+              ]<% } else { -%>, undefined<% } -%><% if (field.dictionary) { -%>, "<%= field.dictionary %>"<% } -%>)}</p>}
 <% } -%>
             </div>
             <Separator />

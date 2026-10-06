@@ -285,6 +285,9 @@ ${beanMethods}
         this.fs.copyTpl(this.templatePath('ApiExceptionHandler.kt.tpl'), this._sharedKernelKotlinPath('shared/infrastructure/web/ApiExceptionHandler.kt'), {
             rootPackage: this.model.rootPackage
         });
+        this.fs.copyTpl(this.templatePath('CommandRejectedException.kt.tpl'), this._sharedKernelKotlinPath('shared/domain/CommandRejectedException.kt'), {
+            rootPackage: this.model.rootPackage
+        });
         this._writeMetadataSupport();
         this.fs.copyTpl(this.templatePath('AxonFlowLoggingConfiguration.kt.tpl'), this._sharedKernelKotlinPath('shared/application/axon/AxonFlowLoggingConfiguration.kt'), {
             rootPackage: this.model.rootPackage

@@ -1,4 +1,5 @@
 // Generated from config.json by the refine generator.
+import { useTranslate } from "@refinedev/core";
 import { useNavigate } from "react-router";
 
 import {
@@ -29,6 +30,7 @@ import { ResourceSelect } from "@/components/refine-ui/form/resource-select";
 <% } -%>
 
 export const <%= command.pageComponent %> = () => {
+  const t = useTranslate();
   const navigate = useNavigate();
 
   const { refineCore: { onFinish }, ...form } = useCommandForm({
@@ -55,7 +57,7 @@ export const <%= command.pageComponent %> = () => {
             rules={<%- field.rules %>}
             render={({ field }) => (
               <FormItem>
-                <FormLabel><%= field.label %></FormLabel>
+                <FormLabel>{t("<%= field.i18nKey %>", "<%= field.label %>")}</FormLabel>
 <% if (field.select) { -%>
                 <ResourceSelect
                   withFormControl
@@ -63,9 +65,12 @@ export const <%= command.pageComponent %> = () => {
                   dataProviderName="<%= field.select.dataProviderName %>"
                   optionLabel="<%= field.select.optionLabel %>"
                   optionValue="<%= field.select.optionValue %>"
+<% if (field.select.optionI18nPrefix) { -%>
+                  optionI18nPrefix="<%= field.select.optionI18nPrefix %>"
+<% } -%>
                   value={field.value || ""}
                   onValueChange={field.onChange}
-                  placeholder="Select <%= field.label %>"
+                  placeholder={t("<%= field.placeholderKey %>", "Select <%= field.label %>")}
 <% if (field.select.filters?.length) { -%>
                   filters={<%- JSON.stringify(field.select.filters) %>}
 <% } -%>
@@ -77,7 +82,7 @@ export const <%= command.pageComponent %> = () => {
 <% } -%>
                   meta={{
                     idField: "<%= field.select.meta.idField %>",
-                    label: "<%= field.select.meta.label %>",
+                    label: t("<%= field.i18nKey %>", "<%= field.select.meta.label %>"),
                     aggregateRoute: "<%= field.select.meta.aggregateRoute %>",
                     queryRoute: "<%= field.select.meta.queryRoute %>",
 <% if (field.select.meta.queryFields?.length) { -%>
@@ -92,12 +97,12 @@ export const <%= command.pageComponent %> = () => {
                 >
                   <FormControl>
                     <SelectTrigger>
-                      <SelectValue placeholder="Select <%= field.label %>" />
+                      <SelectValue placeholder={t("<%= field.placeholderKey %>", "Select <%= field.label %>")} />
                     </SelectTrigger>
                   </FormControl>
                   <SelectContent>
-                    <SelectItem value="true">True</SelectItem>
-                    <SelectItem value="false">False</SelectItem>
+                    <SelectItem value="true">{t("values.boolean.true", "True")}</SelectItem>
+                    <SelectItem value="false">{t("values.boolean.false", "False")}</SelectItem>
                   </SelectContent>
                 </Select>
 <% } else if (field.enumOptions && field.enumOptions.length) { -%>
@@ -107,12 +112,12 @@ export const <%= command.pageComponent %> = () => {
                 >
                   <FormControl>
                     <SelectTrigger>
-                      <SelectValue placeholder="Select <%= field.label %>" />
+                      <SelectValue placeholder={t("<%= field.placeholderKey %>", "Select <%= field.label %>")} />
                     </SelectTrigger>
                   </FormControl>
                   <SelectContent>
 <% field.enumOptions.forEach((option) => { -%>
-                    <SelectItem value="<%= option.value %>"><%= option.label %></SelectItem>
+                    <SelectItem value="<%= option.value %>">{t("<%= option.i18nKey %>", "<%= option.label %>")}</SelectItem>
 <% }) -%>
                   </SelectContent>
                 </Select>

@@ -11,6 +11,7 @@ import {
 } from "@refinedev/core";
 import React from "react";
 import { useFileDownload } from "@/components/download/file-download";
+import { problemDetailDescription } from "@/lib/problem-detail";
 import { useCommandButtonCanAccess } from "./useCommandButtonCanAccess";
 
 type CommandNavOpts = {
@@ -304,7 +305,7 @@ export const useCommandButton = ({
       open?.({
         type: "error",
         message: translate("notifications.error", "Error"),
-        description: error instanceof Error ? error.message : label,
+        description: problemDetailDescription(error, translate, label),
       });
       throw error;
     } finally {

@@ -2248,10 +2248,11 @@ ${eventHandlers}
 };
 
 function readModelFilterFields(readmodel) {
+    const dictionaryValueProvider = dictionaryValueProviderFor(readmodel);
     const providerFilterFields = [
-        readmodel.dictionaryProvider?.code,
-        readmodel.dictionaryProvider?.state,
-        readmodel.dictionaryProvider?.active
+        dictionaryValueProvider?.code,
+        dictionaryValueProvider?.state,
+        dictionaryValueProvider?.active
     ].filter(Boolean);
     const filterFieldNames = new Set([
         ...(readmodel.fields ?? [])
@@ -2266,6 +2267,13 @@ function readModelFilterFields(readmodel) {
             .filter((field) => field.cardinality !== 'Multiple'),
         (field) => field.name
     );
+}
+
+function dictionaryValueProviderFor(readmodel) {
+    if (readmodel.dictionaryProvider?.code) return readmodel.dictionaryProvider;
+    const provider = (readmodel.capabilityProviders ?? [])
+        .find((item) => item?.kind === 'dictionaryValues' && item?.mappings?.code);
+    return provider?.mappings;
 }
 
 function matchesLookupEvent(lookup, event, mappings = []) {

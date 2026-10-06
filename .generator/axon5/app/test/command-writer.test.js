@@ -95,7 +95,9 @@ test('generates backend command handler guards for projection eligibility select
     assert.match(handler, /private val federationOverviewReadModelRepository: FederationOverviewReadModelRepository/);
     assert.match(handler, /val federationOverviewReadModelSelection = federationOverviewReadModelRepository\.findById\(command\.federationId\)/);
     assert.doesNotMatch(handler, /findById\(it\)/);
-    assert.match(handler, /require\(federationOverviewReadModelSelection != null && federationOverviewReadModelSelection\.state == FederationStateEnum\.Active\)/);
+    assert.match(handler, /if \(!\(federationOverviewReadModelSelection != null && federationOverviewReadModelSelection\.state == FederationStateEnum\.Active\)\)/);
+    assert.match(handler, /code = "SELECTION_NOT_ELIGIBLE"/);
+    assert.match(handler, /i18nKey = "errors\.trainingorchestration\.defineTrainingRunConfiguration\.federationOverview\.notEligible"/);
     assert.match(handler, /Federation Overview selection is not eligible\./);
     assert.deepEqual(writer.generationWarnings, undefined);
 });

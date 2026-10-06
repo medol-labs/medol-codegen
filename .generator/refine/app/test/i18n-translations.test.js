@@ -87,3 +87,72 @@ test('loads locale-specific model translations without replacing existing codege
         fs.rmSync(workspace, { recursive: true, force: true });
     }
 });
+
+test('generates i18n messages for read model enum field options', () => {
+    const frontendModel = buildFrontendModel({
+        rootPackage: 'tech.medo',
+        domain: 'Demo',
+        locales: ['zh-CN'],
+        defaultLocale: 'zh-CN',
+        translations: {
+            'zh-CN': {
+                'Order Catalog': '订单目录',
+                'State': '状态',
+                'Active': '已启用',
+                'Draft': '草稿'
+            }
+        },
+        contexts: [{
+            name: 'Sales',
+            title: 'Sales',
+            notes: [],
+            risks: [],
+            decisions: [],
+            metrics: [],
+            valueTypes: [],
+            aggregates: [],
+            concepts: [],
+            externalSystems: []
+        }],
+        valueTypes: [],
+        aggregates: [],
+        concepts: [{
+            name: 'Order',
+            title: 'Order',
+            states: ['Draft', 'Active']
+        }],
+        transitions: [],
+        actors: [],
+        slices: [{
+            context: 'Sales',
+            chapter: 'Sales',
+            title: 'Order Catalog',
+            aggregate: 'Order',
+            commands: [],
+            events: [],
+            readmodels: [{
+                title: 'Order Catalog',
+                name: 'OrderCatalog',
+                listElement: true,
+                fields: [{
+                    name: 'orderId',
+                    type: 'UUID',
+                    idAttribute: true
+                }, {
+                    name: 'state',
+                    type: 'Order.State'
+                }]
+            }],
+            screens: [],
+            processors: [],
+            specifications: [],
+            hotspots: []
+        }]
+    });
+
+    const messages = frontendModel.i18n.messages['zh-CN'];
+
+    assert.equal(messages['resources.order_catalog.fields.state.label'], '状态');
+    assert.equal(messages['resources.order_catalog.fields.state.options.Active'], '已启用');
+    assert.equal(messages['resources.order_catalog.fields.state.options.Draft'], '草稿');
+});

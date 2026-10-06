@@ -524,7 +524,11 @@ export const <%= command.pageComponent %> = () => {
                     label={t("<%= nestedField.i18nKey %>", "<%= nestedField.label %>")}
                     inputType={<%- nestedField.inputType ? JSON.stringify(nestedField.inputType) : 'null' %>}
                     itemDefaultValue={<%- nestedField.scalarListItemDefaultValue %>}
-                    options={<%- nestedField.enumOptions && nestedField.enumOptions.length ? JSON.stringify(nestedField.enumOptions.map((option) => ({ value: option.value, label: option.label }))) : 'undefined' %>}
+                    options={<% if (nestedField.enumOptions && nestedField.enumOptions.length) { -%>[
+<% nestedField.enumOptions.forEach((option) => { -%>
+                      { value: <%- JSON.stringify(option.value) %>, label: t("<%= option.i18nKey %>", <%- JSON.stringify(option.label) %>) },
+<% }) -%>
+                    ]<% } else { -%>undefined<% } -%>}
                   />
 <% } else { -%>
                   <FormField
@@ -602,7 +606,11 @@ export const <%= command.pageComponent %> = () => {
                 label={t("<%= nestedField.i18nKey %>", "<%= nestedField.label %>")}
                 inputType={<%- nestedField.inputType ? JSON.stringify(nestedField.inputType) : 'null' %>}
                 itemDefaultValue={<%- nestedField.scalarListItemDefaultValue %>}
-                options={<%- nestedField.enumOptions && nestedField.enumOptions.length ? JSON.stringify(nestedField.enumOptions.map((option) => ({ value: option.value, label: option.label }))) : 'undefined' %>}
+                options={<% if (nestedField.enumOptions && nestedField.enumOptions.length) { -%>[
+<% nestedField.enumOptions.forEach((option) => { -%>
+                  { value: <%- JSON.stringify(option.value) %>, label: t("<%= option.i18nKey %>", <%- JSON.stringify(option.label) %>) },
+<% }) -%>
+                ]<% } else { -%>undefined<% } -%>}
               />
 <% } else { -%>
               <FormField
@@ -680,6 +688,9 @@ export const <%= command.pageComponent %> = () => {
                   dataProviderName="<%= field.select.dataProviderName %>"
                   optionLabel="<%= field.select.optionLabel %>"
                   optionValue="<%= field.select.optionValue %>"
+<% if (field.select.optionI18nPrefix) { -%>
+                  optionI18nPrefix="<%= field.select.optionI18nPrefix %>"
+<% } -%>
                   value={Array.isArray(field.value) ? field.value : []}
                   onValueChange={field.onChange}
                   placeholder={t("<%= field.placeholderKey %>", "Select <%= field.label %>")}
@@ -714,7 +725,11 @@ export const <%= command.pageComponent %> = () => {
             label={t("<%= field.i18nKey %>", "<%= field.label %>")}
             inputType={<%- field.inputType ? JSON.stringify(field.inputType) : 'null' %>}
             itemDefaultValue={<%- field.scalarListItemDefaultValue %>}
-            options={<%- field.enumOptions && field.enumOptions.length ? JSON.stringify(field.enumOptions.map((option) => ({ value: option.value, label: option.label }))) : 'undefined' %>}
+            options={<% if (field.enumOptions && field.enumOptions.length) { -%>[
+<% field.enumOptions.forEach((option) => { -%>
+              { value: <%- JSON.stringify(option.value) %>, label: t("<%= option.i18nKey %>", <%- JSON.stringify(option.label) %>) },
+<% }) -%>
+            ]<% } else { -%>undefined<% } -%>}
           />
 <% } else { -%>
           <FormField
@@ -731,6 +746,9 @@ export const <%= command.pageComponent %> = () => {
                   dataProviderName="<%= field.select.dataProviderName %>"
                   optionLabel="<%= field.select.optionLabel %>"
                   optionValue="<%= field.select.optionValue %>"
+<% if (field.select.optionI18nPrefix) { -%>
+                  optionI18nPrefix="<%= field.select.optionI18nPrefix %>"
+<% } -%>
                   value={field.value || ""}
                   onValueChange={(value<% if (field.select.snapshots?.length) { -%>, option<% } -%>) => {
                     field.onChange(value);

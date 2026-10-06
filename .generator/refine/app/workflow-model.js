@@ -161,6 +161,7 @@ function buildWorkflowModel(
                     ...selectModel,
                     optionValue: dictionaryProviderField(readModel, 'value') ?? id,
                     optionLabel: dictionaryProviderField(readModel, 'label') ?? optionLabel,
+                    optionI18nPrefix: null,
                     dictionaryCodeField: dictionaryProviderField(readModel, 'code'),
                     stateField: dictionaryProviderField(readModel, 'state'),
                     activeField: dictionaryProviderField(readModel, 'active'),
@@ -298,6 +299,7 @@ function buildWorkflowModel(
             }
             return {
                 ...dictionaryProviderSelect,
+                optionI18nPrefix: `dictionaries.${dictionaryCode}.`,
                 meta: {
                     ...dictionaryProviderSelect.meta,
                     queryFields: unique([

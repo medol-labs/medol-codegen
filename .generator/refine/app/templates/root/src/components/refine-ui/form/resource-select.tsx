@@ -1,4 +1,4 @@
-import { useSelect, type BaseRecord, type CrudFilter } from "@refinedev/core";
+import { useSelect, useTranslate, type BaseRecord, type CrudFilter } from "@refinedev/core";
 import { Check, ChevronsUpDown, X } from "lucide-react";
 import * as React from "react";
 
@@ -26,6 +26,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { dictionaryCodeFromI18nPrefix, useDictionaryTranslation } from "@/lib/dictionary-i18n";
 import { cn } from "@/lib/utils";
 
 type UseSelectParams = NonNullable<Parameters<typeof useSelect>[0]>;
@@ -49,6 +50,7 @@ type ResourceSelectProps = Omit<
   disabled?: boolean;
   optionLabel?: string | ((item: BaseRecord) => string);
   optionValue?: string | ((item: BaseRecord) => string | number);
+  optionI18nPrefix?: string;
   defaultValue?: UseSelectParams["defaultValue"];
   dataProviderName?: UseSelectParams["dataProviderName"];
   filters?: UseSelectParams["filters"];
@@ -76,6 +78,7 @@ type ResourceMultiSelectProps = Omit<
   disabled?: boolean;
   optionLabel?: string | ((item: BaseRecord) => string);
   optionValue?: string | ((item: BaseRecord) => string | number);
+  optionI18nPrefix?: string;
   defaultValue?: UseSelectParams["defaultValue"];
   dataProviderName?: UseSelectParams["dataProviderName"];
   filters?: UseSelectParams["filters"];
@@ -116,6 +119,7 @@ const readableOptionLabel = (
 
   for (const key of [
     "displayName",
+    "defaultDisplayName",
     "datasetName",
     "runtimeName",
     "organizationName",
@@ -152,7 +156,33 @@ const readableOptionValue = (
     ? optionValue(item)
     : typeof optionValue === "string"
       ? item[optionValue]
-      : item.id;
+    : item.id;
+
+const translatedOptionLabel = (
+  translate: ReturnType<typeof useTranslate>,
+  dictionaryLabel: ReturnType<typeof useDictionaryTranslation>["dictionaryLabel"],
+  prefix: string | undefined,
+  value: unknown,
+  label: React.ReactNode,
+  record?: BaseRecord,
+) => {
+  const fallback = prefix && value !== null && value !== undefined
+    ? translate(`${prefix}${String(value)}`, String(label ?? value))
+    : String(label ?? value ?? "");
+  const dictionaryCode =
+    dictionaryCodeFromI18nPrefix(prefix) ??
+    (hasText(record?.dictionaryCode) ? String(record?.dictionaryCode) : undefined);
+  const valueCode = hasText(record?.valueCode) ? record?.valueCode : value;
+
+  if (dictionaryCode) {
+    return dictionaryLabel(dictionaryCode, valueCode, fallback);
+  }
+
+  if (!prefix || value === null || value === undefined) {
+    return label;
+  }
+  return fallback;
+};
 
 const searchFilters = (
   value: string,
@@ -191,6 +221,7 @@ export const ResourceSelect = React.forwardRef<
       disabled,
       optionLabel,
       optionValue,
+      optionI18nPrefix,
       defaultValue,
       dataProviderName,
       filters,
@@ -207,6 +238,8 @@ export const ResourceSelect = React.forwardRef<
     },
     ref,
   ) => {
+    const t = useTranslate();
+    const { dictionaryLabel } = useDictionaryTranslation();
     const select = useSelect<BaseRecord>({
       resource,
       optionLabel: ((item: BaseRecord) =>
@@ -263,13 +296,17 @@ export const ResourceSelect = React.forwardRef<
           const selected = options.find(
             (option) => String(option.value) === nextValue,
           );
+          const selectedRecord = recordsByValue.get(nextValue);
+          const localizedLabel = selected
+            ? translatedOptionLabel(t, dictionaryLabel, optionI18nPrefix, selected.value, selected.label, selectedRecord)
+            : undefined;
           onValueChange?.(
             nextValue,
             selected
               ? {
                   value: selected.value,
-                  label: selected.label,
-                  record: recordsByValue.get(nextValue),
+                  label: localizedLabel,
+                  record: selectedRecord,
                 }
               : undefined,
           );
@@ -288,7 +325,7 @@ export const ResourceSelect = React.forwardRef<
                 key={String(option.value)}
                 value={String(option.value)}
               >
-                {option.label}
+                {translatedOptionLabel(t, dictionaryLabel, optionI18nPrefix, option.value, option.label, recordsByValue.get(String(option.value)))}
               </SelectItem>
             ))
           )}
@@ -316,6 +353,7 @@ export const ResourceMultiSelect = React.forwardRef<
       disabled,
       optionLabel,
       optionValue,
+      optionI18nPrefix,
       defaultValue,
       dataProviderName,
       filters,
@@ -332,6 +370,8 @@ export const ResourceMultiSelect = React.forwardRef<
     },
     ref,
   ) => {
+    const t = useTranslate();
+    const { dictionaryLabel } = useDictionaryTranslation();
     const [open, setOpen] = React.useState(false);
     const currentValue = Array.isArray(value) ? value : [];
     const selectedOptionCache = React.useRef(
@@ -360,14 +400,32 @@ export const ResourceMultiSelect = React.forwardRef<
     const options = select.options ?? [];
     const loading = isLoadingSelect(select);
     const selectedValues = new Set(currentValue.map(String));
+    const records = (
+      (select as { query?: { data?: { data?: BaseRecord[] } } }).query?.data
+        ?.data ??
+      (select as { queryResult?: { data?: { data?: BaseRecord[] } } })
+        .queryResult?.data?.data ??
+      []
+    ) as BaseRecord[];
+    const recordsByValue = React.useMemo(() => {
+      const next = new Map<string, BaseRecord>();
+      records.forEach((record) => {
+        const optionValueForRecord = readableOptionValue(record, optionValue);
+        if (optionValueForRecord !== undefined && optionValueForRecord !== null) {
+          next.set(String(optionValueForRecord), record);
+        }
+      });
+      return next;
+    }, [records, optionValue]);
     React.useEffect(() => {
       options.forEach((option) => {
+        const record = recordsByValue.get(String(option.value));
         selectedOptionCache.current.set(String(option.value), {
-          label: option.label,
+          label: translatedOptionLabel(t, dictionaryLabel, optionI18nPrefix, option.value, option.label, record),
           value: option.value,
         });
       });
-    }, [options]);
+    }, [dictionaryLabel, options, optionI18nPrefix, recordsByValue, t]);
     const selectedOptions = currentValue.map((item) => {
       const cached = selectedOptionCache.current.get(String(item));
       return cached ?? { label: String(item), value: item };
@@ -452,15 +510,16 @@ export const ResourceMultiSelect = React.forwardRef<
               <CommandGroup>
                 {options.map((option) => {
                   const optionValueString = String(option.value);
+                  const optionLabel = translatedOptionLabel(t, dictionaryLabel, optionI18nPrefix, option.value, option.label, recordsByValue.get(optionValueString));
                   const checked = selectedValues.has(optionValueString);
                   return (
                     <CommandItem
                       key={optionValueString}
-                      value={`${option.label} ${optionValueString}`}
+                      value={`${optionLabel} ${optionValueString}`}
                       onSelect={() => toggle(optionValueString)}
                     >
                       <Checkbox checked={checked} aria-hidden="true" tabIndex={-1} />
-                      <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                      <span className="min-w-0 flex-1 truncate">{optionLabel}</span>
                       {checked ? <Check className="size-4" /> : null}
                     </CommandItem>
                   );

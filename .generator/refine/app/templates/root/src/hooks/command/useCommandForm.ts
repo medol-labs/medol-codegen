@@ -1,8 +1,9 @@
 import type { RedirectAction, BaseRecord } from "@refinedev/core";
-import { useInvalidate, useOne } from "@refinedev/core";
+import { useInvalidate, useOne, useTranslate } from "@refinedev/core";
 import { useForm, type UseFormProps } from "@refinedev/react-hook-form";
 import React from "react";
 import { FieldValues } from "react-hook-form";
+import { problemDetailDescription } from "@/lib/problem-detail";
 
 type UseCommandFormProps<
   TVariables extends FieldValues = FieldValues,
@@ -44,6 +45,7 @@ export const useCommandForm = <
     formProps,
   } = props;
   const invalidate = useInvalidate();
+  const translate = useTranslate();
 
   const form = useForm<TData, any, TVariables>({
     ...formProps,
@@ -75,7 +77,16 @@ export const useCommandForm = <
   const { getValues, setValue } = form;
   const onFinish = React.useCallback(
     async (values: TVariables) => {
-      const result = await form.refineCore.onFinish(values);
+      let result;
+      try {
+        result = await form.refineCore.onFinish(values);
+      } catch (error) {
+        const translatedError = new Error(problemDetailDescription(error, translate, "Command failed."));
+        if (error && typeof error === "object") {
+          Object.assign(translatedError, error);
+        }
+        throw translatedError;
+      }
       await invalidate({
         resource,
         id: aggregateId,
@@ -92,7 +103,7 @@ export const useCommandForm = <
       }, 500);
       return result;
     },
-    [aggregateId, dataProviderName, form.refineCore, invalidate, queryDataProviderName, resource],
+    [aggregateId, dataProviderName, form.refineCore, invalidate, queryDataProviderName, resource, translate],
   );
 
   React.useEffect(() => {

@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslate } from "@refinedev/core";
 import type {
   Column,
   ColumnFiltersState,
@@ -418,6 +419,7 @@ export function DataTableFilterList<TData>({
   disabled,
   ...props
 }: DataTableFilterListProps<TData>) {
+  const t = useTranslate();
   const id = React.useId();
   const labelId = React.useId();
   const descriptionId = React.useId();
@@ -658,6 +660,7 @@ export function DataTableFilterList<TData>({
                     columns={columns}
                     onFilterUpdate={onFilterUpdate}
                     onFilterRemove={onFilterRemove}
+                    t={t}
                   />
                 ))}
               </div>
@@ -711,6 +714,7 @@ interface DataTableFilterItemProps<TData> {
     updates: Partial<Omit<ExtendedColumnFilter<TData>, "filterId">>,
   ) => void;
   onFilterRemove: (filterId: string) => void;
+  t: ReturnType<typeof useTranslate>;
 }
 
 function DataTableFilterItem<TData>({
@@ -722,6 +726,7 @@ function DataTableFilterItem<TData>({
   columns,
   onFilterUpdate,
   onFilterRemove,
+  t,
 }: DataTableFilterItemProps<TData>) {
   const [showFieldSelector, setShowFieldSelector] = React.useState(false);
   const [showOperatorSelector, setShowOperatorSelector] = React.useState(false);
@@ -913,6 +918,7 @@ function DataTableFilterItem<TData>({
             onFilterUpdate,
             showValueSelector,
             setShowValueSelector,
+            t,
           })}
         </div>
         <Button
@@ -955,6 +961,7 @@ function onFilterInputRender<TData>({
   onFilterUpdate,
   showValueSelector,
   setShowValueSelector,
+  t,
 }: {
   filter: ExtendedColumnFilter<TData>;
   inputId: string;
@@ -966,6 +973,7 @@ function onFilterInputRender<TData>({
   ) => void;
   showValueSelector: boolean;
   setShowValueSelector: (value: boolean) => void;
+  t: ReturnType<typeof useTranslate>;
 }) {
   if (filter.operator === "isEmpty" || filter.operator === "isNotEmpty") {
     return (
@@ -1046,11 +1054,11 @@ function onFilterInputRender<TData>({
             size="sm"
             className="w-full rounded"
           >
-            <SelectValue placeholder={filter.value ? "True" : "False"} />
+            <SelectValue placeholder={filter.value ? t("values.boolean.true", "True") : t("values.boolean.false", "False")} />
           </SelectTrigger>
           <SelectContent id={inputListboxId}>
-            <SelectItem value="true">True</SelectItem>
-            <SelectItem value="false">False</SelectItem>
+            <SelectItem value="true">{t("values.boolean.true", "True")}</SelectItem>
+            <SelectItem value="false">{t("values.boolean.false", "False")}</SelectItem>
           </SelectContent>
         </Select>
       );

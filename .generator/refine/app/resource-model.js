@@ -124,6 +124,7 @@ function toReadModelResource(group, readModel, allEvents, workflow) {
         createCommand,
         editCommand,
         deleteCommand,
+        importCommands: normalizedCommands.filter((command) => command.importable),
         commands: [createCommand, editCommand, deleteCommand, ...itemCommands].filter(Boolean),
         routedCommands: [deleteCommand, ...itemCommands].filter((command) => command?.requiresPage),
         itemCommands
@@ -361,6 +362,7 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
         label: titleCase(title),
         name: camel(title),
         route: kebab(title),
+        httpRoute: axonRoute(title),
         file: kebab(title),
         pagePath: `${contextRoute}/slices/${sliceRoute}`,
         contextRoute,
@@ -408,7 +410,9 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
         hasFileFields: formFields.some((field) => field.fileInput),
         fileFields: formFields.filter((field) => field.fileInput),
         fileUploadProducer: isFileUploadProducerCommand(command, rawFields),
-        downloadCommand: isDownloadCommand(command)
+        downloadCommand: isDownloadCommand(command),
+        importable: !!command.importable,
+        importCapability: command.importable?.capability
     };
 }
 

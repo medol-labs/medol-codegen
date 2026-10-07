@@ -1,9 +1,10 @@
 // Generated from config.json by the refine generator.
+<% const hasDataImport = resource.importCommands?.length > 0; const hasDataOperations = resource.exportable || hasDataImport; -%>
 import { useTable } from "@refinedev/react-table";
-import { <% if (resource.exportable) { -%>useNotification, <% } -%>useTranslate<% if (resource.exportable) { -%>, type CrudFilter, type CrudSorting<% } -%> } from "@refinedev/core";
+import { <% if (hasDataOperations) { -%>useNotification, <% } -%>useTranslate<% if (resource.exportable) { -%>, type CrudFilter, type CrudSorting<% } -%> } from "@refinedev/core";
 import { createColumnHelper } from "@tanstack/react-table";
-<% if (resource.exportable) { -%>
-import { Download } from "lucide-react";
+<% if (hasDataOperations) { -%>
+import { <% if (resource.exportable) { -%>Download<% } -%><% if (resource.exportable && hasDataImport) { -%>, <% } -%><% if (hasDataImport) { -%>Upload<% } -%> } from "lucide-react";
 <% } -%>
 import React from "react";
 
@@ -19,9 +20,14 @@ import {
   ListViewHeader
 } from "@/components/refine-ui/views/list-view";
 import { Checkbox } from "@/components/ui/checkbox";
-<% if (resource.exportable) { -%>
+<% if (hasDataOperations) { -%>
 import { Button } from "@/components/ui/button";
+<% } -%>
+<% if (resource.exportable) { -%>
 import { requestDataExport, type DataExportColumn } from "@/lib/data-export";
+<% } -%>
+<% if (hasDataImport) { -%>
+import { requestDataImport } from "@/lib/data-import";
 <% } -%>
 import { useDictionaryTranslation } from "@/lib/dictionary-i18n";
 import { renderFieldOverride, renderSlotExtensions } from "@/platform/composition";
@@ -75,9 +81,16 @@ const formatValue = (
 
 export const <%= resource.component %>List = () => {
   const t = useTranslate();
-<% if (resource.exportable) { -%>
+<% if (hasDataOperations) { -%>
   const { open } = useNotification();
+<% } -%>
+<% if (resource.exportable) { -%>
   const [isExporting, setIsExporting] = React.useState(false);
+<% } -%>
+<% if (hasDataImport) { -%>
+  const importInputRef = React.useRef<HTMLInputElement>(null);
+  const [activeImportCommand, setActiveImportCommand] = React.useState<{ name: string; label: string; route: string } | null>(null);
+  const [isImporting, setIsImporting] = React.useState(false);
 <% } -%>
   const { dictionaryLabel } = useDictionaryTranslation();
   const columns = React.useMemo(() => {
@@ -298,6 +311,41 @@ export const <%= resource.component %>List = () => {
   }, [open, table, t]);
 
 <% } -%>
+<% if (hasDataImport) { -%>
+  const handleChooseImportFile = React.useCallback((command: { name: string; label: string; route: string }) => {
+    setActiveImportCommand(command);
+    importInputRef.current?.click();
+  }, []);
+
+  const handleImportFileChange = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !activeImportCommand) return;
+    setIsImporting(true);
+    try {
+      const result = await requestDataImport({
+        aggregateRoute: "<%= resource.aggregateRoute %>",
+        commandRoute: activeImportCommand.route,
+        dataProviderName: "<%= resource.dataProviderName %>",
+        file,
+      });
+      open?.({
+        type: "success",
+        message: t("dataImport.jobCreated", "Import job created"),
+        description: result.jobId || activeImportCommand.label,
+      });
+    } catch (error) {
+      open?.({
+        type: "error",
+        message: t("dataImport.failed", "Import failed"),
+        description: error instanceof Error ? error.message : undefined,
+      });
+    } finally {
+      setIsImporting(false);
+    }
+  }, [activeImportCommand, open, t]);
+
+<% } -%>
 
   return (
     <ListView>
@@ -320,6 +368,21 @@ export const <%= resource.component %>List = () => {
           isQuerying={table.refineCore.tableQuery.isFetching}
           onQuery={() => table.refineCore.tableQuery.refetch()}
         >
+<% if (hasDataImport) { -%>
+          <input ref={importInputRef} className="hidden" type="file" accept=".csv,text/csv" onChange={handleImportFileChange} />
+<% resource.importCommands.forEach((command) => { -%>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => handleChooseImportFile({ name: "<%= command.name %>", label: t("<%= command.i18nKey %>", <%- JSON.stringify(command.label) %>), route: "<%= command.httpRoute %>" })}
+            disabled={isImporting}
+          >
+            <Upload className="size-4" />
+            {isImporting ? t("dataImport.importing", "Importing") : t("<%= command.i18nKey %>", <%- JSON.stringify(command.label) %>)}
+          </Button>
+<% }) -%>
+<% } -%>
 <% if (resource.exportable) { -%>
           <Button type="button" variant="outline" size="sm" onClick={handleExport} disabled={isExporting}>
             <Download className="size-4" />

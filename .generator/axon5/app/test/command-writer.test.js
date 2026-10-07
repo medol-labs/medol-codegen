@@ -178,3 +178,95 @@ test('does not generate partial backend guards for eligibility blocks with unmap
     assert.match(writer.generationWarnings[0], /Runtime\.status == "Online"/);
     assert.match(writer.generationWarnings[0], /Materialize these fields on the projection/);
 });
+
+test('writes import support for importable commands', () => {
+    const command = {
+        name: 'ImportRuntimeNodeInventory',
+        title: 'Import Runtime Node Inventory',
+        importable: {capability: 'PlatformDataExchange'},
+        fields: [
+            {name: 'runtimeNodeInventoryId', type: 'UUID', idAttribute: true},
+            {name: 'runtimeName', type: 'String'},
+            {name: 'nodeReady', type: 'Boolean', optional: true}
+        ]
+    };
+    const slice = {
+        id: 'slice-runtime-node-inventory',
+        name: 'RuntimeNodeInventory',
+        title: 'Runtime Node Inventory',
+        context: 'RuntimeGovernance',
+        concepts: ['RuntimeNodeInventory'],
+        commands: [command],
+        events: [],
+        readmodels: []
+    };
+    const model = {
+        rootPackage: 'tech.medo',
+        concepts: [],
+        valueTypes: [],
+        slices: [
+            slice,
+            {
+                name: 'DataImportJob',
+                events: [],
+                commands: [],
+                processors: [{
+                    name: 'ExecuteDataImport',
+                    metadata: {
+                        on: 'DataImportRequested',
+                        uses: 'PlatformDataExchange.import',
+                        emits: 'MarkDataImportProcessing',
+                        emits2: 'CompleteDataImport',
+                        emits3: 'FailDataImport'
+                    }
+                }]
+            }
+        ],
+        transitions: []
+    };
+    const writes = new Map();
+    const writer = {
+        ...commandWriterMethods,
+        model,
+        fs: {write: (path, content) => writes.set(path, content)},
+        _kotlinPath: (path) => `kotlin/${path}`,
+        _sharedKernelKotlinPath: (path) => `shared/${path}`
+    };
+
+    writer._writeCommandResource(
+        'tech.medo.runtimegovernance.runtimenodeinventory',
+        'runtimegovernance',
+        'runtimenodeinventory',
+        slice
+    );
+
+    const resource = writes.get('kotlin/runtimegovernance/runtimenodeinventory/RuntimeNodeInventoryResource.kt');
+    const service = writes.get('shared/shared/application/importing/DataImportService.kt');
+    const ports = writes.get('shared/shared/application/importing/DataImportPorts.kt');
+    const axonPorts = writes.get('kotlin/dataexchange/dataimportjob/DataImportJobPorts.kt');
+    const processor = writes.get('kotlin/dataexchange/dataimportjob/ExecuteDataImportProcessor.kt');
+    const executor = writes.get('kotlin/runtimegovernance/runtimenodeinventory/ImportRuntimeNodeInventoryDataImportCommandExecutor.kt');
+
+    assert.match(resource, /@PostMapping\("\/importruntimenodeinventory\/import"/);
+    assert.match(resource, /dataImportService\.request/);
+    assert.match(resource, /metadata = MetadataFactory\.from\(request\)/);
+    assert.match(service, /DataImportJobRequestMessage/);
+    assert.match(ports, /fun request\(message: DataImportJobRequestMessage, metadata: Metadata\)/);
+    assert.match(axonPorts, /override fun request\(message: DataImportJobRequestMessage, metadata: Metadata\)/);
+    assert.match(axonPorts, /RequestDataImportCommand\([\s\S]*\),\n            metadata/);
+    assert.match(service, /Only CSV import is supported/);
+    assert.match(service, /fun processCsv\(filePath: String, consumer: \(Long, Map<String, String>, String\) -> Unit\): Long/);
+    assert.match(service, /fun writeFailureIndex/);
+    assert.match(service, /failure-index\.csv/);
+    assert.match(processor, /fun on\(event: DataImportRequestedEvent, message: EventMessage\)/);
+    assert.match(processor, /userId = MetadataFactory\.value\(message\.metadata\[MetadataKeys\.USER_ID\]\?\.toString\(\)\)/);
+    assert.match(processor, /lifecyclePort\.markProcessing\(event\.dataImportJobId, 0\)/);
+    assert.match(executor, /override val commandName: String = "ImportRuntimeNodeInventory"/);
+    assert.match(executor, /runtimeNodeInventoryId = dataImportService\.uuid\(row, "runtimeNodeInventoryId", true\)!!/);
+    assert.match(executor, /nodeReady = dataImportService\.boolean\(row, "nodeReady", false\)/);
+    assert.match(executor, /val metadata = MetadataFactory\.fromValues/);
+    assert.match(executor, /commandGateway\.send\(command, metadata\)\.resultMessage/);
+    assert.match(executor, /rowHash = rowHash/);
+    assert.match(executor, /errorCode = ex\.javaClass\.simpleName/);
+    assert.doesNotMatch(executor, /rawValue = row\.toString\(\)/);
+});

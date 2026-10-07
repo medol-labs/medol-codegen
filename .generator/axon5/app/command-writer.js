@@ -116,6 +116,50 @@ function hasUploadFile(command) {
     return uploadFileFields(command).length > 0;
 }
 
+function importableCommands(slice) {
+    return (slice.commands ?? []).filter((command) => command.importable);
+}
+
+function isImportUnsupportedField(field) {
+    return field.cardinality === 'Multiple' || field.valueType?.kind === 'object';
+}
+
+function importConversionExpression(field) {
+    const required = field.optional ? 'false' : 'true';
+    const fieldName = escapeKotlin(field.name);
+    const optionSet = field.valueType?.kind === 'enum' && (field.valueType.values ?? []).length > 0
+        ? {enumName: field.valueType.name}
+        : undefined;
+    const fieldOptions = optionSet ?? (field.options?.length || field.enumOptions?.length ? {enumName: field.enumName ?? pascal(field.name)} : undefined);
+    if (fieldOptions?.enumName) {
+        const raw = `dataImportService.string(row, "${fieldName}", ${required})`;
+        return field.optional
+            ? `${raw}?.let { ${fieldOptions.enumName}.valueOf(it.trim().uppercase().replace(Regex("[^A-Z0-9]+"), "_")) }`
+            : `${fieldOptions.enumName}.valueOf(${raw}!!.trim().uppercase().replace(Regex("[^A-Z0-9]+"), "_"))`;
+    }
+    const type = String(field.valueType?.resolvedBaseType ?? field.type ?? 'String').toLowerCase();
+    const method = (() => {
+        switch (type) {
+            case 'uuid': return 'uuid';
+            case 'int':
+            case 'integer': return 'int';
+            case 'long': return 'long';
+            case 'decimal':
+            case 'bigdecimal':
+            case 'number': return 'decimal';
+            case 'boolean': return 'boolean';
+            case 'date':
+            case 'localdate': return 'date';
+            case 'datetime':
+            case 'localdatetime':
+            case 'instant': return 'dateTime';
+            default: return 'string';
+        }
+    })();
+    const expression = `dataImportService.${method}(row, "${fieldName}", ${required})`;
+    return field.optional ? expression : `${expression}!!`;
+}
+
 function normalizeArray(value) {
     if (!value) return [];
     return Array.isArray(value) ? value : [value];
@@ -519,9 +563,17 @@ ${handlers}
         const resourceName = `${pascal(slice.name)}Resource`;
         const conceptRoute = httpRoute(slice.concepts[0] ?? slice.name);
         const uploadCommands = slice.commands.filter(hasUploadFile);
+        const importCommands = importableCommands(slice);
         uploadCommands.forEach((command) => this._writeUploadFileStoragePort(packageName, context, slicePackage, command));
+        if (importCommands.length > 0) {
+            this._writeDataImportSupport();
+            this._writeDataImportJobAxonPorts();
+            this._writeDataImportProcessor();
+            importCommands.forEach((command) => this._writeDataImportCommandExecutor(packageName, context, slicePackage, slice, command));
+        }
         const constructorParams = [
             'private val commandGateway: CommandGateway',
+            ...(importCommands.length > 0 ? ['private val dataImportService: DataImportService'] : []),
             ...uploadCommands.map((command) => `private val ${lowerCamel(uploadStorageName(command))}: ${uploadStorageName(command)}`)
         ].join(',\n    ');
         const methods = slice.commands.map((command) => {
@@ -541,7 +593,8 @@ ${handlers}
     ): CompletableFuture<${returnType}> =
         ${sendExpression}`;
             const multipartEndpoint = this._renderUploadFileCommandEndpoint(command);
-            return [jsonEndpoint, multipartEndpoint].filter(Boolean).join('\n\n');
+            const importEndpoint = this._renderDataImportCommandEndpoint(command, conceptRoute);
+            return [jsonEndpoint, multipartEndpoint, importEndpoint].filter(Boolean).join('\n\n');
         }).join('\n\n');
         const commandFieldImports = kotlinFieldImports(uniqueFields(slice.commands.flatMap((command) => command.fields ?? [])), this.model.rootPackage);
         const commandResultImports = uniqueBy(slice.commands
@@ -560,6 +613,17 @@ import org.springframework.web.bind.annotation.RequestPart
 import org.springframework.web.multipart.MultipartFile
 ${commandFieldImports ? `${commandFieldImports}\n` : ''}`
             : '';
+        const importImports = importCommands.length > 0
+            ? `import org.springframework.http.MediaType
+import org.springframework.http.ResponseEntity
+import org.springframework.web.bind.annotation.RequestParam
+import org.springframework.web.bind.annotation.RequestPart
+import org.springframework.web.multipart.MultipartFile
+import ${this.model.rootPackage}.shared.application.importing.DataImportJobResponse
+import ${this.model.rootPackage}.shared.application.importing.DataImportService
+${commandFieldImports ? `${commandFieldImports}\n` : ''}`
+            : '';
+        const multipartImports = uniqueImportLines(`${uploadImports}\n${importImports}`);
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${resourceName}.kt`), `package ${packageName}
 
 import jakarta.servlet.http.HttpServletRequest
@@ -572,7 +636,7 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 import ${this.model.rootPackage}.shared.application.metadata.MetadataFactory
-${uploadImports}
+${multipartImports}
 ${commandResultImports}
 import java.util.concurrent.CompletableFuture
 
@@ -680,6 +744,584 @@ ${constructorArgs}
         )
         return commandGateway.send(command, MetadataFactory.from(request)).resultMessage.thenApply { command }
     }`;
+    },
+
+    _writeDataImportSupport() {
+        if (this._dataImportSupportWritten) {
+            return;
+        }
+        this._dataImportSupportWritten = true;
+        const basePath = 'shared/application/importing';
+        const basePackage = `${this.model.rootPackage}.shared.application.importing`;
+        this.fs.write(this._sharedKernelKotlinPath(`${basePath}/DataImportModels.kt`), `package ${basePackage}
+
+import java.time.Instant
+import java.util.UUID
+
+data class DataImportJobResponse(
+    val jobId: UUID,
+    val status: String,
+    val originalFileName: String,
+    val errorMessage: String? = null
+)
+
+data class DataImportJobRequestMessage(
+    val dataImportJobId: UUID,
+    val commandName: String,
+    val resourceName: String,
+    val originalFileName: String,
+    val filePath: String,
+    val requestedLocale: String?,
+    val requestedAt: Instant,
+    val requestHash: String
+)
+
+data class DataImportExecutionTask(
+    val dataImportJobId: UUID,
+    val commandName: String,
+    val resourceName: String,
+    val originalFileName: String,
+    val filePath: String,
+    val requestedLocale: String?,
+    val requestedAt: Instant,
+    val requestHash: String,
+    val userId: String?,
+    val sessionId: String?,
+    val correlationId: String?,
+    val causationId: String?,
+    val traceId: String?,
+    val tenantId: String?
+)
+
+data class DataImportExecutionResult(
+    val totalRows: Long,
+    val successRows: Long,
+    val failedRows: Long,
+    val failureIndexPath: String? = null
+)
+
+data class DataImportRowError(
+    val rowNumber: Long,
+    val rowHash: String,
+    val errorCode: String?,
+    val message: String
+)
+`);
+        this.fs.write(this._sharedKernelKotlinPath(`${basePath}/DataImportProperties.kt`), `package ${basePackage}
+
+import org.springframework.boot.context.properties.ConfigurationProperties
+import org.springframework.stereotype.Component
+
+@Component
+@ConfigurationProperties(prefix = "medol.data-exchange.import")
+class DataImportProperties {
+    var batchSize: Int = 1000
+    var maxRows: Long = 800000
+    var maxFileSizeBytes: Long = 104857600
+    var errorPreviewLimit: Int = 200
+    var storagePath: String = "build/data-imports"
+}
+`);
+        this.fs.write(this._sharedKernelKotlinPath(`${basePath}/DataImportPorts.kt`), `package ${basePackage}
+
+import java.util.UUID
+import org.axonframework.messaging.core.Metadata
+
+interface DataImportJobRequestPort {
+    fun request(message: DataImportJobRequestMessage, metadata: Metadata)
+}
+
+interface DataImportJobLifecyclePort {
+    fun markProcessing(dataImportJobId: UUID, totalRows: Long)
+    fun complete(dataImportJobId: UUID, totalRows: Long, successRows: Long, failedRows: Long, failureIndexPath: String?)
+    fun fail(dataImportJobId: UUID, errorMessage: String)
+}
+
+interface DataImportCommandExecutor {
+    val commandName: String
+    fun execute(task: DataImportExecutionTask): DataImportExecutionResult
+}
+`);
+        this.fs.write(this._sharedKernelKotlinPath(`${basePath}/DataImportCommandExecutorRegistry.kt`), `package ${basePackage}
+
+import org.springframework.beans.factory.ObjectProvider
+import org.springframework.http.HttpStatus
+import org.springframework.stereotype.Component
+import org.springframework.web.server.ResponseStatusException
+
+@Component
+class DataImportCommandExecutorRegistry(
+    executors: ObjectProvider<DataImportCommandExecutor>
+) {
+    private val executorsByCommandName = executors.orderedStream()
+        .toList()
+        .associateBy { it.commandName }
+
+    fun executor(commandName: String): DataImportCommandExecutor =
+        executorsByCommandName[commandName]
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "No data import executor registered for $commandName.")
+}
+`);
+        this.fs.write(this._sharedKernelKotlinPath(`${basePath}/DataImportService.kt`), `package ${basePackage}
+
+import org.springframework.beans.factory.ObjectProvider
+import org.axonframework.messaging.core.Metadata
+import org.springframework.http.HttpStatus
+import org.springframework.http.ResponseEntity
+import org.springframework.stereotype.Service
+import org.springframework.web.server.ResponseStatusException
+import java.io.InputStream
+import java.math.BigDecimal
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.Path
+import java.security.MessageDigest
+import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.OffsetDateTime
+import java.util.UUID
+import kotlin.io.path.createDirectories
+
+@Service
+class DataImportService(
+    private val properties: DataImportProperties,
+    private val requestPort: ObjectProvider<DataImportJobRequestPort>
+) {
+    fun request(
+        commandName: String,
+        resourceName: String,
+        originalFileName: String,
+        contentType: String?,
+        requestedLocale: String?,
+        inputStream: InputStream,
+        metadata: Metadata
+    ): ResponseEntity<DataImportJobResponse> {
+        val bytes = inputStream.readBytes()
+        if (bytes.size.toLong() > properties.maxFileSizeBytes) {
+            throw ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "Data import file exceeds the configured maximum size.")
+        }
+        val extension = originalFileName.substringAfterLast('.', "csv").lowercase()
+        if (extension != "csv") {
+            throw ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "Only CSV import is supported in this version.")
+        }
+        val requestHash = requestHash(commandName, resourceName, bytes, requestedLocale)
+        val jobId = UUID.nameUUIDFromBytes(requestHash.toByteArray(StandardCharsets.UTF_8))
+        val directory = Path.of(properties.storagePath, jobId.toString()).createDirectories()
+        val safeFileName = originalFileName.replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "import.csv" }
+        val path = directory.resolve(safeFileName).normalize()
+        Files.write(path, bytes)
+        val message = DataImportJobRequestMessage(
+            dataImportJobId = jobId,
+            commandName = commandName,
+            resourceName = resourceName,
+            originalFileName = originalFileName,
+            filePath = path.toString(),
+            requestedLocale = requestedLocale,
+            requestedAt = Instant.now(),
+            requestHash = requestHash
+        )
+        val port = requestPort.getIfAvailable()
+            ?: throw ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Data import job request port is not available.")
+        port.request(message, metadata)
+        return ResponseEntity.accepted().body(DataImportJobResponse(jobId, "REQUESTED", originalFileName))
+    }
+
+    fun readCsv(filePath: String): List<Map<String, String>> {
+        val rows = mutableListOf<Map<String, String>>()
+        processCsv(filePath) { _, row, _ -> rows += row }
+        return rows
+    }
+
+    fun processCsv(filePath: String, consumer: (Long, Map<String, String>, String) -> Unit): Long {
+        var headers: List<String>? = null
+        var totalRows = 0L
+        Files.newBufferedReader(Path.of(filePath), StandardCharsets.UTF_8).useLines { lines ->
+            lines.forEachIndexed { index, line ->
+                val normalizedLine = if (index == 0) line.removePrefix("\\uFEFF") else line
+                if (normalizedLine.isBlank()) return@forEachIndexed
+                val currentHeaders = headers
+                if (currentHeaders == null) {
+                    headers = parseCsvLine(normalizedLine).map { it.trim() }
+                    return@forEachIndexed
+                }
+                totalRows += 1
+                if (totalRows > properties.maxRows) {
+                    throw ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "Data import exceeds the configured maximum row count.")
+                }
+                val values = parseCsvLine(normalizedLine)
+                val row = currentHeaders.mapIndexed { valueIndex, header ->
+                    header to (values.getOrNull(valueIndex)?.trim().orEmpty())
+                }.toMap()
+                consumer(index.toLong() + 1L, row, rowHash(normalizedLine))
+            }
+        }
+        return totalRows
+    }
+
+    fun writeFailureIndex(task: DataImportExecutionTask, errors: List<DataImportRowError>): String? {
+        if (errors.isEmpty()) return null
+        val directory = Path.of(properties.storagePath, task.dataImportJobId.toString()).createDirectories()
+        val path = directory.resolve("failure-index.csv").normalize()
+        val builder = StringBuilder()
+        builder.append("rowNumber,rowHash,errorCode,message\\n")
+        errors.forEach { error ->
+            builder.append(csvCell(error.rowNumber.toString())).append(',')
+                .append(csvCell(error.rowHash)).append(',')
+                .append(csvCell(error.errorCode.orEmpty())).append(',')
+                .append(csvCell(error.message)).append('\\n')
+        }
+        Files.write(path, ("\\uFEFF" + builder.toString()).toByteArray(StandardCharsets.UTF_8))
+        return path.toString()
+    }
+
+    fun string(row: Map<String, String>, field: String, required: Boolean = true): String? =
+        raw(row, field, required)
+
+    fun uuid(row: Map<String, String>, field: String, required: Boolean = true): UUID? =
+        raw(row, field, required)?.let { UUID.fromString(it) }
+
+    fun int(row: Map<String, String>, field: String, required: Boolean = true): Int? =
+        raw(row, field, required)?.toInt()
+
+    fun long(row: Map<String, String>, field: String, required: Boolean = true): Long? =
+        raw(row, field, required)?.toLong()
+
+    fun decimal(row: Map<String, String>, field: String, required: Boolean = true): BigDecimal? =
+        raw(row, field, required)?.let { BigDecimal(it) }
+
+    fun boolean(row: Map<String, String>, field: String, required: Boolean = true): Boolean? =
+        raw(row, field, required)?.let {
+            when (it.lowercase()) {
+                "true", "yes", "y", "1", "是" -> true
+                "false", "no", "n", "0", "否" -> false
+                else -> throw IllegalArgumentException("$field must be boolean.")
+            }
+        }
+
+    fun date(row: Map<String, String>, field: String, required: Boolean = true): LocalDate? =
+        raw(row, field, required)?.let { LocalDate.parse(it) }
+
+    fun dateTime(row: Map<String, String>, field: String, required: Boolean = true): LocalDateTime? =
+        raw(row, field, required)?.let {
+            runCatching { LocalDateTime.parse(it) }
+                .getOrElse { OffsetDateTime.parse(it).toLocalDateTime() }
+        }
+
+    private fun raw(row: Map<String, String>, field: String, required: Boolean): String? {
+        val value = row[field]?.trim().orEmpty()
+        if (value.isBlank()) {
+            if (required) throw IllegalArgumentException("$field is required.")
+            return null
+        }
+        return value
+    }
+
+    private fun requestHash(commandName: String, resourceName: String, bytes: ByteArray, requestedLocale: String?): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        digest.update(commandName.toByteArray(StandardCharsets.UTF_8))
+        digest.update(0.toByte())
+        digest.update(resourceName.toByteArray(StandardCharsets.UTF_8))
+        digest.update(0.toByte())
+        digest.update(requestedLocale.orEmpty().toByteArray(StandardCharsets.UTF_8))
+        digest.update(0.toByte())
+        digest.update(bytes)
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private fun rowHash(row: String): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(row.toByteArray(StandardCharsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+
+    private fun parseCsvLine(line: String): List<String> {
+        val values = mutableListOf<String>()
+        val current = StringBuilder()
+        var quoted = false
+        var index = 0
+        while (index < line.length) {
+            val char = line[index]
+            when {
+                char == '"' && quoted && index + 1 < line.length && line[index + 1] == '"' -> {
+                    current.append('"')
+                    index += 1
+                }
+                char == '"' -> quoted = !quoted
+                char == ',' && !quoted -> {
+                    values += current.toString()
+                    current.clear()
+                }
+                else -> current.append(char)
+            }
+            index += 1
+        }
+        values += current.toString()
+        return values
+    }
+
+    private fun csvCell(value: String): String =
+        if (value.contains(',') || value.contains('"') || value.contains('\\n') || value.contains('\\r')) {
+            "\"" + value.replace("\"", "\"\"") + "\""
+        } else {
+            value
+        }
+}
+`);
+    },
+
+    _writeDataImportJobAxonPorts() {
+        if (this._dataImportJobAxonPortsWritten) {
+            return;
+        }
+        const hasDataImportJobSlice = (this.model.slices ?? []).some((slice) =>
+            String(slice.name ?? slice.title ?? '').toLowerCase() === 'dataimportjob'
+        );
+        if (!hasDataImportJobSlice) {
+            return;
+        }
+        this._dataImportJobAxonPortsWritten = true;
+        const packageName = `${this.model.rootPackage}.dataexchange.dataimportjob`;
+        this.fs.write(this._kotlinPath('dataexchange/dataimportjob/DataImportJobPorts.kt'), `package ${packageName}
+
+import org.axonframework.messaging.commandhandling.gateway.CommandGateway
+import org.axonframework.messaging.core.Metadata
+import org.springframework.stereotype.Component
+import ${this.model.rootPackage}.dataexchange.dataimportjob.RequestDataImportCommand
+import ${this.model.rootPackage}.dataexchange.dataimportjob.MarkDataImportProcessingCommand
+import ${this.model.rootPackage}.dataexchange.dataimportjob.CompleteDataImportCommand
+import ${this.model.rootPackage}.dataexchange.dataimportjob.FailDataImportCommand
+import ${this.model.rootPackage}.shared.application.importing.DataImportJobLifecyclePort
+import ${this.model.rootPackage}.shared.application.importing.DataImportJobRequestMessage
+import ${this.model.rootPackage}.shared.application.importing.DataImportJobRequestPort
+import java.time.LocalDateTime
+import java.time.ZoneOffset
+import java.util.UUID
+
+@Component
+class AxonDataImportJobRequestPort(
+    private val commandGateway: CommandGateway
+) : DataImportJobRequestPort {
+    override fun request(message: DataImportJobRequestMessage, metadata: Metadata) {
+        commandGateway.send(
+            RequestDataImportCommand(
+                dataImportJobId = message.dataImportJobId,
+                commandName = message.commandName,
+                resourceName = message.resourceName,
+                originalFileName = message.originalFileName,
+                filePath = message.filePath,
+                requestedLocale = message.requestedLocale,
+                requestedAt = LocalDateTime.ofInstant(message.requestedAt, ZoneOffset.UTC),
+                requestHash = message.requestHash,
+                status = DataImportJobStatus.REQUESTED
+            ),
+            metadata
+        ).resultMessage.toCompletableFuture().join()
+    }
+}
+
+@Component
+class AxonDataImportJobLifecyclePort(
+    private val commandGateway: CommandGateway
+) : DataImportJobLifecyclePort {
+    override fun markProcessing(dataImportJobId: UUID, totalRows: Long) {
+        commandGateway.send(MarkDataImportProcessingCommand(dataImportJobId, totalRows, DataImportJobStatus.PROCESSING)).resultMessage.toCompletableFuture().join()
+    }
+
+    override fun complete(dataImportJobId: UUID, totalRows: Long, successRows: Long, failedRows: Long, failureIndexPath: String?) {
+        commandGateway.send(CompleteDataImportCommand(dataImportJobId, totalRows, successRows, failedRows, failureIndexPath, DataImportJobStatus.COMPLETED)).resultMessage.toCompletableFuture().join()
+    }
+
+    override fun fail(dataImportJobId: UUID, errorMessage: String) {
+        commandGateway.send(FailDataImportCommand(dataImportJobId, errorMessage, DataImportJobStatus.FAILED)).resultMessage.toCompletableFuture().join()
+    }
+}
+
+object DataImportJobStatus {
+    const val REQUESTED = "REQUESTED"
+    const val PROCESSING = "PROCESSING"
+    const val COMPLETED = "COMPLETED"
+    const val FAILED = "FAILED"
+}
+`);
+    },
+
+    _writeDataImportProcessor() {
+        if (this._dataImportProcessorWritten) {
+            return;
+        }
+        const automation = (this.model.slices ?? [])
+            .flatMap((slice) => slice.processors ?? [])
+            .find((processor) => {
+                const metadata = processor.metadata ?? {};
+                const uses = String(metadata.uses ?? '').toLowerCase();
+                const emits = Object.entries(metadata)
+                    .filter(([key]) => /^emits\d*$/.test(key))
+                    .map(([, value]) => String(value).toLowerCase());
+                return metadata.on === 'DataImportRequested'
+                    && (uses === 'platformdataexchange.import' || uses.endsWith('dataexchange.import'))
+                    && emits.includes('markdataimportprocessing')
+                    && emits.includes('completedataimport')
+                    && emits.includes('faildataimport');
+            });
+        if (!automation) {
+            return;
+        }
+        this._dataImportProcessorWritten = true;
+        const packageName = `${this.model.rootPackage}.dataexchange.dataimportjob`;
+        const processorClass = `${pascal(automation.name)}Processor`;
+        this.fs.write(this._kotlinPath(`dataexchange/dataimportjob/${processorClass}.kt`), `package ${packageName}
+
+import org.axonframework.messaging.core.annotation.Namespace
+import org.axonframework.messaging.eventhandling.EventMessage
+import org.axonframework.messaging.eventhandling.annotation.EventHandler
+import org.slf4j.LoggerFactory
+import org.springframework.stereotype.Component
+import ${this.model.rootPackage}.dataexchange.events.DataImportRequestedEvent
+import ${this.model.rootPackage}.shared.application.importing.DataImportCommandExecutorRegistry
+import ${this.model.rootPackage}.shared.application.importing.DataImportExecutionTask
+import ${this.model.rootPackage}.shared.application.importing.DataImportJobLifecyclePort
+import ${this.model.rootPackage}.shared.application.metadata.MetadataFactory
+import ${this.model.rootPackage}.shared.application.metadata.MetadataKeys
+import java.time.ZoneOffset
+
+@Namespace("automation-data-exchange-${kebab(automation.name)}")
+@Component
+class ${processorClass}(
+    private val registry: DataImportCommandExecutorRegistry,
+    private val lifecyclePort: DataImportJobLifecyclePort
+) {
+    private val log = LoggerFactory.getLogger(javaClass)
+
+    @EventHandler
+    fun on(event: DataImportRequestedEvent, message: EventMessage) {
+        val task = DataImportExecutionTask(
+            dataImportJobId = event.dataImportJobId,
+            commandName = event.commandName,
+            resourceName = event.resourceName,
+            originalFileName = event.originalFileName,
+            filePath = event.filePath,
+            requestedLocale = event.requestedLocale,
+            requestedAt = event.requestedAt.toInstant(ZoneOffset.UTC),
+            requestHash = event.requestHash,
+            userId = MetadataFactory.value(message.metadata[MetadataKeys.USER_ID]?.toString()),
+            sessionId = MetadataFactory.value(message.metadata[MetadataKeys.SESSION_ID]?.toString()),
+            correlationId = MetadataFactory.value(message.metadata[MetadataKeys.CORRELATION_ID]?.toString()),
+            causationId = MetadataFactory.value(message.metadata[MetadataKeys.CAUSATION_ID]?.toString()),
+            traceId = MetadataFactory.value(message.metadata[MetadataKeys.TRACE_ID]?.toString()),
+            tenantId = MetadataFactory.value(message.metadata[MetadataKeys.TENANT_ID]?.toString())
+        )
+        try {
+            lifecyclePort.markProcessing(event.dataImportJobId, 0)
+            val result = registry.executor(event.commandName).execute(task)
+            lifecyclePort.complete(event.dataImportJobId, result.totalRows, result.successRows, result.failedRows, result.failureIndexPath)
+        } catch (ex: Exception) {
+            log.warn("Data import job {} failed", event.dataImportJobId, ex)
+            lifecyclePort.fail(event.dataImportJobId, ex.message ?: "Data import failed.")
+        }
+    }
+}
+`);
+    },
+
+    _writeDataImportCommandExecutor(packageName, context, slicePackage, slice, command) {
+        const commandName = safeIdentifier(command.name);
+        const commandClassName = `${commandName}Command`;
+        const executorClassName = `${commandName}DataImportCommandExecutor`;
+        const commandFields = (command.fields ?? [])
+            .filter((field) => field?.name && !field.generated && !field.excludeFromApi && !field.uploadFile && !field.file);
+        const unsupportedFields = commandFields.filter(isImportUnsupportedField);
+        const imports = [
+            `import ${packageName}.${commandClassName}`,
+            'import org.axonframework.messaging.commandhandling.gateway.CommandGateway',
+            'import org.springframework.stereotype.Component',
+            `import ${this.model.rootPackage}.shared.application.importing.DataImportCommandExecutor`,
+            `import ${this.model.rootPackage}.shared.application.importing.DataImportExecutionResult`,
+            `import ${this.model.rootPackage}.shared.application.importing.DataImportExecutionTask`,
+            `import ${this.model.rootPackage}.shared.application.importing.DataImportRowError`,
+            `import ${this.model.rootPackage}.shared.application.importing.DataImportService`,
+            `import ${this.model.rootPackage}.shared.application.metadata.MetadataFactory`,
+            kotlinFieldImports(commandFields, this.model.rootPackage)
+        ].filter(Boolean).join('\n');
+        const assignments = commandFields.map((field) => {
+            if (isImportUnsupportedField(field)) {
+                return `${field.name} = ${fallbackValue(field)} /* Unsupported CSV import field: ${field.name}. Model a dedicated import command or adapter for complex values. */`;
+            }
+            return `${field.name} = ${importConversionExpression(field)}`;
+        }).join(',\n                            ');
+        const unsupportedGuard = unsupportedFields.length > 0
+            ? `\n                require(false) { "Unsupported CSV import field(s): ${unsupportedFields.map((field) => field.name).join(', ')}. Model a dedicated import command or adapter for complex values." }\n`
+            : '';
+        this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${executorClassName}.kt`), `package ${packageName}
+
+${imports}
+
+@Component
+class ${executorClassName}(
+    private val commandGateway: CommandGateway,
+    private val dataImportService: DataImportService
+) : DataImportCommandExecutor {
+    override val commandName: String = "${commandName}"
+
+    override fun execute(task: DataImportExecutionTask): DataImportExecutionResult {
+        val errors = mutableListOf<DataImportRowError>()
+        var successRows = 0L
+        var totalRows = 0L
+        dataImportService.processCsv(task.filePath) { rowNumber, row, rowHash ->
+            totalRows += 1
+            try {${unsupportedGuard}
+                val command = ${commandClassName}(
+                    ${assignments}
+                )
+                val metadata = MetadataFactory.fromValues(
+                    userId = task.userId,
+                    sessionId = task.sessionId,
+                    correlationId = task.correlationId ?: task.requestHash,
+                    causationId = "${'${task.dataImportJobId}'}:${'${rowNumber}'}",
+                    traceId = task.traceId ?: task.requestHash,
+                    tenantId = task.tenantId
+                )
+                commandGateway.send(command, metadata).resultMessage.toCompletableFuture().join()
+                successRows += 1
+            } catch (ex: Exception) {
+                errors += DataImportRowError(
+                    rowNumber = rowNumber,
+                    rowHash = rowHash,
+                    errorCode = ex.javaClass.simpleName,
+                    message = ex.message ?: "Import row failed."
+                )
+            }
+        }
+        val failureIndexPath = dataImportService.writeFailureIndex(task, errors)
+        return DataImportExecutionResult(
+            totalRows = totalRows,
+            successRows = successRows,
+            failedRows = errors.size.toLong(),
+            failureIndexPath = failureIndexPath
+        )
+    }
+}
+`);
+    },
+
+    _renderDataImportCommandEndpoint(command, resourceName) {
+        if (!command.importable) return '';
+        const route = httpRoute(command.title);
+        return `    @PreAuthorize("hasAuthority('*:*') or hasAuthority('${permissionCode(command.name ?? command.title)}:import') or hasAuthority('${permissionCode(command.name ?? command.title)}:execute')")
+    @PostMapping("/${route}/import", consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
+    fun ${safeIdentifier(command.name)}Import(
+        @RequestPart("file") file: MultipartFile,
+        @RequestParam(required = false) requestedLocale: String?,
+        request: HttpServletRequest
+    ): ResponseEntity<DataImportJobResponse> =
+        dataImportService.request(
+            commandName = "${safeIdentifier(command.name)}",
+            resourceName = "${resourceName}",
+            originalFileName = file.originalFilename ?: "${route}.csv",
+            contentType = file.contentType,
+            requestedLocale = requestedLocale,
+            inputStream = file.inputStream,
+            metadata = MetadataFactory.from(request)
+        )`;
     },
 };
 

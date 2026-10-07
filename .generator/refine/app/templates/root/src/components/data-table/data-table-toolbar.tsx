@@ -66,6 +66,7 @@ export function DataTableToolbar<TData>({
       {...props}
     >
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto overflow-y-hidden whitespace-nowrap [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {children}
         {activeFilters.map((filter) => (
           <Badge
             key={filter.id}
@@ -96,7 +97,6 @@ export function DataTableToolbar<TData>({
         )}
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        {children}
         <DataTableViewOptions table={table} align="end" />
       </div>
     </div>

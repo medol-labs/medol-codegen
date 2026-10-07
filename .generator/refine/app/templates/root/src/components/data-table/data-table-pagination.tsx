@@ -31,7 +31,7 @@ export function DataTablePagination<TData>({
   ...props
 }: DataTablePaginationProps<TData>) {
   const t = useTranslate();
-  const selectedRows = table.getFilteredSelectedRowModel().rows.length;
+  const selectedRows = Object.values(table.getState().rowSelection).filter(Boolean).length;
   const filteredRows = table.getFilteredRowModel().rows.length;
   const totalRows = typeof total === "number" ? total : filteredRows;
   const pageCount = table.getPageCount();

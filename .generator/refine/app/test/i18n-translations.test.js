@@ -83,6 +83,9 @@ test('loads locale-specific model translations without replacing existing codege
         assert.equal(messages['resources.order_catalog.label'], '订单目录');
         assert.equal(messages['resources.order_catalog.fields.orderId.label'], '订单ID');
         assert.equal(messages['breadcrumb.actions.create'], '创建');
+        assert.equal(messages['table.pagination.totalRows'], '共 {{total}} 行');
+        assert.equal(messages['table.pagination.rowsPerPage'], '每页行数');
+        assert.equal(messages['table.pagination.pageOf'], '第 {{page}} / {{pageCount}} 页');
     } finally {
         fs.rmSync(workspace, { recursive: true, force: true });
     }

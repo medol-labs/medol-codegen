@@ -153,10 +153,16 @@ export const authFetch = async (
   const authorization = await authHeaders();
   Object.entries(authorization).forEach(([key, value]) => headers.set(key, value));
 
-  return fetch(input, {
+  const response = await fetch(input, {
     ...init,
     headers,
   });
+
+  if (response.status === 401) {
+    clearLocalAuth();
+  }
+
+  return response;
 };
 
 export const fetchCurrentUser = async (): Promise<CurrentUser> => {

@@ -48,13 +48,13 @@ export const ListToolbar = <TData,>({
   const translate = useTranslate();
 
   return (<DataTableToolbar table={table}>
+    {children}
     <DataTableFilterList table={table} />
     <DataTableSortList table={table}></DataTableSortList>
     <Button
       type="button"
       variant="outline"
       size="sm"
-      className="ml-auto"
       disabled={isQuerying}
       onClick={() => {
         table.setPageIndex(0);
@@ -70,7 +70,6 @@ export const ListToolbar = <TData,>({
         ? translate("buttons.querying", "Searching")
         : translate("buttons.search", "Search")}
     </Button>
-    {children}
   </DataTableToolbar>
   );
 }

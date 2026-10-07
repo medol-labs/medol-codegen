@@ -5,6 +5,7 @@ import type {
   ColumnDef,
   HeaderContext,
 } from "@tanstack/react-table";
+import { useTranslate } from "@refinedev/core";
 import * as React from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
@@ -116,6 +117,7 @@ function DataGridSelectHeader<TData>({
   readOnly,
   debug,
 }: DataGridSelectHeaderProps<TData>) {
+  const t = useTranslate();
   const onCheckedChange = React.useCallback(
     (value: boolean) => table.toggleAllPageRowsSelected(value),
     [table],
@@ -131,7 +133,7 @@ function DataGridSelectHeader<TData>({
 
   return (
     <DataGridSelectCheckbox
-      aria-label="Select all"
+      aria-label={t("table.selection.selectAll", "Select all")}
       checked={
         table.getIsAllPageRowsSelected() ||
         (table.getIsSomePageRowsSelected() && "indeterminate")
@@ -159,6 +161,7 @@ function DataGridSelectCell<TData>({
   readOnly,
   debug,
 }: DataGridSelectCellProps<TData>) {
+  const t = useTranslate();
   const meta = table.options.meta;
   const rowNumber = enableRowMarkers
     ? (meta?.getVisualRowIndex?.(row.id) ?? row.index + 1)
@@ -195,7 +198,11 @@ function DataGridSelectCell<TData>({
 
   return (
     <DataGridSelectCheckbox
-      aria-label={rowNumber ? `Select row ${rowNumber}` : "Select row"}
+      aria-label={
+        rowNumber
+          ? t("table.selection.selectRowNumber", { row: rowNumber }, "Select row {{row}}")
+          : t("table.selection.selectRow", "Select row")
+      }
       checked={row.getIsSelected()}
       onCheckedChange={onCheckedChange}
       onClick={onClick}

@@ -113,6 +113,9 @@ export const <%= resource.component %>List = () => {
         enableColumnFilter: <%= field.filterable ? "true" : "false" %>,
         meta: {
           label: t("<%= field.i18nKey %>", "<%= field.label %>"),
+<% if (field.dictionary) { -%>
+          dictionaryCode: "<%= field.dictionary %>",
+<% } -%>
           placeholder: <%- JSON.stringify(field.placeholder) %>,
           variant: "<%= field.filterVariant %>",
 <% if (field.filterOperator) { -%>
@@ -249,6 +252,14 @@ export const <%= resource.component %>List = () => {
         field: sort.id,
         order: sort.desc ? "desc" : "asc",
       }));
+<% if (resource.idFields.length === 1) { -%>
+      const selectedIds = Object.entries(tableState.rowSelection)
+        .filter(([, selected]) => selected)
+        .map(([id]) => id);
+<% } -%>
+      const exportFilters: CrudFilter[] = <% if (resource.idFields.length === 1) { -%>selectedIds.length > 0
+        ? [...filters, { field: "<%= resource.idField %>", operator: "in", value: selectedIds } as CrudFilter]
+        : filters<% } else { -%>filters<% } -%>;
       const columns: DataExportColumn[] = table.reactTable
         .getAllLeafColumns()
         .filter((column) => column.getIsVisible())
@@ -256,12 +267,15 @@ export const <%= resource.component %>List = () => {
         .map((column) => ({
           field: column.id,
           label: String(column.columnDef.meta?.label ?? column.id),
+          dictionaryCode: typeof column.columnDef.meta?.dictionaryCode === "string"
+            ? column.columnDef.meta.dictionaryCode
+            : undefined,
         }));
       const result = await requestDataExport({
         aggregateRoute: "<%= resource.aggregateRoute %>",
         queryRoute: "<%= resource.queryRoute %>",
         dataProviderName: "<%= resource.dataProviderName %>",
-        filters,
+        filters: exportFilters,
         sorters,
         columns,
       });
@@ -292,12 +306,6 @@ export const <%= resource.component %>List = () => {
 <% if (resource.createCommand) { -%>
         <CommandButton variant="default" command="<%= resource.createCommand.name %>" />
 <% } -%>
-<% if (resource.exportable) { -%>
-        <Button type="button" variant="outline" onClick={handleExport} disabled={isExporting}>
-          <Download className="size-4" />
-          {isExporting ? t("dataExport.exporting", "Exporting") : t("dataExport.export", "Export")}
-        </Button>
-<% } -%>
         {renderSlotExtensions(frontendComposition, "toolbar:<%= resource.route %>:list", "toolbar.actions", { resource: "<%= resource.route %>", table })}
       </ListViewHeader>
       <RefineDataTable table={table} actionBar={
@@ -311,7 +319,20 @@ export const <%= resource.component %>List = () => {
           table={table.reactTable}
           isQuerying={table.refineCore.tableQuery.isFetching}
           onQuery={() => table.refineCore.tableQuery.refetch()}
-        />
+        >
+<% if (resource.exportable) { -%>
+          <Button type="button" variant="outline" size="sm" onClick={handleExport} disabled={isExporting}>
+            <Download className="size-4" />
+            {isExporting
+              ? t("dataExport.exporting", "Exporting")
+<% if (resource.idFields.length === 1) { -%>
+              : Object.values(table.reactTable.getState().rowSelection).some(Boolean)
+                ? t("dataExport.exportSelected", "Export selected")
+                : t("dataExport.export", "Export")<% } else { -%>
+              : t("dataExport.export", "Export")<% } -%>}
+          </Button>
+<% } -%>
+        </ListToolbar>
         {renderSlotExtensions(frontendComposition, "toolbar:<%= resource.route %>:list", "toolbar.after", { resource: "<%= resource.route %>", table })}
       </RefineDataTable>
     </ListView>

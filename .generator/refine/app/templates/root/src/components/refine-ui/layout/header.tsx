@@ -11,7 +11,7 @@ import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 import {
   getPersistedLocale,
-  isSupportedLocale,
+  normalizeSupportedLocale,
   supportedLocales,
   type SupportedLocale,
 } from "@/providers/i18n";
@@ -247,7 +247,7 @@ function LanguageSwitcher({ compact = false }: { compact?: boolean }) {
           title="Change language"
         >
           <Globe2 className="h-4 w-4" />
-          {!compact && <span className="text-xs font-semibold uppercase">{currentLocale}</span>}
+          {!compact && <span className="text-xs font-semibold">{localeLabel(currentLocale)}</span>}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
@@ -306,13 +306,13 @@ const UserDropdown = () => {
 };
 
 function normalizeLocale(locale: string | undefined): SupportedLocale {
-  const candidate = locale ?? null;
-  return isSupportedLocale(candidate) ? candidate : supportedLocales[0];
+  return normalizeSupportedLocale(locale) ?? supportedLocales[0];
 }
 
 function localeLabel(locale: SupportedLocale) {
-  if (locale === "en") return "English";
-  if (locale === "zh-CN") return "中文";
+  const normalized = locale.toLowerCase();
+  if (normalized === "en") return "English";
+  if (normalized === "zh-cn") return "中文";
   return locale;
 }
 

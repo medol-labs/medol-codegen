@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { type BaseKey, useShowButton } from "@refinedev/core";
+import { type BaseKey, useShowButton, useTranslate } from "@refinedev/core";
 import { Eye } from "lucide-react";
 import React from "react";
 
@@ -38,6 +38,7 @@ export const ShowButton = React.forwardRef<
     { resource, recordItemId, accessControl, meta, children, onClick, ...rest },
     ref
   ) => {
+    const t = useTranslate();
     const { hidden, disabled, LinkComponent, to, label } = useShowButton({
       resource,
       id: recordItemId,
@@ -69,7 +70,7 @@ export const ShowButton = React.forwardRef<
           {children ?? (
             <div className="flex items-center gap-2 font-semibold">
               <Eye className="h-4 w-4" />
-              <span>{label}</span>
+              <span>{t("buttons.show", label ?? "Show")}</span>
             </div>
           )}
         </LinkComponent>

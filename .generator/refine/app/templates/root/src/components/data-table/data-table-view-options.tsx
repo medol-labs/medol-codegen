@@ -18,6 +18,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { useTranslate } from "@refinedev/core";
 
 interface DataTableViewOptionsProps<TData>
   extends React.ComponentProps<typeof PopoverContent> {
@@ -30,6 +31,7 @@ export function DataTableViewOptions<TData>({
   disabled,
   ...props
 }: DataTableViewOptionsProps<TData>) {
+  const t = useTranslate();
   const columns = React.useMemo(
     () =>
       table
@@ -45,7 +47,7 @@ export function DataTableViewOptions<TData>({
     <Popover>
       <PopoverTrigger asChild>
         <Button
-          aria-label="Toggle columns"
+          aria-label={t("table.view.toggleColumns", "Toggle columns")}
           role="combobox"
           variant="outline"
           size="sm"
@@ -53,14 +55,14 @@ export function DataTableViewOptions<TData>({
           disabled={disabled}
         >
           <Settings2 className="text-muted-foreground" />
-          View
+          {t("table.view.button", "View")}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-44 p-0" {...props}>
         <Command>
-          <CommandInput placeholder="Search columns..." />
+          <CommandInput placeholder={t("table.view.searchColumns", "Search columns...")} />
           <CommandList>
-            <CommandEmpty>No columns found.</CommandEmpty>
+            <CommandEmpty>{t("table.view.noColumns", "No columns found.")}</CommandEmpty>
             <CommandGroup>
               {columns.map((column) => (
                 <CommandItem

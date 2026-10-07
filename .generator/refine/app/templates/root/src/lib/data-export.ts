@@ -7,6 +7,7 @@ import { appendSpringCriteriaFilters } from "@/lib/query-filters";
 export type DataExportColumn = {
   field: string;
   label: string;
+  dictionaryCode?: string;
 };
 
 export type DataExportResult =
@@ -42,6 +43,17 @@ const filenameFromDisposition = (value: string | null): string | undefined => {
   return plain ? decodeURIComponent(plain) : undefined;
 };
 
+const currentLocale = (): string | undefined => {
+  if (typeof document !== "undefined") {
+    const htmlLang = document.documentElement.lang;
+    if (htmlLang) return htmlLang;
+  }
+  if (typeof navigator !== "undefined") {
+    return navigator.language || navigator.languages?.[0];
+  }
+  return undefined;
+};
+
 export async function requestDataExport(params: {
   aggregateRoute: string;
   queryRoute: string;
@@ -49,6 +61,7 @@ export async function requestDataExport(params: {
   filters?: CrudFilter[];
   sorters?: CrudSorting;
   columns: DataExportColumn[];
+  requestedLocale?: string;
 }): Promise<DataExportResult> {
   const query = appendSorters(new URLSearchParams(), params.sorters);
   appendSpringCriteriaFilters(query, params.filters);
@@ -57,7 +70,10 @@ export async function requestDataExport(params: {
   const response = await authFetch(`${backendApiUrl(params.dataProviderName)}${path}${suffix}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ columns: params.columns }),
+    body: JSON.stringify({
+      columns: params.columns,
+      requestedLocale: params.requestedLocale ?? currentLocale(),
+    }),
   });
 
   if (!response.ok) {

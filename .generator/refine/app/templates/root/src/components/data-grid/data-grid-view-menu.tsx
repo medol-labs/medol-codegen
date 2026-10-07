@@ -19,6 +19,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { useTranslate } from "@refinedev/core";
 
 interface DataGridViewMenuProps<TData>
   extends React.ComponentProps<typeof PopoverContent> {
@@ -33,6 +34,7 @@ export function DataGridViewMenu<TData>({
   ...props
 }: DataGridViewMenuProps<TData>) {
   const dir = useDirection();
+  const t = useTranslate();
 
   const columns = React.useMemo(
     () =>
@@ -49,7 +51,7 @@ export function DataGridViewMenu<TData>({
     <Popover>
       <PopoverTrigger asChild>
         <Button
-          aria-label="Toggle columns"
+          aria-label={t("table.view.toggleColumns", "Toggle columns")}
           role="combobox"
           dir={dir}
           variant="outline"
@@ -58,7 +60,7 @@ export function DataGridViewMenu<TData>({
           disabled={disabled}
         >
           <Settings2 className="text-muted-foreground" />
-          View
+          {t("table.view.button", "View")}
         </Button>
       </PopoverTrigger>
       <PopoverContent
@@ -67,9 +69,9 @@ export function DataGridViewMenu<TData>({
         {...props}
       >
         <Command>
-          <CommandInput placeholder="Search columns..." />
+          <CommandInput placeholder={t("table.view.searchColumns", "Search columns...")} />
           <CommandList>
-            <CommandEmpty>No columns found.</CommandEmpty>
+            <CommandEmpty>{t("table.view.noColumns", "No columns found.")}</CommandEmpty>
             <CommandGroup>
               {columns.map((column) => (
                 <CommandItem

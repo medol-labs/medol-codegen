@@ -5,8 +5,21 @@ export const LOCALE_STORAGE_KEY = "refine.locale";
 export const LOCALE_CHANGE_EVENT = "refine.localechange";
 let currentLocale: SupportedLocale = defaultLocale;
 
+export function normalizeSupportedLocale(locale: string | null | undefined): SupportedLocale | undefined {
+  if (!locale) {
+    return undefined;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(messages, locale)) {
+    return locale as SupportedLocale;
+  }
+
+  const normalized = locale.toLowerCase();
+  return supportedLocales.find((supportedLocale) => supportedLocale.toLowerCase() === normalized);
+}
+
 export function isSupportedLocale(locale: string | null): locale is SupportedLocale {
-  return !!locale && Object.prototype.hasOwnProperty.call(messages, locale);
+  return normalizeSupportedLocale(locale) !== undefined;
 }
 
 export function getPersistedLocale(): SupportedLocale | undefined {
@@ -15,7 +28,7 @@ export function getPersistedLocale(): SupportedLocale | undefined {
   }
 
   const locale = window.localStorage.getItem(LOCALE_STORAGE_KEY);
-  return isSupportedLocale(locale) ? locale : undefined;
+  return normalizeSupportedLocale(locale);
 }
 
 export function getCurrentLocale(): SupportedLocale {
@@ -43,11 +56,12 @@ export const i18nProvider: I18nProvider = {
     );
   },
   changeLocale: async (locale) => {
-    if (isSupportedLocale(locale)) {
-      currentLocale = locale;
+    const supportedLocale = normalizeSupportedLocale(locale);
+    if (supportedLocale) {
+      currentLocale = supportedLocale;
     }
 
-    if (typeof window !== "undefined" && isSupportedLocale(locale)) {
+    if (typeof window !== "undefined" && supportedLocale) {
       window.localStorage.setItem(LOCALE_STORAGE_KEY, currentLocale);
       window.dispatchEvent(new CustomEvent(LOCALE_CHANGE_EVENT, { detail: currentLocale }));
     }

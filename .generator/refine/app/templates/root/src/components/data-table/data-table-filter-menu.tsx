@@ -231,7 +231,7 @@ export function DataTableFilterMenu<TData>({
       ))}
       {filters.length > 0 && (
         <Button
-          aria-label="Reset all filters"
+          aria-label={t("table.filter.resetAll", "Reset all filters")}
           variant="outline"
           size="icon"
           className="size-8"
@@ -243,7 +243,7 @@ export function DataTableFilterMenu<TData>({
       <Popover open={open} onOpenChange={onOpenChange}>
         <PopoverTrigger asChild>
           <Button
-            aria-label="Open filter command menu"
+            aria-label={t("table.filter.openMenu", "Open filter command menu")}
             variant="outline"
             size={filters.length > 0 ? "icon" : "sm"}
             className={cn(filters.length > 0 && "size-8", "h-8 font-normal")}
@@ -252,7 +252,7 @@ export function DataTableFilterMenu<TData>({
             disabled={disabled}
           >
             <ListFilter className="text-muted-foreground" />
-            {filters.length > 0 ? null : "Filter"}
+            {filters.length > 0 ? null : t("table.filter.button", "Filter")}
           </Button>
         </PopoverTrigger>
         <PopoverContent
@@ -265,7 +265,7 @@ export function DataTableFilterMenu<TData>({
               placeholder={
                 selectedColumn
                   ? (selectedColumn.columnDef.meta?.label ?? selectedColumn.id)
-                  : "Search fields..."
+                  : t("table.filter.searchFields", "Search fields...")
               }
               value={inputValue}
               onValueChange={setInputValue}
@@ -275,7 +275,7 @@ export function DataTableFilterMenu<TData>({
               {selectedColumn ? (
                 <>
                   {selectedColumn.columnDef.meta?.options && (
-                    <CommandEmpty>No options found.</CommandEmpty>
+                    <CommandEmpty>{t("table.filter.noOptions", "No options found.")}</CommandEmpty>
                   )}
                   <FilterValueSelector
                     column={selectedColumn}
@@ -286,7 +286,7 @@ export function DataTableFilterMenu<TData>({
                 </>
               ) : (
                 <>
-                  <CommandEmpty>No fields found.</CommandEmpty>
+                  <CommandEmpty>{t("table.filter.noFields", "No fields found.")}</CommandEmpty>
                   <CommandGroup>
                     {columns.map((column) => (
                       <CommandItem
@@ -405,9 +405,9 @@ function DataTableFilterItem<TData>({
           </PopoverTrigger>
           <PopoverContent align="start" className="w-48 p-0">
             <Command loop>
-              <CommandInput placeholder="Search fields..." />
+              <CommandInput placeholder={t("table.filter.searchFields", "Search fields...")} />
               <CommandList>
-                <CommandEmpty>No fields found.</CommandEmpty>
+                <CommandEmpty>{t("table.filter.noFields", "No fields found.")}</CommandEmpty>
                 <CommandGroup>
                   {columns.map((column) => (
                     <CommandItem
@@ -746,9 +746,9 @@ function onFilterInputRender<TData>({
             className="w-48 p-0"
           >
             <Command>
-              <CommandInput placeholder="Search options..." />
+              <CommandInput placeholder={t("table.filter.searchOptions", "Search options...")} />
               <CommandList>
-                <CommandEmpty>No options found.</CommandEmpty>
+                <CommandEmpty>{t("table.filter.noOptions", "No options found.")}</CommandEmpty>
                 <CommandGroup>
                   {options.map((option) => (
                     <CommandItem

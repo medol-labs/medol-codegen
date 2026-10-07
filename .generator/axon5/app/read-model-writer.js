@@ -263,6 +263,21 @@ function exportColumns(readmodel) {
         .filter((field) => !['version'].includes(String(field.name).toLowerCase()));
 }
 
+function dataExportColumnLiteral(field) {
+    const label = escapeKotlin(field.label ?? field.title ?? field.name);
+    const dictionary = field.dictionary ? `, dictionaryCode = "${escapeKotlin(field.dictionary)}"` : '';
+    return `DataExportColumn("${field.name}", "${label}"${dictionary})`;
+}
+
+function readModelSlicePackage(readmodel) {
+    return safeIdentifier(_readmodelTitle(readmodel.title)).toLowerCase();
+}
+
+function dictionaryCapabilityProvider(readmodel, kind) {
+    return (readmodel?.capabilityProviders ?? [])
+        .find((item) => item?.capability === 'DictionaryMaintenance' && item?.kind === kind && item?.mappings);
+}
+
 function isJsonJpaField(field) {
     return field.cardinality === 'Multiple' || valueTypeForField(field)?.kind === 'object';
 }
@@ -383,7 +398,7 @@ const readModelWriterMethods = {
         const idClassAnnotation = compositeId ? `@IdClass(${keyName}::class)\n` : '';
         const resultFields = [
             ...readmodel.fields.map((field) => `    val ${field.name}: ${readModelStorageType(field, true)}`),
-            ...metadataFields.map((field) => `    val ${field.name}: ${field.type}`)
+            ...metadataFields.map((field) => `    val ${field.name}: ${field.type} = null`)
         ].join(',\n');
         const resultArguments = [
             ...readmodel.fields.map((field) => `    ${field.name} = ${field.name}`),
@@ -469,11 +484,107 @@ ${entityFields}
             }
             this._writeReadModelResource(packageName, context, slicePackage, slice, readmodel, name, idFields);
             this._writeReadModelProjector(packageName, context, slicePackage, slice, readmodel, name, idFields);
+            this._writeDictionaryDataExportLabelProviderIfNeeded(packageName, context, slicePackage, slice, readmodel);
             if (readmodel.sync) {
                 this._writeSyncReadModelSupport();
                 this._writeSyncReadModelRegistration(packageName, context, slicePackage, readmodel, name, idFields);
             }
         }
+    },
+
+    _writeDictionaryDataExportLabelProviderIfNeeded(packageName, context, slicePackage, slice, readmodel) {
+        const translationProvider = dictionaryCapabilityProvider(readmodel, 'dictionaryTranslations');
+        if (!translationProvider?.mappings?.code || !translationProvider?.mappings?.value || !translationProvider?.mappings?.locale || !translationProvider?.mappings?.label) {
+            return;
+        }
+        const valueSource = this._findCapabilityProviderReadModel('dictionaryValues', slice.context ?? slice.boundedContext ?? context);
+        if (!valueSource?.readmodel || !valueSource?.provider?.mappings?.code || !valueSource?.provider?.mappings?.value || !valueSource?.provider?.mappings?.label) {
+            return;
+        }
+        const className = `${_readmodelTitle(readmodel.title)}DataExportLabelProvider`;
+        const valueName = _readmodelTitle(valueSource.readmodel.title);
+        const translationName = _readmodelTitle(readmodel.title);
+        const valuePackage = `${this.model.rootPackage}.${contextPackage(valueSource.slice.context ?? valueSource.slice.boundedContext ?? context)}.${_sliceTitle(valueSource.slice.title)}`;
+        const valueMappings = valueSource.provider.mappings;
+        const translationMappings = translationProvider.mappings;
+        const valueFilterArgs = [
+            'dictionaryCode',
+            ...(valueMappings.active ? ['true'] : []),
+            ...(valueMappings.state ? ['null'] : []),
+            'pageable'
+        ].join(', ');
+        this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${className}.kt`), `package ${packageName}
+
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.PageRequest
+import org.springframework.data.domain.Pageable
+import org.springframework.stereotype.Component
+import ${valuePackage}.${valueName}
+import ${valuePackage}.${valueName}Repository
+import ${packageName}.${translationName}
+import ${packageName}.${translationName}Repository
+import ${this.model.rootPackage}.shared.application.export.DataExportDictionaryLabelProvider
+
+@Component
+class ${className}(
+    private val dictionaryValues: ${valueName}Repository,
+    private val dictionaryTranslations: ${translationName}Repository
+) : DataExportDictionaryLabelProvider {
+    override fun labels(dictionaryCode: String, locale: String?): Map<String, String> {
+        val labels = mutableMapOf<String, String>()
+        loadDictionaryValues(dictionaryCode).forEach { value ->
+            val valueCode = value.${valueMappings.value} ?: return@forEach
+            labels[valueCode] = value.${valueMappings.label} ?: valueCode
+        }
+        fallbackLocales(locale).forEach { currentLocale ->
+            loadDictionaryTranslations(dictionaryCode, currentLocale).forEach { translation ->
+                val valueCode = translation.${translationMappings.value} ?: return@forEach
+                labels[valueCode] = translation.${translationMappings.label} ?: labels[valueCode] ?: valueCode
+            }
+        }
+        return labels
+    }
+
+    private fun fallbackLocales(locale: String?): List<String> {
+        val normalized = locale?.trim()?.takeIf { it.isNotEmpty() } ?: return emptyList()
+        val base = normalized.substringBefore("-").substringBefore("_")
+        return listOf(base, normalized).distinct()
+    }
+
+    private fun loadDictionaryValues(dictionaryCode: String): List<${valueName}> =
+        loadAll { pageable -> dictionaryValues.findAllByFilter(${valueFilterArgs}) }
+
+    private fun loadDictionaryTranslations(dictionaryCode: String, locale: String): List<${translationName}> =
+        loadAll { pageable -> dictionaryTranslations.findAllByFilter(dictionaryCode, null, locale, pageable) }
+
+    private fun <T> loadAll(fetch: (Pageable) -> Page<T>): List<T> {
+        val records = mutableListOf<T>()
+        var pageNumber = 0
+        do {
+            val page = fetch(PageRequest.of(pageNumber, 1000))
+            records += page.content
+            pageNumber += 1
+        } while (pageNumber < page.totalPages)
+        return records
+    }
+}
+`);
+    },
+
+    _findCapabilityProviderReadModel(kind, contextName) {
+        const model = this.fullModel ?? this.model;
+        for (const candidateSlice of model?.slices ?? []) {
+            if (contextName && candidateSlice.context !== contextName && candidateSlice.boundedContext !== contextName) {
+                continue;
+            }
+            for (const candidateReadModel of candidateSlice.readmodels ?? []) {
+                const provider = dictionaryCapabilityProvider(candidateReadModel, kind);
+                if (provider) {
+                    return {slice: candidateSlice, readmodel: candidateReadModel, provider};
+                }
+            }
+        }
+        return null;
     },
 
     _writeDataExportSupport() {
@@ -490,11 +601,13 @@ import java.util.UUID
 
 data class DataExportColumn(
     val field: String,
-    val label: String? = null
+    val label: String? = null,
+    val dictionaryCode: String? = null
 )
 
 data class DataExportRequest(
-    val columns: List<DataExportColumn>? = null
+    val columns: List<DataExportColumn>? = null,
+    val requestedLocale: String? = null
 )
 
 data class DataExportSortOrder(
@@ -573,6 +686,10 @@ interface DataExportResourceExecutor {
     val resourceName: String
     fun execute(task: DataExportExecutionTask): DataExportExecutionResult
 }
+
+interface DataExportDictionaryLabelProvider {
+    fun labels(dictionaryCode: String, locale: String?): Map<String, String>
+}
 `);
         this.fs.write(this._sharedKernelKotlinPath(`${basePath}/DataExportService.kt`), `package ${basePackage}
 
@@ -604,7 +721,8 @@ import kotlin.io.path.createDirectories
 class DataExportService(
     private val properties: DataExportProperties,
     private val objectMapper: ObjectMapper,
-    private val requestPort: ObjectProvider<DataExportJobRequestPort>
+    private val requestPort: ObjectProvider<DataExportJobRequestPort>,
+    private val dictionaryLabelProviders: ObjectProvider<DataExportDictionaryLabelProvider>
 ) {
     private val accessorCache = java.util.concurrent.ConcurrentHashMap<String, java.lang.reflect.Method?>()
     private val columnsType = object : TypeReference<List<DataExportColumn>>() {}
@@ -616,7 +734,10 @@ class DataExportService(
         val allowedByField = allowed.associateBy { it.field }
         val selected = requested
             ?.mapNotNull { requestedColumn ->
-                allowedByField[requestedColumn.field]?.copy(label = requestedColumn.label ?: allowedByField[requestedColumn.field]?.label)
+                allowedByField[requestedColumn.field]?.copy(
+                    label = requestedColumn.label ?: allowedByField[requestedColumn.field]?.label,
+                    dictionaryCode = requestedColumn.dictionaryCode ?: allowedByField[requestedColumn.field]?.dictionaryCode
+                )
             }
             ?.takeIf { it.isNotEmpty() }
             ?: allowed
@@ -663,7 +784,7 @@ class DataExportService(
             port.request(request)
             ResponseEntity.accepted().body(DataExportJobResponse(jobId, "REQUESTED", fileName) as Any)
         } else {
-            csvResponse(fileName, renderCsv(columns, firstPage, fetchPage).content)
+            csvResponse(fileName, renderCsv(columns, firstPage, fetchPage, requestedLocale).content)
         }
     }
 
@@ -679,9 +800,10 @@ class DataExportService(
         fileName: String,
         columns: List<DataExportColumn>,
         firstPage: Page<T>,
+        requestedLocale: String? = null,
         fetchPage: (Pageable) -> Page<T>
     ): DataExportExecutionResult {
-        val rendered = renderCsv(columns, firstPage, fetchPage)
+        val rendered = renderCsv(columns, firstPage, fetchPage, requestedLocale)
         val directory = Path.of(properties.storagePath).createDirectories()
         val path = directory.resolve(fileName).normalize()
         Files.write(path, rendered.content)
@@ -704,30 +826,40 @@ class DataExportService(
     private fun <T : Any> renderCsv(
         columns: List<DataExportColumn>,
         firstPage: Page<T>,
-        fetchPage: (Pageable) -> Page<T>
+        fetchPage: (Pageable) -> Page<T>,
+        requestedLocale: String?
     ): RenderedCsv {
         val builder = StringBuilder()
+        val dictionaryCache = mutableMapOf<String, Map<String, String>>()
         var rowCount = 0L
         builder.append(columns.joinToString(",") { csvCell(it.label ?: it.field) }).append("\\n")
-        appendRows(builder, columns, firstPage.content)
+        appendRows(builder, columns, firstPage.content, requestedLocale, dictionaryCache)
         rowCount += firstPage.content.size
         var pageNumber = 1
         while (pageNumber < firstPage.totalPages) {
             val page = fetchPage(PageRequest.of(pageNumber, pageSize(), firstPage.pageable.sort))
-            appendRows(builder, columns, page.content)
+            appendRows(builder, columns, page.content, requestedLocale, dictionaryCache)
             rowCount += page.content.size
             pageNumber += 1
         }
         return RenderedCsv(("\\uFEFF" + builder.toString()).toByteArray(StandardCharsets.UTF_8), rowCount)
     }
 
-    private fun <T : Any> appendRows(builder: StringBuilder, columns: List<DataExportColumn>, rows: List<T>) {
+    private fun <T : Any> appendRows(
+        builder: StringBuilder,
+        columns: List<DataExportColumn>,
+        rows: List<T>,
+        requestedLocale: String?,
+        dictionaryCache: MutableMap<String, Map<String, String>>
+    ) {
         for (row in rows) {
-            builder.append(columns.joinToString(",") { column -> csvCell(readField(row, column.field)) }).append("\\n")
+            builder.append(columns.joinToString(",") { column ->
+                csvCell(formatValue(readField(row, column.field), column, requestedLocale, dictionaryCache))
+            }).append("\\n")
         }
     }
 
-    private fun readField(row: Any, field: String): String {
+    private fun readField(row: Any, field: String): Any? {
         val key = row.javaClass.name + "#" + field
         val method = accessorCache.computeIfAbsent(key) {
             val suffix = field.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
@@ -735,7 +867,61 @@ class DataExportService(
                 method.parameterCount == 0 && (method.name == "get$suffix" || method.name == "is$suffix")
             }
         }
-        return method?.invoke(row)?.toString() ?: ""
+        return method?.invoke(row)
+    }
+
+    private fun formatValue(
+        value: Any?,
+        column: DataExportColumn,
+        requestedLocale: String?,
+        dictionaryCache: MutableMap<String, Map<String, String>>
+    ): String {
+        if (value == null) return ""
+        if (value is Iterable<*>) {
+            return value.map { formatValue(it, column, requestedLocale, dictionaryCache) }
+                .filter { it.isNotBlank() }
+                .joinToString("; ")
+        }
+        if (value.javaClass.isArray) {
+            return (0 until java.lang.reflect.Array.getLength(value))
+                .map { index -> formatValue(java.lang.reflect.Array.get(value, index), column, requestedLocale, dictionaryCache) }
+                .filter { it.isNotBlank() }
+                .joinToString("; ")
+        }
+        val rawValue = when (value) {
+            is Enum<*> -> value.name
+            else -> value.toString()
+        }
+        val dictionaryCode = column.dictionaryCode
+        if (!dictionaryCode.isNullOrBlank()) {
+            val labels = dictionaryCache.getOrPut(dictionaryCacheKey(dictionaryCode, requestedLocale)) {
+                dictionaryLabels(dictionaryCode, requestedLocale)
+            }
+            return labels[rawValue] ?: rawValue
+        }
+        if (value is Boolean) {
+            return if (isChineseLocale(requestedLocale)) {
+                if (value) "是" else "否"
+            } else {
+                if (value) "Yes" else "No"
+            }
+        }
+        return rawValue
+    }
+
+    private fun dictionaryCacheKey(dictionaryCode: String, requestedLocale: String?): String =
+        listOf(requestedLocale.orEmpty(), dictionaryCode).joinToString("\\u001F")
+
+    private fun dictionaryLabels(dictionaryCode: String, requestedLocale: String?): Map<String, String> =
+        dictionaryLabelProviders.orderedStream()
+            .map { provider -> provider.labels(dictionaryCode, requestedLocale) }
+            .filter { labels -> labels.isNotEmpty() }
+            .findFirst()
+            .orElse(emptyMap())
+
+    private fun isChineseLocale(requestedLocale: String?): Boolean {
+        val locale = requestedLocale?.lowercase() ?: return false
+        return locale == "zh" || locale.startsWith("zh-") || locale.startsWith("zh_")
     }
 
     private fun csvCell(value: String): String {
@@ -791,7 +977,7 @@ import org.springframework.web.bind.annotation.RestController
 import java.nio.file.Files
 import java.nio.file.Path
 
-@RestController
+@RestController("dataExportJobDownloadResource")
 @RequestMapping("/data-export/jobs")
 class DataExportJobResource(
     private val dataExportService: DataExportService
@@ -2240,7 +2426,7 @@ class ${resourceName}(
     private val repository: ${repositoryName}${exportable ? ',\n    private val dataExportService: DataExportService' : ''}
 ) {
 ${exportable ? `    private val exportColumns = listOf(
-${exportColumns(readmodel).map((field) => `        DataExportColumn("${field.name}", "${escapeKotlin(field.label ?? field.title ?? field.name)}")`).join(',\n')}
+${exportColumns(readmodel).map((field) => `        ${dataExportColumnLiteral(field)}`).join(',\n')}
     )
 
 ` : ''}    @PreAuthorize("hasAuthority('*:*') or hasAuthority('${readModelPermission}:list') or hasAuthority('${readModelPermission}:read')")
@@ -2264,7 +2450,7 @@ ${exportable ? `    @PreAuthorize("hasAuthority('*:*') or hasAuthority('${readMo
         val firstPage = findPage(snapshotCriteria, exportPageable)
         return dataExportService.export("${readmodelRoute}", columns, snapshotCriteria, pageable.sort, firstPage, fetchPage = { nextPage ->
             findPage(snapshotCriteria, nextPage)
-        }, snapshotUpperBound = snapshotUpperBound.toInstant(ZoneOffset.UTC))
+        }, requestedLocale = request?.requestedLocale, snapshotUpperBound = snapshotUpperBound.toInstant(ZoneOffset.UTC))
     }
 
 ` : ''}
@@ -2299,7 +2485,7 @@ class ${name}DataExportExecutor(
 ) : DataExportResourceExecutor {
     override val resourceName: String = "${readmodelRoute}"
     private val exportColumns = listOf(
-${exportColumns(readmodel).map((field) => `        DataExportColumn("${field.name}", "${escapeKotlin(field.label ?? field.title ?? field.name)}")`).join(',\n')}
+${exportColumns(readmodel).map((field) => `        ${dataExportColumnLiteral(field)}`).join(',\n')}
     )
 
     override fun execute(task: DataExportExecutionTask): DataExportExecutionResult {
@@ -2309,7 +2495,7 @@ ${exportColumns(readmodel).map((field) => `        DataExportColumn("${field.nam
         val columns = dataExportService.columnsFromJson(task.columnsJson, exportColumns)
         val sort = dataExportService.sortFromJson(task.sortJson)
         val firstPage = repository.findAllByCriteria(criteria, PageRequest.of(0, dataExportService.pageSize(), sort))
-        return dataExportService.writeCsvFile(task.fileName, columns, firstPage) { nextPage ->
+        return dataExportService.writeCsvFile(task.fileName, columns, firstPage, requestedLocale = task.requestedLocale) { nextPage ->
             repository.findAllByCriteria(criteria, nextPage)
         }
     }
@@ -2326,7 +2512,7 @@ ${exportColumns(readmodel).map((field) => `        DataExportColumn("${field.nam
     }
 }
 ` : ''}
-`);
+`.trimEnd() + '\n');
         if (this._isSyncReadModelSource(slice, readmodel)) {
             this._writeSyncReadModelSourceResource(packageName, context, slicePackage, slice, readmodel, name);
         }

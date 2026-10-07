@@ -58,6 +58,6 @@ test('data export client posts to generated resource export endpoint', () => {
     assert.match(source, /appendSpringCriteriaFilters\(query, params\.filters\)/);
     assert.match(source, /const path = `\/\$\{params\.aggregateRoute\}\/\$\{params\.queryRoute\}\/export`/);
     assert.match(source, /method: "POST"/);
-    assert.match(source, /body: JSON\.stringify\(\{ columns: params\.columns \}\)/);
+    assert.match(source, /requestedLocale: params\.requestedLocale \?\? currentLocale\(\)/);
     assert.match(source, /filenameFromDisposition/);
 });

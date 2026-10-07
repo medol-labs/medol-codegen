@@ -610,7 +610,7 @@ export function DataTableFilterList<TData>({
             disabled={disabled}
           >
             <ListFilter className="text-muted-foreground" />
-            Filter
+            {t("table.filter.button", "Filter")}
             {filters.length > 0 && (
               <Badge
                 variant="secondary"
@@ -629,7 +629,9 @@ export function DataTableFilterList<TData>({
         >
           <div className="flex flex-col gap-1">
             <h4 id={labelId} className="font-medium leading-none">
-              {filters.length > 0 ? "Filters" : "No filters applied"}
+              {filters.length > 0
+                ? t("table.filter.title", "Filters")
+                : t("table.filter.emptyTitle", "No filters applied")}
             </h4>
             <p
               id={descriptionId}
@@ -639,8 +641,8 @@ export function DataTableFilterList<TData>({
               )}
             >
               {filters.length > 0
-                ? "Modify filters to refine your rows."
-                : "Add filters to refine your rows."}
+                ? t("table.filter.description", "Modify filters to refine your rows.")
+                : t("table.filter.emptyDescription", "Add filters to refine your rows.")}
             </p>
           </div>
           {filters.length > 0 ? (
@@ -673,7 +675,7 @@ export function DataTableFilterList<TData>({
               ref={addButtonRef}
               onClick={onFilterAdd}
             >
-              Add filter
+              {t("table.filter.add", "Add filter")}
             </Button>
             {filters.length > 0 ? (
               <Button
@@ -682,7 +684,7 @@ export function DataTableFilterList<TData>({
                 className="rounded"
                 onClick={onFiltersReset}
               >
-                Reset filters
+                {t("table.filter.reset", "Reset filters")}
               </Button>
             ) : null}
           </div>
@@ -782,14 +784,14 @@ function DataTableFilterItem<TData>({
       >
         <div className="min-w-[72px] text-center">
           {index === 0 ? (
-            <span className="text-muted-foreground text-sm">Where</span>
+            <span className="text-muted-foreground text-sm">{t("table.filter.where", "Where")}</span>
           ) : index === 1 ? (
             <Select
               value={joinOperator}
               onValueChange={(value: JoinOperator) => setJoinOperator(value)}
             >
               <SelectTrigger
-                aria-label="Select join operator"
+                aria-label={t("table.filter.joinOperator", "Select join operator")}
                 aria-controls={joinOperatorListboxId}
                 size="sm"
                 className="rounded lowercase"
@@ -839,9 +841,9 @@ function DataTableFilterItem<TData>({
             className="w-[320px] p-0"
           >
             <Command>
-              <CommandInput placeholder="Search fields..." />
+              <CommandInput placeholder={t("table.filter.searchFields", "Search fields...")} />
               <CommandList>
-                <CommandEmpty>No fields found.</CommandEmpty>
+                <CommandEmpty>{t("table.filter.noFields", "No fields found.")}</CommandEmpty>
                 <CommandGroup>
                   {columns.map((column) => (
                     <CommandItem
@@ -1102,18 +1104,22 @@ function onFilterInputRender<TData>({
                 options={columnMeta?.options}
                 placeholder={
                   columnMeta?.placeholder ??
-                  `Select option${multiple ? "s" : ""}...`
+                  (multiple
+                    ? t("table.filter.selectOptions", "Select options...")
+                    : t("table.filter.selectOption", "Select option..."))
                 }
               />
             </Button>
           </FacetedTrigger>
           <FacetedContent id={inputListboxId} className="w-[200px]">
             <FacetedInput
-              aria-label={`Search ${columnMeta?.label} options`}
-              placeholder={columnMeta?.placeholder ?? "Search options..."}
+              aria-label={t("table.filter.searchColumnOptions", {
+                column: columnMeta?.label ?? "",
+              }, "Search {{column}} options")}
+              placeholder={columnMeta?.placeholder ?? t("table.filter.searchOptions", "Search options...")}
             />
             <FacetedList>
-              <FacetedEmpty>No options found.</FacetedEmpty>
+              <FacetedEmpty>{t("table.filter.noOptions", "No options found.")}</FacetedEmpty>
               <FacetedGroup>
                 {columnMeta?.options?.map((option) => (
                   <FacetedItem key={option.value} value={option.value}>
@@ -1158,7 +1164,7 @@ function onFilterInputRender<TData>({
           ? `${formatDate(startDate, { month: "short" })} - ${formatDate(endDate, { month: "short" })}`
           : startDate
             ? formatDate(startDate, { month: "short" })
-            : "Pick a date";
+            : t("table.filter.pickDate", "Pick a date");
 
       return (
         <Popover open={showValueSelector} onOpenChange={setShowValueSelector}>
@@ -1166,7 +1172,9 @@ function onFilterInputRender<TData>({
             <Button
               id={inputId}
               aria-controls={inputListboxId}
-              aria-label={`${columnMeta?.label} date filter`}
+              aria-label={t("table.filter.columnDateFilter", {
+                column: columnMeta?.label ?? column.id,
+              }, "{{column}} date filter")}
               variant="outline"
               size="sm"
               className={cn(

@@ -43,6 +43,7 @@ export const ListToolbar = <TData,>({
   table,
   isQuerying = false,
   onQuery,
+  children,
 }: DataTableProps<TData>) => {
   const translate = useTranslate();
 
@@ -69,6 +70,7 @@ export const ListToolbar = <TData,>({
         ? translate("buttons.querying", "Searching")
         : translate("buttons.search", "Search")}
     </Button>
+    {children}
   </DataTableToolbar>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import type { Column } from "@tanstack/react-table";
+import { useTranslate } from "@refinedev/core";
 import { CalendarIcon, XCircle } from "lucide-react";
 import * as React from "react";
 import type { DateRange } from "react-day-picker";
@@ -61,6 +62,7 @@ export function DataTableDateFilter<TData>({
   title,
   multiple,
 }: DataTableDateFilterProps<TData>) {
+  const t = useTranslate();
   const columnFilterValue = column.getFilterValue();
 
   const selectedDates = React.useMemo<DateSelection>(() => {
@@ -131,7 +133,7 @@ export function DataTableDateFilter<TData>({
       const hasSelectedDates = selectedDates.from || selectedDates.to;
       const dateText = hasSelectedDates
         ? formatDateRange(selectedDates)
-        : "Select date range";
+        : t("table.filter.selectDateRange", "Select date range");
 
       return (
         <span className="flex items-center gap-2">
@@ -154,7 +156,7 @@ export function DataTableDateFilter<TData>({
     const hasSelectedDate = selectedDates.length > 0;
     const dateText = hasSelectedDate
       ? formatDate(selectedDates[0])
-      : "Select date";
+      : t("table.filter.selectDate", "Select date");
 
     return (
       <span className="flex items-center gap-2">
@@ -183,7 +185,9 @@ export function DataTableDateFilter<TData>({
           {hasValue ? (
             <div
               role="button"
-              aria-label={`Clear ${title} filter`}
+              aria-label={t("table.filter.clearColumn", {
+                column: title ?? "",
+              }, "Clear {{column}} filter")}
               tabIndex={0}
               onClick={onReset}
               className="rounded-sm opacity-70 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"

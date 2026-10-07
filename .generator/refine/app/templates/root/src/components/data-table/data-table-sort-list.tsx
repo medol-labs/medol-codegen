@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/sortable";
 import { dataTableConfig } from "@/config/data-table";
 import { cn } from "@/lib/utils";
+import { useTranslate } from "@refinedev/core";
 
 const SORT_SHORTCUT_KEY = "s";
 const REMOVE_SORT_SHORTCUTS = ["backspace", "delete"];
@@ -55,6 +56,7 @@ export function DataTableSortList<TData>({
   disabled,
   ...props
 }: DataTableSortListProps<TData>) {
+  const t = useTranslate();
   const id = React.useId();
   const labelId = React.useId();
   const descriptionId = React.useId();
@@ -176,7 +178,7 @@ export function DataTableSortList<TData>({
             disabled={disabled}
           >
             <ArrowDownUp className="text-muted-foreground" />
-            Sort
+            {t("table.sort.button", "Sort")}
             {sorting.length > 0 && (
               <Badge
                 variant="secondary"
@@ -195,7 +197,9 @@ export function DataTableSortList<TData>({
         >
           <div className="flex flex-col gap-1">
             <h4 id={labelId} className="font-medium leading-none">
-              {sorting.length > 0 ? "Sort by" : "No sorting applied"}
+              {sorting.length > 0
+                ? t("table.sort.title", "Sort by")
+                : t("table.sort.emptyTitle", "No sorting applied")}
             </h4>
             <p
               id={descriptionId}
@@ -205,8 +209,8 @@ export function DataTableSortList<TData>({
               )}
             >
               {sorting.length > 0
-                ? "Modify sorting to organize your rows."
-                : "Add sorting to organize your rows."}
+                ? t("table.sort.description", "Modify sorting to organize your rows.")
+                : t("table.sort.emptyDescription", "Add sorting to organize your rows.")}
             </p>
           </div>
           {sorting.length > 0 && (
@@ -224,6 +228,7 @@ export function DataTableSortList<TData>({
                     columnLabels={columnLabels}
                     onSortUpdate={onSortUpdate}
                     onSortRemove={onSortRemove}
+                    t={t}
                   />
                 ))}
               </div>
@@ -237,7 +242,7 @@ export function DataTableSortList<TData>({
               onClick={onSortAdd}
               disabled={columns.length === 0}
             >
-              Add sort
+              {t("table.sort.add", "Add sort")}
             </Button>
             {sorting.length > 0 && (
               <Button
@@ -246,7 +251,7 @@ export function DataTableSortList<TData>({
                 className="rounded"
                 onClick={onSortingReset}
               >
-                Reset sorting
+                {t("table.sort.resetSorting", "Reset sorting")}
               </Button>
             )}
           </div>
@@ -271,6 +276,7 @@ interface DataTableSortItemProps {
   columnLabels: Map<string, string>;
   onSortUpdate: (sortId: string, updates: Partial<ColumnSort>) => void;
   onSortRemove: (sortId: string) => void;
+  t: ReturnType<typeof useTranslate>;
 }
 
 function DataTableSortItem({
@@ -280,6 +286,7 @@ function DataTableSortItem({
   columnLabels,
   onSortUpdate,
   onSortRemove,
+  t,
 }: DataTableSortItemProps) {
   const fieldListboxId = `${sortItemId}-field-listbox`;
   const fieldTriggerId = `${sortItemId}-field-trigger`;
@@ -337,9 +344,9 @@ function DataTableSortItem({
             className="w-(--radix-popover-trigger-width) p-0"
           >
             <Command>
-              <CommandInput placeholder="Search fields..." />
+              <CommandInput placeholder={t("table.sort.searchFields", "Search fields...")} />
               <CommandList>
-                <CommandEmpty>No fields found.</CommandEmpty>
+                <CommandEmpty>{t("table.sort.noFields", "No fields found.")}</CommandEmpty>
                 <CommandGroup>
                   {columns.map((column) => (
                     <CommandItem
@@ -376,7 +383,7 @@ function DataTableSortItem({
           >
             {dataTableConfig.sortOrders.map((order) => (
               <SelectItem key={order.value} value={order.value}>
-                {order.label}
+                {t(`table.sort.direction.${order.value}`, order.label)}
               </SelectItem>
             ))}
           </SelectContent>

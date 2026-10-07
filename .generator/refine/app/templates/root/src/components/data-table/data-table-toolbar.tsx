@@ -1,6 +1,7 @@
 "use client";
 
 import type { Table } from "@tanstack/react-table";
+import { useTranslate } from "@refinedev/core";
 import { X } from "lucide-react";
 import * as React from "react";
 
@@ -21,6 +22,7 @@ export function DataTableToolbar<TData>({
   className,
   ...props
 }: DataTableToolbarProps<TData>) {
+  const t = useTranslate();
   const columnFilters = table.getState().columnFilters;
   const isFiltered = columnFilters.length > 0;
 
@@ -82,20 +84,20 @@ export function DataTableToolbar<TData>({
         ))}
         {isFiltered && (
           <Button
-            aria-label="Reset filters"
+            aria-label={t("table.filter.reset", "Reset filters")}
             variant="outline"
             size="sm"
             className="shrink-0 border-dashed"
             onClick={onReset}
           >
             <X />
-            Reset
+            {t("buttons.reset", "Reset")}
           </Button>
         )}
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        <DataTableViewOptions table={table} align="end" />
         {children}
+        <DataTableViewOptions table={table} align="end" />
       </div>
     </div>
   );

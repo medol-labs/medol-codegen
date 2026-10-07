@@ -1,6 +1,7 @@
 "use client";
 
 import { useDirection } from "@radix-ui/react-direction";
+import { useTranslate } from "@refinedev/core";
 import type { ColumnSort, SortDirection, Table } from "@tanstack/react-table";
 import {
   ArrowDownUp,
@@ -61,6 +62,7 @@ export function DataGridSortMenu<TData>({
   ...props
 }: DataGridSortMenuProps<TData>) {
   const dir = useDirection();
+  const t = useTranslate();
   const id = React.useId();
   const labelId = React.useId();
   const descriptionId = React.useId();
@@ -183,7 +185,7 @@ export function DataGridSortMenu<TData>({
             disabled={disabled}
           >
             <ArrowDownUp className="text-muted-foreground" />
-            Sort
+            {t("table.sort.button", "Sort")}
             {sorting.length > 0 && (
               <Badge
                 variant="secondary"
@@ -203,7 +205,9 @@ export function DataGridSortMenu<TData>({
         >
           <div className="flex flex-col gap-1">
             <h4 id={labelId} className="font-medium leading-none">
-              {sorting.length > 0 ? "Sort by" : "No sorting applied"}
+              {sorting.length > 0
+                ? t("table.sort.title", "Sort by")
+                : t("table.sort.emptyTitle", "No sorting applied")}
             </h4>
             <p
               id={descriptionId}
@@ -213,8 +217,8 @@ export function DataGridSortMenu<TData>({
               )}
             >
               {sorting.length > 0
-                ? "Modify sorting to organize your rows."
-                : "Add sorting to organize your rows."}
+                ? t("table.sort.description", "Modify sorting to organize your rows.")
+                : t("table.sort.emptyDescription", "Add sorting to organize your rows.")}
             </p>
           </div>
           {sorting.length > 0 && (
@@ -233,6 +237,7 @@ export function DataGridSortMenu<TData>({
                     columnLabels={columnLabels}
                     onSortUpdate={onSortUpdate}
                     onSortRemove={onSortRemove}
+                    t={t}
                   />
                 ))}
               </div>
@@ -246,7 +251,7 @@ export function DataGridSortMenu<TData>({
               onClick={onSortAdd}
               disabled={columns.length === 0}
             >
-              Add sort
+              {t("table.sort.add", "Add sort")}
             </Button>
             {sorting.length > 0 && (
               <Button
@@ -255,7 +260,7 @@ export function DataGridSortMenu<TData>({
                 className="rounded"
                 onClick={onSortingReset}
               >
-                Reset sorting
+                {t("table.sort.resetSorting", "Reset sorting")}
               </Button>
             )}
           </div>
@@ -281,6 +286,7 @@ interface DataTableSortItemProps {
   columnLabels: Map<string, string>;
   onSortUpdate: (sortId: string, updates: Partial<ColumnSort>) => void;
   onSortRemove: (sortId: string) => void;
+  t: ReturnType<typeof useTranslate>;
 }
 
 function DataTableSortItem({
@@ -291,6 +297,7 @@ function DataTableSortItem({
   columnLabels,
   onSortUpdate,
   onSortRemove,
+  t,
 }: DataTableSortItemProps) {
   const fieldListboxId = `${sortItemId}-field-listbox`;
   const fieldTriggerId = `${sortItemId}-field-trigger`;
@@ -349,9 +356,9 @@ function DataTableSortItem({
             className="w-(--radix-popover-trigger-width) p-0"
           >
             <Command>
-              <CommandInput placeholder="Search fields..." />
+              <CommandInput placeholder={t("table.sort.searchFields", "Search fields...")} />
               <CommandList>
-                <CommandEmpty>No fields found.</CommandEmpty>
+                <CommandEmpty>{t("table.sort.noFields", "No fields found.")}</CommandEmpty>
                 <CommandGroup>
                   {columns.map((column) => (
                     <CommandItem
@@ -388,7 +395,7 @@ function DataTableSortItem({
           >
             {SORT_ORDERS.map((order) => (
               <SelectItem key={order.value} value={order.value}>
-                {order.label}
+                {t(`table.sort.direction.${order.value}`, order.label)}
               </SelectItem>
             ))}
           </SelectContent>

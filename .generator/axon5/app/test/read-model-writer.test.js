@@ -501,6 +501,7 @@ test('writes export support for exportable read models', () => {
     assert.match(registry, /class DataExportResourceExecutorRegistry/);
     assert.match(registry, /executorsByResourceName/);
     assert.match(jobResource, /@PreAuthorize\("isAuthenticated\(\)"\)/);
+    assert.match(jobResource, /@RestController\("dataExportJobDownloadResource"\)/);
     assert.match(jobResource, /Files\.readAllBytes\(path\)/);
     assert.match(processor, /class ExecuteDataExportProcessor/);
     assert.match(processor, /fun on\(event: DataExportRequestedEvent\)/);
@@ -521,7 +522,9 @@ test('writes export support for exportable read models', () => {
     assert.match(resource, /val snapshotCriteria = applyExportSnapshot\(criteria, snapshotUpperBound\)/);
     assert.match(resource, /PageRequest\.of\(0, dataExportService\.pageSize\(\), pageable\.sort\)/);
     assert.match(resource, /findPage\(snapshotCriteria, nextPage\)/);
+    assert.match(resource, /requestedLocale = request\?\.requestedLocale/);
     assert.match(resource, /snapshotUpperBound = snapshotUpperBound\.toInstant\(ZoneOffset\.UTC\)/);
+    assert.match(resource, /requestedLocale = task\.requestedLocale/);
     assert.match(resource, /class RuntimeNodeInventoryCatalogDataExportExecutor/);
     assert.match(resource, /criteria\.projectionUpdatedAt/);
     assert.match(resource, /projectionUpdatedAt\.getLessThanOrEqual\(\)/);

@@ -85,6 +85,27 @@ const {readModelProcessingGroup} = require('./axon-processing');
 const {contextPackage} = require('../../common/util/value-types');
 const {_commandTitle, _eventTitle, _readmodelTitle, _sliceTitle} = require('../../common/util/naming');
 
+function deploymentName(generator) {
+    return kebab(generator.currentDeployment?.name ?? generator.model.deployment ?? generator.modulePrefix ?? 'application');
+}
+
+function deploymentScopedProcessingGroup(generator, processingGroup) {
+    const [kind, ...rest] = processingGroup.split('-');
+    return `${kind}-${deploymentName(generator)}-${rest.join('-')}`;
+}
+
+function isDeploymentScopedDataExchangeReadModel(context, readmodel) {
+    const name = kebab(readmodel.name ?? readmodel.title);
+    return context === 'dataexchange' && (name === 'data-export-job-catalog' || name === 'data-import-job-catalog');
+}
+
+function readModelProcessingGroupFor(generator, context, readmodel) {
+    const group = readModelProcessingGroup(readmodel);
+    return isDeploymentScopedDataExchangeReadModel(context, readmodel)
+        ? deploymentScopedProcessingGroup(generator, group)
+        : group;
+}
+
 function permissionCode(name) {
     return kebab(name)
         .replace(/-/g, '_')
@@ -589,6 +610,7 @@ class ${className}(
 
     _writeDataExportSupport() {
         if (this._dataExportSupportWritten) {
+            this._writeDataExportJobAxonPorts();
             return;
         }
         this._dataExportSupportWritten = true;
@@ -961,9 +983,11 @@ import org.springframework.stereotype.Component
 class DataExportResourceExecutorRegistry(executors: List<DataExportResourceExecutor>) {
     private val executorsByResourceName = executors.associateBy { it.resourceName }
 
+    fun availableResourceNames(): Set<String> = executorsByResourceName.keys
+
     fun executor(resourceName: String): DataExportResourceExecutor =
         executorsByResourceName[resourceName]
-            ?: throw IllegalArgumentException("No data export executor registered for resource $resourceName.")
+            ?: throw IllegalArgumentException("No data export executor registered for resource $resourceName. Available resources: ${'$'}{availableResourceNames().sorted().joinToString(", ")}")
 }
 `);
         this.fs.write(this._sharedKernelKotlinPath(`${basePath}/DataExportJobResource.kt`), `package ${basePackage}
@@ -1006,13 +1030,16 @@ class DataExportJobResource(
             return;
         }
         const packageName = `${this.model.rootPackage}.dataexchange.dataexportjob`;
+        const localDeploymentName = deploymentName(this);
         this.fs.write(this._kotlinPath('dataexchange/dataexportjob/DataExportJobPorts.kt'), `package ${packageName}
 
 import org.axonframework.messaging.commandhandling.gateway.CommandGateway
+import org.axonframework.messaging.core.Metadata
 import org.springframework.stereotype.Component
 import ${this.model.rootPackage}.shared.application.export.DataExportJobLifecyclePort
 import ${this.model.rootPackage}.shared.application.export.DataExportJobRequestMessage
 import ${this.model.rootPackage}.shared.application.export.DataExportJobRequestPort
+import ${this.model.rootPackage}.shared.application.metadata.MetadataKeys
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 import java.util.UUID
@@ -1021,6 +1048,8 @@ import java.util.UUID
 class AxonDataExportJobRequestPort(
     private val commandGateway: CommandGateway
 ) : DataExportJobRequestPort {
+    private val metadata: Metadata = Metadata.from(mapOf(MetadataKeys.DEPLOYMENT_NAME to DEPLOYMENT_NAME))
+
     override fun request(message: DataExportJobRequestMessage) {
         commandGateway.send(
             RequestDataExportCommand(
@@ -1035,8 +1064,13 @@ class AxonDataExportJobRequestPort(
                 requestHash = message.requestHash,
                 fileName = message.fileName,
                 status = DataExportJobStatus.REQUESTED
-            )
+            ),
+            metadata
         ).resultMessage.toCompletableFuture().join()
+    }
+
+    companion object {
+        const val DEPLOYMENT_NAME = "${localDeploymentName}"
     }
 }
 
@@ -1044,16 +1078,18 @@ class AxonDataExportJobRequestPort(
 class AxonDataExportJobLifecyclePort(
     private val commandGateway: CommandGateway
 ) : DataExportJobLifecyclePort {
+    private val metadata: Metadata = Metadata.from(mapOf(MetadataKeys.DEPLOYMENT_NAME to AxonDataExportJobRequestPort.DEPLOYMENT_NAME))
+
     override fun markProcessing(dataExportJobId: UUID) {
-        commandGateway.send(MarkDataExportProcessingCommand(dataExportJobId, DataExportJobStatus.PROCESSING)).resultMessage.toCompletableFuture().join()
+        commandGateway.send(MarkDataExportProcessingCommand(dataExportJobId, DataExportJobStatus.PROCESSING), metadata).resultMessage.toCompletableFuture().join()
     }
 
     override fun complete(dataExportJobId: UUID, fileName: String, filePath: String, rowCount: Long) {
-        commandGateway.send(CompleteDataExportCommand(dataExportJobId, fileName, filePath, rowCount, DataExportJobStatus.COMPLETED)).resultMessage.toCompletableFuture().join()
+        commandGateway.send(CompleteDataExportCommand(dataExportJobId, fileName, filePath, rowCount, DataExportJobStatus.COMPLETED), metadata).resultMessage.toCompletableFuture().join()
     }
 
     override fun fail(dataExportJobId: UUID, errorMessage: String) {
-        commandGateway.send(FailDataExportCommand(dataExportJobId, errorMessage, DataExportJobStatus.FAILED)).resultMessage.toCompletableFuture().join()
+        commandGateway.send(FailDataExportCommand(dataExportJobId, errorMessage, DataExportJobStatus.FAILED), metadata).resultMessage.toCompletableFuture().join()
     }
 }
 
@@ -1073,6 +1109,7 @@ object DataExportJobStatus {
         this.fs.write(this._kotlinPath(`dataexchange/dataexportjob/${processorClass}.kt`), `package ${packageName}
 
 import org.axonframework.messaging.core.annotation.Namespace
+import org.axonframework.messaging.eventhandling.EventMessage
 import org.axonframework.messaging.eventhandling.annotation.EventHandler
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
@@ -1080,9 +1117,10 @@ import ${this.model.rootPackage}.dataexchange.events.${eventClass}
 import ${this.model.rootPackage}.shared.application.export.DataExportExecutionTask
 import ${this.model.rootPackage}.shared.application.export.DataExportJobLifecyclePort
 import ${this.model.rootPackage}.shared.application.export.DataExportResourceExecutorRegistry
+import ${this.model.rootPackage}.shared.application.metadata.MetadataKeys
 import java.time.ZoneOffset
 
-@Namespace("automation-data-exchange-${kebab(automation.name)}")
+@Namespace("${deploymentScopedProcessingGroup(this, `automation-data-exchange-${kebab(automation.name)}`)}")
 @Component
 class ${processorClass}(
     private val registry: DataExportResourceExecutorRegistry,
@@ -1091,7 +1129,10 @@ class ${processorClass}(
     private val log = LoggerFactory.getLogger(javaClass)
 
     @EventHandler
-    fun on(event: ${eventClass}) {
+    fun on(event: ${eventClass}, message: EventMessage) {
+        if (message.metadata()[MetadataKeys.DEPLOYMENT_NAME]?.toString() != AxonDataExportJobRequestPort.DEPLOYMENT_NAME) {
+            return
+        }
         val task = DataExportExecutionTask(
             dataExportJobId = event.dataExportJobId,
             resourceName = event.resourceName,
@@ -1105,7 +1146,6 @@ class ${processorClass}(
             fileName = event.fileName
         )
         try {
-            lifecyclePort.markProcessing(event.dataExportJobId)
             val result = registry.executor(event.resourceName).execute(task)
             lifecyclePort.complete(event.dataExportJobId, result.fileName, result.filePath, result.rowCount)
         } catch (ex: Exception) {
@@ -2810,6 +2850,7 @@ ${appendOutbox(readModelKey, '            ')}
         // Skipped: ${_eventTitle(event.title)} does not provide enough key fields to locate ${name}Projection.
     }`;
         }).join('\n\n');
+        const scopedDataExchangeReadModel = isDeploymentScopedDataExchangeReadModel(context, readmodel);
         const interfaceMethods = events.map((event) => `    fun update(
         event: ${_eventTitle(event.title)},
         message: EventMessage
@@ -2819,7 +2860,7 @@ ${appendOutbox(readModelKey, '            ')}
         event: ${_eventTitle(event.title)},
         message: EventMessage
     ) {
-        updater.update(event, message)
+${scopedDataExchangeReadModel ? '        if (!accepts(message)) return\n' : ''}        updater.update(event, message)
     }`).join('\n\n');
 
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${name}Projector.kt`), `package ${packageName}
@@ -2832,7 +2873,7 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
-${includeMetadata ? `import ${this.model.rootPackage}.shared.application.metadata.ProjectionMetadata\n` : ''}
+${includeMetadata ? `import ${this.model.rootPackage}.shared.application.metadata.ProjectionMetadata\n` : ''}${scopedDataExchangeReadModel ? `import ${this.model.rootPackage}.shared.application.metadata.MetadataKeys\n` : ''}
 ${syncSource ? `import ${this.model.rootPackage}.shared.application.outbox.MedolOutboxAppender\n` : ''}
 ${eventImports}
 ${stateImports}
@@ -2862,12 +2903,15 @@ class ${name}ProjectionUpdaterConfiguration {
         Default${name}ProjectionUpdater(repository${syncSource ? ', outbox' : ''})
 }
 
-@Namespace("${readModelProcessingGroup(readmodel)}")
+@Namespace("${readModelProcessingGroupFor(this, context, readmodel)}")
 @Component
 class ${name}Projector(
     private val updater: ${name}ProjectionUpdater
 ) {
-${eventHandlers}
+${scopedDataExchangeReadModel ? `    private fun accepts(message: EventMessage): Boolean =
+        message.metadata()[MetadataKeys.DEPLOYMENT_NAME]?.toString() == "${deploymentName(this)}"
+
+` : ''}${eventHandlers}
 }
 `);
     },

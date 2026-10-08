@@ -15,6 +15,7 @@ object MetadataKeys {
     const val CAUSATION_ID = "causationId"
     const val TRACE_ID = "traceId"
     const val TENANT_ID = "tenantId"
+    const val DEPLOYMENT_NAME = "deploymentName"
 
     val PROPAGATED_KEYS = arrayOf(
         CORRELATION_ID,
@@ -22,7 +23,8 @@ object MetadataKeys {
         USER_ID,
         SESSION_ID,
         TRACE_ID,
-        TENANT_ID
+        TENANT_ID,
+        DEPLOYMENT_NAME
     )
 }
 

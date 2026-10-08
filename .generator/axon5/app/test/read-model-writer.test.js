@@ -592,11 +592,13 @@ test('writes export support for exportable read models', () => {
     assert.match(jobResource, /@RestController\("dataExportJobDownloadResource"\)/);
     assert.match(jobResource, /Files\.readAllBytes\(path\)/);
     assert.match(processor, /class ExecuteDataExportProcessor/);
-    assert.match(processor, /fun on\(event: DataExportRequestedEvent\)/);
-    assert.match(processor, /@Namespace\("automation-data-exchange-execute-data-export"\)/);
+    assert.match(processor, /fun on\(event: DataExportRequestedEvent, message: EventMessage\)/);
+    assert.match(processor, /@Namespace\("automation-application-data-exchange-execute-data-export"\)/);
+    assert.match(processor, /MetadataKeys\.DEPLOYMENT_NAME/);
+    assert.match(processor, /AxonDataExportJobRequestPort\.DEPLOYMENT_NAME/);
     assert.match(processor, /requestedAt = event\.requestedAt\.toInstant\(ZoneOffset\.UTC\)/);
     assert.match(processor, /snapshotUpperBound = event\.snapshotUpperBound\.toInstant\(ZoneOffset\.UTC\)/);
-    assert.match(processor, /lifecyclePort\.markProcessing\(event\.dataExportJobId\)/);
+    assert.doesNotMatch(processor, /lifecyclePort\.markProcessing/);
     assert.match(processor, /registry\.executor\(event\.resourceName\)\.execute\(task\)/);
     assert.match(processor, /lifecyclePort\.complete\(event\.dataExportJobId, result\.fileName, result\.filePath, result\.rowCount\)/);
     assert.doesNotMatch(processor, /outbox|DataExportWorker|DataExportJobWorkPort/);
@@ -618,6 +620,48 @@ test('writes export support for exportable read models', () => {
     assert.match(resource, /projectionUpdatedAt\.getLessThanOrEqual\(\)/);
     assert.match(resource, /requestedUpperBound == null \|\| requestedUpperBound\.isAfter\(snapshotUpperBound\)/);
     assert.match(resource, /applyExportSnapshot\(criteria, snapshotUpperBound\)/);
+});
+
+test('writes data export job ports for every generated backend module', () => {
+    const writes = new Map();
+    const writer = syncWriter(writes);
+    writer.model.slices = [{
+        name: 'DataExportJob',
+        processors: [{
+            name: 'ExecuteDataExport',
+            metadata: {
+                on: 'DataExportRequested',
+                onKind: 'event',
+                uses: 'PlatformDataExchange.export',
+                emits: 'MarkDataExportProcessing',
+                emits2: 'CompleteDataExport',
+                emits3: 'FailDataExport'
+            }
+        }]
+    }];
+    let moduleName = 'platform';
+    writer._kotlinPath = (relative) => `${moduleName}/${relative}`;
+
+    readModelWriterMethods._writeDataExportSupport.call(writer);
+    moduleName = 'support';
+    readModelWriterMethods._writeDataExportSupport.call(writer);
+
+    assert.match(
+        writes.get('platform/dataexchange/dataexportjob/DataExportJobPorts.kt'),
+        /class AxonDataExportJobRequestPort/
+    );
+    assert.match(
+        writes.get('support/dataexchange/dataexportjob/DataExportJobPorts.kt'),
+        /class AxonDataExportJobRequestPort/
+    );
+    assert.match(
+        writes.get('support/dataexchange/dataexportjob/DataExportJobPorts.kt'),
+        /const val DEPLOYMENT_NAME = "application"/
+    );
+    assert.match(
+        writes.get('support/dataexchange/dataexportjob/ExecuteDataExportProcessor.kt'),
+        /class ExecuteDataExportProcessor/
+    );
 });
 
 function syncWriter(writes) {

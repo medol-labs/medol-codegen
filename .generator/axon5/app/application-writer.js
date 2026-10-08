@@ -41,6 +41,37 @@ function processorDependency(processor, direction, elementType) {
     );
 }
 
+function deploymentName(generator) {
+    return kebab(generator.currentDeployment?.name ?? generator.model.deployment ?? generator.modulePrefix ?? 'application');
+}
+
+function deploymentScopedProcessingGroup(generator, processingGroup) {
+    const [kind, ...rest] = processingGroup.split('-');
+    return `${kind}-${deploymentName(generator)}-${rest.join('-')}`;
+}
+
+function isDeploymentScopedDataExchangeReadModel(context, readmodel) {
+    const name = kebab(readmodel.name ?? readmodel.title);
+    return context === 'dataexchange' && (name === 'data-export-job-catalog' || name === 'data-import-job-catalog');
+}
+
+function readModelProcessingGroupFor(generator, context, readmodel) {
+    const group = readModelProcessingGroup(readmodel);
+    return isDeploymentScopedDataExchangeReadModel(context, readmodel)
+        ? deploymentScopedProcessingGroup(generator, group)
+        : group;
+}
+
+function isDataExchangeExecutionProcessor(processor) {
+    const metadata = processor.metadata ?? {};
+    const uses = String(metadata.uses ?? '').toLowerCase();
+    return (metadata.on === 'DataExportRequested' || metadata.on === 'DataImportRequested')
+        && (uses === 'platformdataexchange.export'
+            || uses === 'platformdataexchange.import'
+            || uses.endsWith('dataexchange.export')
+            || uses.endsWith('dataexchange.import'));
+}
+
 const applicationWriterMethods = {
     _isMonoMode() {
         return !process.env.CODEGEN_DEPLOYMENT && (this.model.deployments ?? []).length > 1;
@@ -234,7 +265,7 @@ ${beanMethods}
         const namespaces = new Set([AUDIT_TRAIL_PROCESSING_GROUP]);
         for (const slice of this.model.slices ?? []) {
             for (const readmodel of slice.readmodels ?? []) {
-                namespaces.add(readModelProcessingGroup(readmodel));
+                namespaces.add(readModelProcessingGroupFor(this, slice.context, readmodel));
             }
             for (const processor of slice.processors ?? []) {
                 if (processor.metadata?.onKind === 'todo') {
@@ -243,6 +274,10 @@ ${beanMethods}
                 const inbound = processorDependency(processor, 'INBOUND', 'EVENT');
                 const outbound = processorDependency(processor, 'OUTBOUND', 'COMMAND');
                 if (!inbound || !outbound) {
+                    continue;
+                }
+                if (isDataExchangeExecutionProcessor(processor)) {
+                    namespaces.add(deploymentScopedProcessingGroup(this, `automation-data-exchange-${kebab(processor.name ?? processor.title)}`));
                     continue;
                 }
                 namespaces.add(automationProcessingGroup(slice));

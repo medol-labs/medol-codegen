@@ -1211,7 +1211,6 @@ class ${processorClass}(
             tenantId = MetadataFactory.value(message.metadata[MetadataKeys.TENANT_ID]?.toString())
         )
         try {
-            lifecyclePort.markProcessing(event.dataImportJobId, 0)
             val result = registry.executor(event.commandName).execute(task)
             lifecyclePort.complete(event.dataImportJobId, result.totalRows, result.successRows, result.failedRows, result.failureIndexPath)
         } catch (ex: Exception) {

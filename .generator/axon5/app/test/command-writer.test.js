@@ -260,7 +260,7 @@ test('writes import support for importable commands', () => {
     assert.match(service, /failure-index\.csv/);
     assert.match(processor, /fun on\(event: DataImportRequestedEvent, message: EventMessage\)/);
     assert.match(processor, /userId = MetadataFactory\.value\(message\.metadata\[MetadataKeys\.USER_ID\]\?\.toString\(\)\)/);
-    assert.match(processor, /lifecyclePort\.markProcessing\(event\.dataImportJobId, 0\)/);
+    assert.doesNotMatch(processor, /lifecyclePort\.markProcessing/);
     assert.match(executor, /override val commandName: String = "ImportRuntimeNodeInventory"/);
     assert.match(executor, /runtimeNodeInventoryId = dataImportService\.uuid\(row, "runtimeNodeInventoryId", true\)!!/);
     assert.match(executor, /nodeReady = dataImportService\.boolean\(row, "nodeReady", false\)/);

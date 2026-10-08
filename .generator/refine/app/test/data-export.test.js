@@ -81,6 +81,38 @@ test('list page template exports current table state and visible columns', () =>
     assert.match(template, /column\.getIsVisible\(\)/);
     assert.match(template, /!\["select", "actions"\]\.includes\(column\.id\)/);
     assert.match(template, /<Download className="size-4" \/>/);
+    assert.match(template, /leadingActions=\{\s*<>/);
+    assert.ok(
+        template.indexOf('<Download className="size-4" />') < template.indexOf('<Upload className="size-4" />'),
+        'export actions should render before import actions'
+    );
+});
+
+test('list toolbar keeps reset on the left and export import before right-side view controls', () => {
+    const toolbar = readFileSync(join(__dirname, '../templates/root/src/components/data-table/data-table-toolbar.tsx'), 'utf8');
+    const listView = readFileSync(join(__dirname, '../templates/root/src/components/refine-ui/views/list-view.tsx'), 'utf8');
+
+    assert.ok(
+        toolbar.indexOf('{isFiltered && (') < toolbar.indexOf('{children}'),
+        'reset should render on the left before active filter badges'
+    );
+    assert.ok(
+        toolbar.indexOf('{children}') < toolbar.indexOf('{leadingActions}'),
+        'resource actions should not render in the left toolbar content'
+    );
+    assert.match(toolbar, /<div className="flex shrink-0 items-center gap-2">\s*\{leadingActions\}\s*<DataTableViewOptions table=\{table\} align="end" \/>\s*\{trailingActions\}/);
+    assert.ok(
+        listView.indexOf('trailingActions={') < listView.indexOf('<DataTableFilterList table={table} />'),
+        'filter should be part of right-side actions'
+    );
+    assert.ok(
+        listView.indexOf('<DataTableFilterList table={table} />') < listView.indexOf('<DataTableSortList table={table}>'),
+        'filter should render before sort'
+    );
+    assert.ok(
+        listView.indexOf('<DataTableSortList table={table}>') < listView.indexOf('<Search className="h-4 w-4" />'),
+        'sort should render before search'
+    );
 });
 
 test('data export client posts to generated resource export endpoint', () => {

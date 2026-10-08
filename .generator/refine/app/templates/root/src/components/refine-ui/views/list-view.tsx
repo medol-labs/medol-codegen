@@ -1,6 +1,6 @@
 "use client";
 
-import type { PropsWithChildren } from "react";
+import type { PropsWithChildren, ReactNode } from "react";
 
 import { CreateButton } from "@/components/refine-ui/buttons/create";
 import { Breadcrumb } from "@/components/refine-ui/layout/breadcrumb";
@@ -36,40 +36,49 @@ type ListHeaderProps = PropsWithChildren<{
 interface DataTableProps<TData> extends React.ComponentProps<"div"> {
   table: TanstackTable<TData>;
   isQuerying?: boolean;
+  leadingActions?: ReactNode;
   onQuery?: () => void;
 }
 
 export const ListToolbar = <TData,>({
   table,
   isQuerying = false,
+  leadingActions,
   onQuery,
   children,
 }: DataTableProps<TData>) => {
   const translate = useTranslate();
 
-  return (<DataTableToolbar table={table}>
+  return (<DataTableToolbar
+    table={table}
+    leadingActions={leadingActions}
+    trailingActions={
+      <>
+        <DataTableFilterList table={table} />
+        <DataTableSortList table={table}></DataTableSortList>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={isQuerying}
+          onClick={() => {
+            table.setPageIndex(0);
+            onQuery?.();
+          }}
+        >
+          {isQuerying ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Search className="h-4 w-4" />
+          )}
+          {isQuerying
+            ? translate("buttons.querying", "Searching")
+            : translate("buttons.search", "Search")}
+        </Button>
+      </>
+    }
+  >
     {children}
-    <DataTableFilterList table={table} />
-    <DataTableSortList table={table}></DataTableSortList>
-    <Button
-      type="button"
-      variant="outline"
-      size="sm"
-      disabled={isQuerying}
-      onClick={() => {
-        table.setPageIndex(0);
-        onQuery?.();
-      }}
-    >
-      {isQuerying ? (
-        <Loader2 className="h-4 w-4 animate-spin" />
-      ) : (
-        <Search className="h-4 w-4" />
-      )}
-      {isQuerying
-        ? translate("buttons.querying", "Searching")
-        : translate("buttons.search", "Search")}
-    </Button>
   </DataTableToolbar>
   );
 }

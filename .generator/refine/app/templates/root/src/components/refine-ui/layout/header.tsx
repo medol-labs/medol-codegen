@@ -167,6 +167,11 @@ type NotificationSummaryRecord = {
   toastPolicy?: string;
 };
 
+const resourceListRoute = (resource?: { list?: unknown; name?: string }) => {
+  if (typeof resource?.list === "string") return resource.list;
+  return resource?.name ? `/${resource.name.replaceAll("_", "-")}` : undefined;
+};
+
 function NotificationIndicator({ compact = false }: { compact?: boolean }) {
   const translate = useTranslate();
   const navigate = useNavigate();
@@ -181,7 +186,7 @@ function NotificationIndicator({ compact = false }: { compact?: boolean }) {
     [],
   );
   const summaryMeta = summaryResource?.meta as Record<string, unknown> | undefined;
-  const catalogRoute = catalogResource?.name;
+  const catalogRoute = resourceListRoute(catalogResource);
 
   const summary = useList<NotificationSummaryRecord>({
     resource: summaryResource?.name ?? "__system_notification_summary_missing__",
@@ -240,7 +245,7 @@ function NotificationIndicator({ compact = false }: { compact?: boolean }) {
       title={label}
       onClick={() => {
         if (catalogRoute) {
-          navigate(`/${catalogRoute}`);
+          navigate(catalogRoute);
         }
       }}
     >

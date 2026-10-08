@@ -14,10 +14,14 @@ const DATA_TABLE_RESET_FILTERS_EVENT = "medol:data-table:reset-filters";
 
 interface DataTableToolbarProps<TData> extends React.ComponentProps<"div"> {
   table: Table<TData>;
+  leadingActions?: React.ReactNode;
+  trailingActions?: React.ReactNode;
 }
 
 export function DataTableToolbar<TData>({
   table,
+  leadingActions,
+  trailingActions,
   children,
   className,
   ...props
@@ -66,6 +70,18 @@ export function DataTableToolbar<TData>({
       {...props}
     >
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto overflow-y-hidden whitespace-nowrap [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {isFiltered && (
+          <Button
+            aria-label={t("table.filter.reset", "Reset filters")}
+            variant="outline"
+            size="sm"
+            className="shrink-0 border-dashed"
+            onClick={onReset}
+          >
+            <X />
+            {t("buttons.reset", "Reset")}
+          </Button>
+        )}
         {children}
         {activeFilters.map((filter) => (
           <Badge
@@ -83,21 +99,11 @@ export function DataTableToolbar<TData>({
             </span>
           </Badge>
         ))}
-        {isFiltered && (
-          <Button
-            aria-label={t("table.filter.reset", "Reset filters")}
-            variant="outline"
-            size="sm"
-            className="shrink-0 border-dashed"
-            onClick={onReset}
-          >
-            <X />
-            {t("buttons.reset", "Reset")}
-          </Button>
-        )}
       </div>
       <div className="flex shrink-0 items-center gap-2">
+        {leadingActions}
         <DataTableViewOptions table={table} align="end" />
+        {trailingActions}
       </div>
     </div>
   );

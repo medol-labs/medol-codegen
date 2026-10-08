@@ -367,33 +367,41 @@ export const <%= resource.component %>List = () => {
           table={table.reactTable}
           isQuerying={table.refineCore.tableQuery.isFetching}
           onQuery={() => table.refineCore.tableQuery.refetch()}
+<% if (resource.exportable || hasDataImport) { -%>
+          leadingActions={
+            <>
+<% if (resource.exportable) { -%>
+              <Button type="button" variant="outline" size="sm" onClick={handleExport} disabled={isExporting}>
+                <Download className="size-4" />
+                {isExporting
+                  ? t("dataExport.exporting", "Exporting")
+<% if (resource.idFields.length === 1) { -%>
+                  : Object.values(table.reactTable.getState().rowSelection).some(Boolean)
+                    ? t("dataExport.exportSelected", "Export selected")
+                    : t("dataExport.export", "Export")<% } else { -%>
+                  : t("dataExport.export", "Export")<% } -%>}
+              </Button>
+<% } -%>
+<% if (hasDataImport) { -%>
+<% resource.importCommands.forEach((command) => { -%>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => handleChooseImportFile({ name: "<%= command.name %>", label: t("<%= command.i18nKey %>", <%- JSON.stringify(command.label) %>), route: "<%= command.httpRoute %>" })}
+                disabled={isImporting}
+              >
+                <Upload className="size-4" />
+                {isImporting ? t("dataImport.importing", "Importing") : t("<%= command.i18nKey %>", <%- JSON.stringify(command.label) %>)}
+              </Button>
+<% }) -%>
+<% } -%>
+            </>
+          }
+<% } -%>
         >
 <% if (hasDataImport) { -%>
           <input ref={importInputRef} className="hidden" type="file" accept=".csv,text/csv" onChange={handleImportFileChange} />
-<% resource.importCommands.forEach((command) => { -%>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => handleChooseImportFile({ name: "<%= command.name %>", label: t("<%= command.i18nKey %>", <%- JSON.stringify(command.label) %>), route: "<%= command.httpRoute %>" })}
-            disabled={isImporting}
-          >
-            <Upload className="size-4" />
-            {isImporting ? t("dataImport.importing", "Importing") : t("<%= command.i18nKey %>", <%- JSON.stringify(command.label) %>)}
-          </Button>
-<% }) -%>
-<% } -%>
-<% if (resource.exportable) { -%>
-          <Button type="button" variant="outline" size="sm" onClick={handleExport} disabled={isExporting}>
-            <Download className="size-4" />
-            {isExporting
-              ? t("dataExport.exporting", "Exporting")
-<% if (resource.idFields.length === 1) { -%>
-              : Object.values(table.reactTable.getState().rowSelection).some(Boolean)
-                ? t("dataExport.exportSelected", "Export selected")
-                : t("dataExport.export", "Export")<% } else { -%>
-              : t("dataExport.export", "Export")<% } -%>}
-          </Button>
 <% } -%>
         </ListToolbar>
         {renderSlotExtensions(frontendComposition, "toolbar:<%= resource.route %>:list", "toolbar.after", { resource: "<%= resource.route %>", table })}

@@ -469,12 +469,45 @@ function relatedEventsForSlice(model, slice) {
     return uniqueBy([...(slice.events ?? []), ...related], (event) => event.id ?? event.name);
 }
 
+function pastTenseVerb(verb) {
+    const irregular = {
+        Bind: 'Bound',
+        Choose: 'Chosen',
+        Run: 'Run',
+        Send: 'Sent',
+        Submit: 'Submitted'
+    };
+    if (irregular[verb]) return irregular[verb];
+    if (verb.endsWith('y')) return `${verb.slice(0, -1)}ied`;
+    if (verb.endsWith('e')) return `${verb}d`;
+    return `${verb}ed`;
+}
+
+function commandNameParts(name) {
+    return String(name ?? '').match(/[A-Z]?[a-z0-9]+|[A-Z]+(?![a-z])/g) ?? [];
+}
+
+function inferredOutboundEventNames(command) {
+    const parts = commandNameParts(command.name);
+    if (parts.length < 2) return [];
+    const [verb, ...objectParts] = parts;
+    const objectName = objectParts.join('');
+    const candidates = [`${objectName}${pastTenseVerb(verb)}`];
+    if (verb === 'Mark' && objectName.endsWith('Processing')) {
+        candidates.unshift(`${objectName}Started`);
+    }
+    return uniqueBy(candidates, (value) => value);
+}
+
 function outboundEvents(command, events) {
     const ids = new Set((command.dependencies ?? [])
         .filter((dependency) => dependency.direction === 'OUTBOUND' && dependency.elementType === 'EVENT')
         .map((dependency) => dependency.id));
     const selected = events.filter((event) => ids.has(event.id));
-    return selected.length > 0 ? selected : events.slice(0, 1);
+    if (selected.length > 0) return selected;
+    const inferredNames = new Set(inferredOutboundEventNames(command));
+    const inferred = events.filter((event) => inferredNames.has(event.name));
+    return inferred.length > 0 ? inferred : events.slice(0, 1);
 }
 
 function transitionForCommand(model, command) {

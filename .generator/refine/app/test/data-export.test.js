@@ -38,6 +38,37 @@ test('carries exportable read model metadata into frontend resources', () => {
     assert.equal(resource.dataProviderName, 'support');
 });
 
+test('uses the read model route for generated list and show pages', () => {
+    const resource = toReadModelResource(
+        {
+            title: 'System Notification',
+            chapter: 'System Notification',
+            slice: {title: 'System Notification Catalog', context: 'SystemNotification'},
+            commands: [],
+            deployment: {
+                name: 'Support',
+                label: 'Support',
+                dataProviderName: 'support'
+            }
+        },
+        {
+            id: 'readmodel-system-notification-summary',
+            title: 'System Notification Summary',
+            listElement: true,
+            fields: [
+                {name: 'recipientUserId', type: 'String', idAttribute: true},
+                {name: 'unreadCount', type: 'Long'}
+            ]
+        },
+        [],
+        {commandSliceFor: () => undefined}
+    );
+
+    assert.equal(resource.pagePath, 'systemnotification/read-models/system-notification-summary');
+    assert.equal(resource.listPagePath, 'systemnotification/slices/system-notification-summary');
+    assert.equal(resource.showPagePath, 'systemnotification/slices/system-notification-summary');
+});
+
 test('list page template exports current table state and visible columns', () => {
     const template = readFileSync(join(__dirname, '../templates/src/pages/list.tsx.tpl'), 'utf8');
 

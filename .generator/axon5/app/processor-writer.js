@@ -14,11 +14,12 @@ const {
     selectionFor,
     eventFieldsWithTags,
     eventTagFieldsFor,
+    escapeKotlin,
     safeIdentifier,
     uniqueBy
 } = require('./model-helpers');
 const {automationProcessingGroup, integrationProcessingGroup} = require('./axon-processing');
-const {contextPackage} = require('../../common/util/value-types');
+const {contextPackage, valueTypeImport} = require('../../common/util/value-types');
 const {_commandTitle, _eventTitle, _readmodelTitle, _sliceTitle} = require('../../common/util/naming');
 
 function lowerCamel(value) {
@@ -38,6 +39,18 @@ function deploymentForContext(generator, contextName) {
 function findCommand(generator, commandId) {
     for (const slice of allSlices(generator)) {
         const command = (slice.commands ?? []).find((candidate) => candidate.id === commandId);
+        if (command) return {slice, command};
+    }
+    return null;
+}
+
+function findCommandByName(generator, commandName) {
+    const expected = String(commandName ?? '').toLowerCase();
+    for (const slice of allSlices(generator)) {
+        const command = (slice.commands ?? []).find((candidate) =>
+            String(candidate.name ?? '').toLowerCase() === expected
+            || String(candidate.title ?? '').toLowerCase() === expected
+        );
         if (command) return {slice, command};
     }
     return null;
@@ -186,6 +199,52 @@ function readModelRepositoryPageCall(readmodel) {
         : 'findAll(PageRequest.of(0, 100))';
 }
 
+function defaultToastPolicy(severity) {
+    const normalized = String(severity ?? '').toUpperCase();
+    if (normalized === 'ERROR' || normalized === 'WARNING') return 'IMPORTANT';
+    if (normalized === 'SUCCESS') return 'DEFAULT';
+    return 'NONE';
+}
+
+function humanFallbackTitle(messageKey, eventName) {
+    const key = String(messageKey ?? '').trim();
+    if (key) {
+        return key
+            .split(/[._-]+/)
+            .filter(Boolean)
+            .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+            .join(' ');
+    }
+    return String(eventName ?? 'Notification')
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .trim() || 'Notification';
+}
+
+function notificationMessageKey(eventName) {
+    return `notifications.${lowerCamel(eventName)}`;
+}
+
+function inferNotificationCategory(eventRef) {
+    const text = `${eventRef.slice.context} ${eventRef.slice.name} ${eventRef.event.name}`.toLowerCase();
+    if (text.includes('dataexport') || text.includes('dataimport') || text.includes('dataexchange')) return 'DATA_EXCHANGE';
+    if (text.includes('training')) return 'TRAINING';
+    if (text.includes('runtime')) return 'RUNTIME';
+    return 'SYSTEM';
+}
+
+function inferNotificationSeverity(eventName) {
+    const name = String(eventName ?? '');
+    if (/(Failed|Failure|Rejected|Canceled|Cancelled|Error)$/i.test(name) || /(Failed|Failure|Rejected|Canceled|Cancelled|Error)/i.test(name)) return 'ERROR';
+    if (/(Alert|Raised|Warning|Detected)$/i.test(name) || /(Alert|Warning|Detected)/i.test(name)) return 'WARNING';
+    if (/(Completed|Succeeded|Success|Approved|Activated|Published|Created)$/i.test(name) || /(Completed|Succeeded|Success|Approved|Activated|Published|Created)/i.test(name)) return 'SUCCESS';
+    return 'INFO';
+}
+
+function notificationTargetIdField(event) {
+    return (event.fields ?? []).find((field) => field.id)
+        ?? (event.fields ?? []).find((field) => /Id$/.test(field.name));
+}
+
 function importLines(values) {
     return uniqueBy(values.flatMap((value) => String(value ?? '')
         .split('\n')
@@ -204,9 +263,112 @@ function commandRequestClass(command) {
 
 const processorWriterMethods = {
     _writeProcessors(slice) {
+        this._writeSystemNotificationProcessors();
         for (const processor of slice.processors ?? []) {
             this._writeProcessor(slice, processor);
         }
+    },
+
+    _writeSystemNotificationProcessors() {
+        if (this._systemNotificationProcessorsWritten) {
+            return;
+        }
+        this._systemNotificationProcessorsWritten = true;
+        const notifiableEvents = allSlices(this)
+            .flatMap((slice) => (slice.events ?? [])
+                .filter((event) => event.notifiable)
+                .map((event) => ({slice, event})));
+        if (notifiableEvents.length === 0) return;
+
+        const publishCommandRef = findCommandByName(this, 'PublishSystemNotification');
+        if (!publishCommandRef) return;
+
+        const localContextNames = new Set((this.model.contexts ?? []).map((context) => context.name));
+        const commandClass = _commandTitle(publishCommandRef.command.title);
+        const commandImport = `${this.model.rootPackage}.${contextPackage(publishCommandRef.slice.context)}.${_sliceTitle(publishCommandRef.slice.title)}.${commandClass}`;
+        const categoryImport = valueTypeImport('NotificationCategory');
+        const severityImport = valueTypeImport('NotificationSeverity');
+        const toastImport = valueTypeImport('NotificationToastPolicy');
+
+        notifiableEvents.forEach((eventRef, index) => {
+            if (!localContextNames.has(eventRef.slice.context)) return;
+            if (!localContextNames.has(publishCommandRef.slice.context)) return;
+            this._writeSystemNotificationProcessor(index, eventRef, commandImport, commandClass, [categoryImport, severityImport, toastImport].filter(Boolean));
+        });
+    },
+
+    _writeSystemNotificationProcessor(index, eventRef, commandImport, commandClass, typeImports) {
+        const context = contextPackage(eventRef.slice.context);
+        const slicePackage = _sliceTitle(eventRef.slice.title);
+        const packageName = `${this.model.rootPackage}.${context}.${slicePackage}`;
+        const eventClass = _eventTitle(eventRef.event.title);
+        const eventImport = `${this.model.rootPackage}.${contextPackage(eventRef.slice.context)}.events.${eventClass}`;
+        const className = `${eventClass}SystemNotification${index + 1}Processor`;
+        const eventFields = new Set((eventRef.event.fields ?? []).map((field) => field.name));
+        const argsEntries = (eventRef.event.fields ?? [])
+            .map((field) => field.name)
+            .filter((arg) => eventFields.has(arg))
+            .map((arg) => `"${escapeKotlin(arg)}" to event.${arg}`)
+            .join(', ');
+        const messageArgs = argsEntries
+            ? `objectMapper.writeValueAsString(mapOf(${argsEntries}))`
+            : 'null';
+        const targetKey = notificationTargetIdField(eventRef.event)?.name ?? null;
+        const targetId = targetKey && eventFields.has(targetKey)
+            ? `event.${targetKey}.toString()`
+            : 'null';
+        const category = safeIdentifier(inferNotificationCategory(eventRef));
+        const severity = safeIdentifier(inferNotificationSeverity(eventRef.event.name));
+        const toastPolicy = safeIdentifier(defaultToastPolicy(severity));
+        const messageKey = notificationMessageKey(eventRef.event.name);
+        const fallbackTitle = humanFallbackTitle(messageKey, eventRef.event.name);
+        const imports = importLines([
+            eventImport,
+            commandImport,
+            ...typeImports
+        ]).join('\n');
+
+        this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${className}.kt`), `package ${packageName}
+
+${imports}
+import com.fasterxml.jackson.databind.ObjectMapper
+import org.axonframework.messaging.commandhandling.gateway.CommandGateway
+import org.axonframework.messaging.eventhandling.annotation.EventHandler
+import org.axonframework.messaging.core.annotation.Namespace
+import org.springframework.stereotype.Component
+import java.time.LocalDateTime
+import java.util.UUID
+
+@Namespace("system-notification-${kebab(eventRef.slice.context)}-${kebab(eventRef.slice.name)}")
+@Component
+class ${className}(
+    private val commandGateway: CommandGateway,
+    private val objectMapper: ObjectMapper
+) {
+    @EventHandler
+    fun on(event: ${eventClass}) {
+        commandGateway.send(
+            ${commandClass}(
+                notificationId = UUID.randomUUID(),
+                recipientUserId = "GLOBAL",
+                recipientRole = null,
+                category = NotificationCategory.${category},
+                severity = NotificationSeverity.${severity},
+                messageKey = "${escapeKotlin(messageKey)}",
+                messageArgsJson = ${messageArgs},
+                fallbackTitle = "${escapeKotlin(fallbackTitle)}",
+                fallbackBody = null,
+                targetType = "${escapeKotlin(eventRef.slice.name)}",
+                targetId = ${targetId},
+                targetRoute = null,
+                toastPolicy = NotificationToastPolicy.${toastPolicy},
+                publishedAt = LocalDateTime.now(),
+                status = "UNREAD"
+            )
+        ).resultMessage
+    }
+}
+`);
     },
 
     _writeProcessor(slice, processor) {

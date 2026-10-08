@@ -5,6 +5,7 @@ const test = require('node:test');
 
 const {readModelWriterMethods} = require('../read-model-writer');
 const {safeDatabaseIdentifier} = require('../model-helpers');
+const {configureValueTypes} = require('../../../common/util/value-types');
 
 test('places UmaDB event storage settings under medol.axon', () => {
     const template = readFileSync(join(__dirname, '../templates/application.yml'), 'utf8');
@@ -413,6 +414,93 @@ test('writes sync source read model updater with transactional outbox append', (
     assert.match(projector, /sourceContext = "DatasetGovernance"/);
     assert.match(projector, /sourceReadModel = "FeatureSchemaCatalog"/);
     assert.match(projector, /payload = entity\.toReadModel\(\)/);
+});
+
+test('writes system notification summary projector with unread count and latest notification state', () => {
+    const writes = new Map();
+    const published = {
+        id: 'event-published',
+        name: 'SystemNotificationPublished',
+        title: 'System Notification Published',
+        fields: []
+    };
+    const read = {
+        id: 'event-read',
+        name: 'SystemNotificationRead',
+        title: 'System Notification Read',
+        fields: []
+    };
+    const allRead = {
+        id: 'event-all-read',
+        name: 'AllSystemNotificationsRead',
+        title: 'All System Notifications Read',
+        fields: []
+    };
+    const slices = [
+        {context: 'SystemNotification', name: 'PublishSystemNotification', title: 'Publish System Notification', events: [published]},
+        {context: 'SystemNotification', name: 'MarkSystemNotificationRead', title: 'Mark System Notification Read', events: [read]},
+        {context: 'SystemNotification', name: 'MarkAllSystemNotificationsRead', title: 'Mark All System Notifications Read', events: [allRead]}
+    ];
+    const readmodel = {
+        name: 'SystemNotificationSummary',
+        dependencies: [
+            {direction: 'INBOUND', elementType: 'EVENT', id: 'event-published'},
+            {direction: 'INBOUND', elementType: 'EVENT', id: 'event-read'},
+            {direction: 'INBOUND', elementType: 'EVENT', id: 'event-all-read'}
+        ],
+        fields: [
+            {name: 'recipientUserId', type: 'String', idAttribute: true},
+            {name: 'unreadCount', type: 'Long'},
+            {name: 'latestNotificationId', type: 'UUID', optional: true},
+            {name: 'latestSeverity', type: 'NotificationSeverity', optional: true},
+            {name: 'latestPublishedAt', type: 'DateTime', optional: true},
+            {name: 'messageKey', type: 'String', optional: true},
+            {name: 'fallbackTitle', type: 'String', optional: true},
+            {name: 'fallbackBody', type: 'Text', optional: true},
+            {name: 'toastPolicy', type: 'NotificationToastPolicy', optional: true},
+            {name: 'hasUnreadError', type: 'Boolean'}
+        ]
+    };
+    configureValueTypes([
+        {name: 'NotificationSeverity', context: 'SystemNotification'},
+        {name: 'NotificationToastPolicy', context: 'SystemNotification'}
+    ], 'tech.medo', []);
+    const writer = {
+        ...readModelWriterMethods,
+        model: {
+            rootPackage: 'tech.medo',
+            slices
+        },
+        fs: {
+            write(path, content) {
+                writes.set(path, content);
+            }
+        },
+        _kotlinPath(relative) {
+            return `kotlin/${relative}`;
+        }
+    };
+
+    readModelWriterMethods._writeReadModelProjector.call(
+        writer,
+        'tech.medo.systemnotification.systemnotificationcatalog',
+        'systemnotification',
+        'systemnotificationcatalog',
+        {context: 'SystemNotification'},
+        readmodel,
+        'SystemNotificationSummary',
+        [readmodel.fields[0]]
+    );
+
+    const projector = writes.get('kotlin/systemnotification/systemnotificationcatalog/SystemNotificationSummaryProjector.kt');
+    assert.match(projector, /open class DefaultSystemNotificationSummaryProjectionUpdater/);
+    assert.match(projector, /entity\.unreadCount = \(entity\.unreadCount \?: 0L\) \+ 1L/);
+    assert.match(projector, /entity\.latestNotificationId = event\.notificationId/);
+    assert.match(projector, /entity\.messageKey = event\.messageKey/);
+    assert.match(projector, /entity\.toastPolicy = event\.toastPolicy/);
+    assert.match(projector, /entity\.hasUnreadError = \(entity\.hasUnreadError == true\) \|\| event\.severity == NotificationSeverity\.ERROR/);
+    assert.match(projector, /entity\.unreadCount = maxOf\(0L, \(entity\.unreadCount \?: 0L\) - 1L\)/);
+    assert.match(projector, /entity\.unreadCount = 0L/);
 });
 
 test('does not write sync registration for read models without sync source or a single id', () => {

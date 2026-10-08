@@ -47,7 +47,7 @@ function toReadModelResource(group, readModel, allEvents, workflow) {
     const resourceCommands = uniqueElements(group.commands);
     const deployment = group.deployment;
     const contextRoute = contextRouteFor(group.slice, group.chapter);
-    const readModelSliceRoute = sliceRouteFor(group.slice, queryTitle);
+    const readModelSliceRoute = route;
     const readModelPagePath = `${contextRoute}/slices/${readModelSliceRoute}`;
     const aggregatePagePath = `${contextRoute}/read-models/${route}`;
     let normalizedCommands = resourceCommands

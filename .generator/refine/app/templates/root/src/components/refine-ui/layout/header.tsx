@@ -15,7 +15,7 @@ import {
   supportedLocales,
   type SupportedLocale,
 } from "@/providers/i18n";
-import { backendModules } from "@/providers/resources";
+import { backendModules, resources } from "@/providers/resources";
 import {
   HeaderExtensionActions,
   useAppExtensions,
@@ -23,12 +23,15 @@ import {
 import {
   useActiveAuthProvider,
   useGetLocale,
+  useList,
   useLogout,
+  useNotification,
   useRefineOptions,
   useSetLocale,
+  useTranslate,
 } from "@refinedev/core";
-import { Check, Globe2, LogOutIcon, Server } from "lucide-react";
-import { useEffect } from "react";
+import { Bell, Check, Globe2, LogOutIcon, Server } from "lucide-react";
+import { useEffect, useMemo, useRef } from "react";
 import { useLocation, useNavigate } from "react-router";
 
 export const Header = () => {
@@ -57,6 +60,7 @@ function DesktopHeader() {
       )}
     >
       <HeaderExtensionActions />
+      <NotificationIndicator />
       <ModuleSwitcher />
       <LanguageSwitcher />
       <ThemeToggle />
@@ -141,11 +145,130 @@ function MobileHeader() {
 
       <div className={cn("flex", "shrink-0", "items-center", "gap-1")}>
         <HeaderExtensionActions compact />
+        <NotificationIndicator compact />
         <ModuleSwitcher compact />
         <LanguageSwitcher compact />
         <ThemeToggle className={cn("h-8", "w-8")} />
       </div>
     </header>
+  );
+}
+
+type NotificationSummaryRecord = {
+  notificationId?: string;
+  latestNotificationId?: string;
+  unreadCount?: number;
+  latestSeverity?: string;
+  latestPublishedAt?: string;
+  hasUnreadError?: boolean;
+  fallbackTitle?: string;
+  fallbackBody?: string;
+  messageKey?: string;
+  toastPolicy?: string;
+};
+
+function NotificationIndicator({ compact = false }: { compact?: boolean }) {
+  const translate = useTranslate();
+  const navigate = useNavigate();
+  const { open } = useNotification();
+  const lastToastIdRef = useRef<string | null>(null);
+  const summaryResource = useMemo(
+    () => resources.find((resource) => resource.name === "system_notification_summary"),
+    [],
+  );
+  const catalogResource = useMemo(
+    () => resources.find((resource) => resource.name === "system_notification_catalog"),
+    [],
+  );
+  const summaryMeta = summaryResource?.meta as Record<string, unknown> | undefined;
+  const catalogRoute = catalogResource?.name;
+
+  const summary = useList<NotificationSummaryRecord>({
+    resource: summaryResource?.name ?? "__system_notification_summary_missing__",
+    dataProviderName: summaryMeta?.dataProviderName as string | undefined,
+    pagination: { currentPage: 1, pageSize: 1, mode: "server" },
+    meta: summaryMeta,
+    queryOptions: {
+      enabled: Boolean(summaryResource),
+      refetchInterval: 15000,
+      staleTime: 10000,
+    },
+  });
+
+  const record = summary.query.data?.data?.[0];
+  const unreadCount = Number(record?.unreadCount ?? 0);
+  const latestNotificationId = record?.latestNotificationId ?? record?.notificationId;
+  const latestSeverity = String(record?.latestSeverity ?? "").toUpperCase();
+  const toastPolicy = String(record?.toastPolicy ?? "").toUpperCase();
+  const shouldToast =
+    latestNotificationId
+    && latestNotificationId !== lastToastIdRef.current
+    && (toastPolicy === "DEFAULT"
+      || toastPolicy === "IMPORTANT"
+      || latestSeverity === "ERROR"
+      || latestSeverity === "WARNING");
+
+  useEffect(() => {
+    if (!shouldToast || !latestNotificationId) return;
+    lastToastIdRef.current = latestNotificationId;
+    const message = record?.messageKey
+      ? translate(record.messageKey, record.fallbackTitle ?? record.messageKey)
+      : record?.fallbackTitle ?? translate("systemNotification.new", "New notification");
+    const description = record?.fallbackBody;
+    open?.({
+      type: latestSeverity === "ERROR" ? "error" : "success",
+      message,
+      description,
+    });
+  }, [latestNotificationId, latestSeverity, open, record?.fallbackBody, record?.fallbackTitle, record?.messageKey, shouldToast, translate]);
+
+  if (!summaryResource) {
+    return null;
+  }
+
+  const label = unreadCount > 0
+    ? translate("systemNotification.unreadCount", { count: unreadCount }, "{{count}} unread")
+    : translate("systemNotification.noneUnread", "No unread notifications");
+
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className={cn("relative", compact ? "h-8 w-8" : "h-9 w-9")}
+      aria-label={label}
+      title={label}
+      onClick={() => {
+        if (catalogRoute) {
+          navigate(`/${catalogRoute}`);
+        }
+      }}
+    >
+      <Bell className={cn("size-4", record?.hasUnreadError ? "text-destructive" : "text-muted-foreground")} />
+      {unreadCount > 0 ? (
+        <span
+          className={cn(
+            "absolute",
+            "-right-0.5",
+            "-top-0.5",
+            "flex",
+            "h-4",
+            "min-w-4",
+            "items-center",
+            "justify-center",
+            "rounded-full",
+            "bg-destructive",
+            "px-1",
+            "text-[10px]",
+            "font-medium",
+            "leading-none",
+            "text-destructive-foreground"
+          )}
+        >
+          {unreadCount > 99 ? "99+" : unreadCount}
+        </span>
+      ) : null}
+    </Button>
   );
 }
 

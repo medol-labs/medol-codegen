@@ -125,6 +125,16 @@ test('data export client posts to generated resource export endpoint', () => {
     assert.match(source, /filenameFromDisposition/);
 });
 
+test('data export list template does not special-case export job downloads', () => {
+    const template = readFileSync(join(__dirname, '../templates/src/pages/list.tsx.tpl'), 'utf8');
+    const source = readFileSync(join(__dirname, '../templates/root/src/lib/data-export.ts'), 'utf8');
+
+    assert.doesNotMatch(template, /hasDataExportJobDownload/);
+    assert.doesNotMatch(template, /downloadDataExportJob/);
+    assert.doesNotMatch(source, /export async function downloadDataExportJob/);
+    assert.match(source, /const downloadBlob/);
+});
+
 test('carries importable command metadata into frontend resources', () => {
     const resource = toReadModelResource(
         {

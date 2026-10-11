@@ -771,6 +771,111 @@ test('prefills download commands with artifact row fields', () => {
     assert.deepEqual(command?.hiddenPrefillFields.map((field) => field.name), ['modelId']);
 });
 
+test('maps read model eligibility into row command state visibility', () => {
+    const model = {
+        domain: 'Demo',
+        contexts: [{name: 'DataExchange', title: 'Data Exchange'}],
+        aggregates: [],
+        transitions: [],
+        deployments: [{
+            name: 'Support',
+            title: 'Support',
+            contexts: ['DataExchange']
+        }],
+        slices: [{
+            id: 'slice-data-export-job',
+            context: 'DataExchange',
+            chapter: 'Data Exchange',
+            title: 'Data Export Job',
+            commands: [],
+            events: [{
+                id: 'event-data-export-completed',
+                title: 'Data Export Completed',
+                fields: [{name: 'dataExportJobId', type: 'UUID', idAttribute: true}]
+            }],
+            readmodels: [{
+                id: 'readmodel-data-export-job-catalog',
+                title: 'Data Export Job Catalog',
+                listElement: true,
+                eligibility: [{
+                    profile: 'DownloadDataExportFile',
+                    operator: 'AND',
+                    conditions: [{left: 'DataExportJob.status', operator: '==', right: 'COMPLETED'}]
+                }],
+                fields: [
+                    {name: 'dataExportJobId', type: 'UUID', idAttribute: true},
+                    {name: 'status', type: 'String'},
+                    {name: 'fileName', type: 'String'},
+                    {name: 'downloadUri', type: 'String'}
+                ],
+                dependencies: [{
+                    id: 'event-data-export-completed',
+                    direction: 'INBOUND',
+                    title: 'Data Export Completed',
+                    elementType: 'EVENT'
+                }]
+            }]
+        }, {
+            id: 'slice-download-data-export-file',
+            context: 'DataExchange',
+            chapter: 'Data Exchange',
+            title: 'Download Data Export File',
+            commands: [{
+                id: 'command-download-data-export-file',
+                title: 'Download Data Export File',
+                clientEffect: {
+                    type: 'download',
+                    options: {
+                        uriField: 'downloadUri',
+                        filenameField: 'fileName'
+                    }
+                },
+                fields: [
+                    {name: 'dataExportJobId', type: 'UUID', idAttribute: true, technicalAttribute: true},
+                    {name: 'fileName', type: 'String'},
+                    {name: 'downloadUri', type: 'String'}
+                ],
+                dependencies: [{
+                    id: 'event-data-export-completed',
+                    direction: 'INBOUND',
+                    title: 'Data Export Completed',
+                    elementType: 'EVENT'
+                }, {
+                    id: 'event-data-export-file-download-authorized',
+                    direction: 'OUTBOUND',
+                    title: 'Data Export File Download Authorized',
+                    elementType: 'EVENT'
+                }]
+            }],
+            events: [{
+                id: 'event-data-export-file-download-authorized',
+                title: 'Data Export File Download Authorized',
+                fields: [{name: 'dataExportJobId', type: 'UUID', idAttribute: true}],
+                dependencies: [{
+                    id: 'command-download-data-export-file',
+                    direction: 'INBOUND',
+                    title: 'Download Data Export File',
+                    elementType: 'COMMAND'
+                }]
+            }],
+            dependencies: [{
+                id: 'event-data-export-completed',
+                direction: 'INBOUND',
+                title: 'Data Export Completed',
+                elementType: 'EVENT'
+            }]
+        }]
+    };
+
+    const frontend = buildFrontendModel(model);
+    const resource = frontend.resources.find((item) => item.name === 'data_export_job_catalog');
+    const command = resource?.commands.find((item) => item.name === 'downloadDataExportFile');
+
+    assert.equal(command?.downloadCommand, true);
+    assert.equal(command?.stateField, 'status');
+    assert.deepEqual(command?.allowedStates, ['COMPLETED']);
+});
+
 test('supports download client effects without metadata options', () => {
     const model = {
         domain: 'Demo',

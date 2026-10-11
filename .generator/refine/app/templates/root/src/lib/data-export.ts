@@ -54,6 +54,17 @@ const currentLocale = (): string | undefined => {
   return undefined;
 };
 
+const downloadBlob = (blob: Blob, filename: string) => {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+};
+
 export async function requestDataExport(params: {
   aggregateRoute: string;
   queryRoute: string;
@@ -93,13 +104,6 @@ export async function requestDataExport(params: {
 
   const blob = await response.blob();
   const filename = filenameFromDisposition(response.headers.get("content-disposition")) ?? "export.csv";
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+  downloadBlob(blob, filename);
   return { kind: "download", filename };
 }

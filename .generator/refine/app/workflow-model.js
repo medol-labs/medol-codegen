@@ -256,7 +256,12 @@ function buildWorkflowModel(
             const transition = transitionsByCommandId.get(commandKey(command))
                 ?? transitionsByCommandId.get(String(command.name ?? ''))
                 ?? transitionsByCommandId.get(String(command.title ?? ''));
-            return stateControlForTransition(transition, readModel);
+            const transitionControl = stateControlForTransition(transition, readModel);
+            if (transitionControl.allowedStates.length > 0) {
+                return transitionControl;
+            }
+            const slice = this.commandSliceFor(command);
+            return eligibilityStateControlForCommand(command, readModel, slice) ?? transitionControl;
         },
         selectForField(field) {
             return readModelSelectForFieldSource(field, selectableReadModelsByFieldSource);
@@ -869,6 +874,44 @@ function stateControlForTransition(transition, readModel) {
         allowedStates,
         targetState: transition?.to,
         stateField: allowedStates.length > 0 ? stateFieldForReadModel(readModel, conceptName, transition) : undefined
+    };
+}
+
+function eligibilityStateControlForCommand(command, readModel, slice) {
+    const eligibility = eligibilityForCommand(eligibilityForReadModel(readModel), command, slice);
+    if (!eligibility || String(eligibility.operator ?? 'AND').toUpperCase() !== 'AND') {
+        return null;
+    }
+
+    const fields = normalizeFields(readModel?.fields ?? []);
+    const selectableFields = new Set(fields.map((field) => field.name).filter(Boolean));
+    const fieldDefinitionsByName = new Map(fields
+        .filter((field) => field?.name)
+        .map((field) => [field.name, field]));
+    const select = {
+        resource: snake(cleanTitle(readModel?.title)),
+        meta: {
+            label: cleanTitle(readModel?.title),
+            queryRoute: axonRoute(readModel?.title),
+            fields: [...selectableFields]
+        }
+    };
+
+    const filters = normalizeArray(eligibility.conditions)
+        .map((condition) => eligibilityConditionToFilter(condition, selectableFields, fieldDefinitionsByName, select));
+    if (filters.length !== 1 || filters.some((filter) => !filter)) {
+        return null;
+    }
+
+    const [filter] = filters;
+    if (filter.operator !== 'eq' || filter.value === undefined || filter.value === null) {
+        return null;
+    }
+
+    return {
+        allowedStates: [String(filter.value)],
+        targetState: undefined,
+        stateField: filter.field
     };
 }
 

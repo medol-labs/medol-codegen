@@ -602,6 +602,9 @@ test('writes export support for exportable read models', () => {
     assert.match(processor, /registry\.executor\(event\.resourceName\)\.execute\(task\)/);
     assert.match(processor, /lifecyclePort\.complete\(event\.dataExportJobId, result\.fileName, result\.filePath, result\.rowCount\)/);
     assert.doesNotMatch(processor, /outbox|DataExportWorker|DataExportJobWorkPort/);
+    const jobPorts = writes.get('kotlin/dataexchange/dataexportjob/DataExportJobPorts.kt');
+    assert.match(jobPorts, /val downloadUri = "\/data-export\/jobs\/download\?filePath=\$encodedFilePath&fileName=\$encodedFileName"/);
+    assert.match(jobPorts, /CompleteDataExportCommand\(dataExportJobId, fileName, filePath, downloadUri, rowCount, DataExportJobStatus\.COMPLETED\)/);
     assert.match(resource, /private val exportColumns = listOf\(/);
     assert.match(resource, /DataExportColumn\("runtimeNodeInventoryId", "runtimeNodeInventoryId"\)/);
     assert.match(resource, /DataExportColumn\("runtimeName", "Runtime Name"\)/);

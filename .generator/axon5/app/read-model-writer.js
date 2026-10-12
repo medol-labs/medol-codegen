@@ -106,6 +106,26 @@ function readModelProcessingGroupFor(generator, context, readmodel) {
         : group;
 }
 
+function readModelAccessPolicyFor(model, readmodel) {
+    const policyName = readmodel?.accessPolicy ?? model.defaultAccessPolicy;
+    const policy = (model.accessPolicies ?? []).find((candidate) => candidate.name === policyName);
+    return {
+        name: policyName,
+        fields: (policy?.rules ?? [])
+            .filter((rule) => rule?.kind === 'fields')
+            .flatMap((rule) => rule.fields ?? [])
+            .map(String)
+    };
+}
+
+function readModelAccessPolicyLiteral(policy) {
+    const name = policy.name ? `"${escapeKotlin(policy.name)}"` : 'null';
+    return `ReadModelAccessPolicy(
+            name = ${name},
+            fields = ${stringList(policy.fields)}
+        )`;
+}
+
 function permissionCode(name) {
     return kebab(name)
         .replace(/-/g, '_')
@@ -473,7 +493,7 @@ ${resultArguments}
 interface ${name}Repository {
     fun ${readModelRepositoryMethodName(filterFields)}(${filterSignaturePrefix}pageable: Pageable): Page<${name}>
     fun findAllByCriteria(criteria: ${name}Criteria?, pageable: Pageable): Page<${name}>
-${id ? `    fun findById(id: ${idType}): ${name}?\n` : ''}    fun findProjectionById(id: ${idType}): ${name}Projection?
+${id ? `    fun findById(id: ${idType}): ${name}?\n    fun findByIdWithAccessPolicy(id: ${idType}): ${name}?\n` : ''}    fun findProjectionById(id: ${idType}): ${name}Projection?
 ${partialLookupMethods ? `${partialLookupMethods}\n` : ''}    fun save(projection: ${name}Projection)
 }
 
@@ -499,6 +519,7 @@ ${entityFields}
 }
 `);
         if (id) {
+            this._writeReadModelAccessPolicySupport();
             this._writeReadModelJpaRepository(packageName, context, slicePackage, slice, readmodel, name, idFields, hasJsonJpaFields);
             if (readmodel.exportable) {
                 this._writeDataExportSupport();
@@ -511,6 +532,44 @@ ${entityFields}
                 this._writeSyncReadModelRegistration(packageName, context, slicePackage, readmodel, name, idFields);
             }
         }
+    },
+
+    _writeReadModelAccessPolicySupport() {
+        if (this._readModelAccessPolicySupportWritten) {
+            return;
+        }
+        this._readModelAccessPolicySupportWritten = true;
+        const basePackage = `${this.model.rootPackage}.shared.application.access`;
+        const basePath = 'shared/application/access';
+        this.fs.write(this._sharedKernelKotlinPath(`${basePath}/ReadModelAccessPolicyFilter.kt`), `package ${basePackage}
+
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
+import org.springframework.data.jpa.domain.Specification
+import org.springframework.stereotype.Component
+
+data class ReadModelAccessPolicy(
+    val name: String?,
+    val fields: List<String> = emptyList()
+)
+
+interface ReadModelAccessPolicyFilter {
+    fun <T> specification(
+        contextName: String,
+        readModelName: String,
+        policy: ReadModelAccessPolicy
+    ): Specification<T>
+}
+
+@Component
+@ConditionalOnMissingBean(ReadModelAccessPolicyFilter::class)
+class PermitAllReadModelAccessPolicyFilter : ReadModelAccessPolicyFilter {
+    override fun <T> specification(
+        contextName: String,
+        readModelName: String,
+        policy: ReadModelAccessPolicy
+    ): Specification<T> = Specification.where(null)
+}
+`);
     },
 
     _writeDictionaryDataExportLabelProviderIfNeeded(packageName, context, slicePackage, slice, readmodel) {
@@ -2204,13 +2263,28 @@ ${assignments}
             .join(', ');
         const filterSignaturePrefix = filterFields.length > 0 ? `${filterParameters}, ` : '';
         const filterArguments = filterFields.map((field) => field.name).join(', ');
+        const accessPolicy = readModelAccessPolicyFor(this.model, readmodel);
+        const accessPolicyLiteral = readModelAccessPolicyLiteral(accessPolicy);
+        const contextName = slice.context ?? slice.chapter ?? context;
+        const readModelName = readmodel.name ?? readmodel.title ?? name;
+        const idSpecification = idFields.length > 1
+            ? `    private fun idSpecification(id: ${idType}): Specification<${entityName}> =
+        Specification { root, _, criteriaBuilder ->
+            criteriaBuilder.and(
+${idFields.map((field) => `                criteriaBuilder.equal(root.get<${readModelStorageType(field, false)}>("${field.name}"), id.${field.name})`).join(',\n')}
+            )
+        }`
+            : `    private fun idSpecification(id: ${idType}): Specification<${entityName}> =
+        Specification { root, _, criteriaBuilder ->
+            criteriaBuilder.equal(root.get<${idType}>("${id.name}"), id)
+        }`;
         const findAllImplementation = filterFields.length > 0
             ? `    override fun findAllByFilter(${filterSignaturePrefix}pageable: Pageable): Page<${name}> =
-        jpaRepository.findAll(filters(${filterArguments}), pageable).map { it.toProjection().toReadModel() }`
+        jpaRepository.findAll(filters(${filterArguments}).and(accessSpecification()), pageable).map { it.toProjection().toReadModel() }`
             : `    override fun findAll(pageable: Pageable): Page<${name}> =
         findAllByCriteria(null, pageable)`;
         const criteriaImplementation = `    override fun findAllByCriteria(criteria: ${name}Criteria?, pageable: Pageable): Page<${name}> =
-        queryService.findByCriteria(criteria, pageable)`;
+        jpaRepository.findAll(queryService.createSpecification(criteria).and(accessSpecification()), pageable).map { it.toProjection().toReadModel() }`;
         const filterSpecification = filterFields.length > 0
             ? `
 
@@ -2246,11 +2320,14 @@ ${partialLookupMethods}
 `);
         this.fs.write(this._kotlinPath(`${readModelPersistencePath(context, name)}/${adapterName}.kt`), `package ${packageName}
 
-${filterFields.length > 0 ? 'import jakarta.persistence.criteria.Predicate\nimport org.springframework.data.jpa.domain.Specification\n' : ''}import org.springframework.data.domain.Page
+${filterFields.length > 0 ? 'import jakarta.persistence.criteria.Predicate\n' : ''}import org.springframework.data.jpa.domain.Specification
+import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import org.springframework.stereotype.Repository
 ${hasJsonJpaFields ? 'import com.fasterxml.jackson.databind.ObjectMapper\n' : ''}${hasJsonJpaFields ? 'import com.fasterxml.jackson.module.kotlin.readValue\n' : ''}
 ${imports}
+import ${this.model.rootPackage}.shared.application.access.ReadModelAccessPolicy
+import ${this.model.rootPackage}.shared.application.access.ReadModelAccessPolicyFilter
 import ${readModelPackageName}.${name}
 import ${readModelPackageName}.${name}Criteria
 ${idFields.length > 1 ? `import ${readModelPackageName}.${name}Key\n` : ''}import ${readModelPackageName}.${name}Projection
@@ -2260,6 +2337,7 @@ import ${readModelPackageName}.toReadModel
 @Repository
 class ${adapterName}(
     private val jpaRepository: ${springDataRepositoryName},
+    private val accessPolicyFilter: ReadModelAccessPolicyFilter,
     private val queryService: ${name}QueryService${hasJsonJpaFields ? ',\n    private val objectMapper: ObjectMapper' : ''}
 ) : ${repositoryName} {
 ${findAllImplementation}
@@ -2269,12 +2347,24 @@ ${criteriaImplementation}
     override fun findById(id: ${idType}): ${name}? =
         jpaRepository.findById(id).map { it.toProjection().toReadModel() }.orElse(null)
 
+    override fun findByIdWithAccessPolicy(id: ${idType}): ${name}? =
+        jpaRepository.findOne(idSpecification(id).and(accessSpecification())).map { it.toProjection().toReadModel() }.orElse(null)
+
     override fun findProjectionById(id: ${idType}): ${name}Projection? =
         jpaRepository.findById(id).map { it.toProjection() }.orElse(null)
 
 ${projectionLookupMethods ? `${projectionLookupMethods}\n\n` : ''}    override fun save(projection: ${name}Projection) {
         jpaRepository.save(projection.toEntity())
     }${filterSpecification}
+
+${idSpecification}
+
+    private fun accessSpecification(): Specification<${entityName}> =
+        accessPolicyFilter.specification(
+            contextName = "${escapeKotlin(contextName)}",
+            readModelName = "${escapeKotlin(readModelName)}",
+            policy = ${accessPolicyLiteral}
+        )
 
     private fun ${entityName}.toProjection(): ${name}Projection =
         ${name}Projection().also {
@@ -2291,6 +2381,14 @@ ${projectionToEntityAssignments}
             const hasRangeCriteriaFields = criteriaFields.some((field) => field.name === 'projectionUpdatedAt' || isRangeCriteriaType(readModelStorageType(field, false)));
             const hasLocalDateCriteriaFields = criteriaFields.some((field) => readModelStorageType(field, false) === 'LocalDate');
             const hasLocalDateTimeCriteriaFields = criteriaFields.some((field) => field.name === 'projectionUpdatedAt' || readModelStorageType(field, false) === 'LocalDateTime');
+            const queryServiceConstructorParameters = [
+                hasJsonJpaFields ? 'private val objectMapper: com.fasterxml.jackson.databind.ObjectMapper' : ''
+            ].filter(Boolean);
+            const queryServiceConstructor = queryServiceConstructorParameters.length > 0
+                ? `(
+    ${queryServiceConstructorParameters.join(',\n    ')}
+)`
+                : '()';
             const queryServiceImports = mergeKotlinImports(
                 hasRangeCriteriaFields ? 'import tech.jhipster.service.filter.RangeFilter' : '',
                 'import java.util.function.Function',
@@ -2300,8 +2398,6 @@ ${projectionToEntityAssignments}
             );
             this.fs.write(this._kotlinPath(`${readModelPersistencePath(context, name)}/${name}QueryService.kt`), `package ${packageName}
 
-import org.springframework.data.domain.Page
-import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.domain.Specification
 import org.springframework.stereotype.Service
 import jakarta.persistence.criteria.Expression
@@ -2309,19 +2405,12 @@ import jakarta.persistence.criteria.Root
 import org.hibernate.query.criteria.JpaExpression
 import tech.jhipster.service.QueryService
 ${queryServiceImports}
-import ${readModelPackageName}.${name}
 import ${readModelPackageName}.${name}Criteria
 import ${readModelPackageName}.${name}Projection
-import ${readModelPackageName}.toReadModel
 
 @Service
-class ${name}QueryService(
-    private val repository: ${springDataRepositoryName}${hasJsonJpaFields ? ',\n    private val objectMapper: com.fasterxml.jackson.databind.ObjectMapper' : ''}
-) : QueryService<${entityName}>() {
-    fun findByCriteria(criteria: ${name}Criteria?, pageable: Pageable): Page<${name}> =
-        repository.findAll(createSpecification(criteria), pageable).map { it.toProjection().toReadModel() }
-
-    private fun createSpecification(criteria: ${name}Criteria?): Specification<${entityName}> {
+class ${name}QueryService${queryServiceConstructor} : QueryService<${entityName}>() {
+    fun createSpecification(criteria: ${name}Criteria?): Specification<${entityName}> {
         var specification = Specification.where<${entityName}>(null)
         if (criteria != null) {
 ${criteriaFields.map((field) => queryServiceSpecificationBuilder(field, entityName)).join('\n')}
@@ -2518,7 +2607,7 @@ ${idFields.length === 1 ? `
     @PreAuthorize("hasAuthority('*:*') or hasAuthority('${readModelPermission}:read')")
     @GetMapping("/{id}")
     fun findOne(@PathVariable id: ${idType}): ResponseEntity<${name}> =
-        repository.findById(id)?.let { ResponseEntity.ok(it) } ?: ResponseEntity.notFound().build()
+        repository.findByIdWithAccessPolicy(id)?.let { ResponseEntity.ok(it) } ?: ResponseEntity.notFound().build()
 ` : ''}
 }
 ${exportable ? `

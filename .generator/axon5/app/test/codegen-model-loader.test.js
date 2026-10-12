@@ -104,3 +104,33 @@ test('loads codegen model from .medol by default', () => {
         ['DictionaryMaintenance', 'IdentityAccessManagement']
     );
 });
+
+test('preserves access policy metadata from codegen model', () => {
+    const source = {
+        ...deployedMultiDomainModel(),
+        accessPolicies: [{
+            name: 'DefaultAccess',
+            rules: [{kind: 'fields', fields: ['DictionaryMaintenance.DictionaryCatalog.organizationId']}]
+        }, {
+            name: 'PublicAccess',
+            rules: []
+        }],
+        defaultAccessPolicy: 'DefaultAccess',
+        slices: [{
+            name: 'RegisterDictionary',
+            title: 'RegisterDictionary',
+            context: 'DictionaryMaintenance',
+            readmodels: [{
+                name: 'DictionaryCatalog',
+                title: 'DictionaryCatalog',
+                accessPolicy: 'PublicAccess'
+            }]
+        }]
+    };
+
+    const model = loadCodegenModel(writeModel(source));
+
+    assert.equal(model.defaultAccessPolicy, 'DefaultAccess');
+    assert.deepEqual(model.accessPolicies, source.accessPolicies);
+    assert.equal(model.slices[0].readmodels[0].accessPolicy, 'PublicAccess');
+});

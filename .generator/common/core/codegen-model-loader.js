@@ -34,6 +34,8 @@ function loadCodegenModel(cwd, options = {}) {
         domain: model.domain || 'MedolApplication',
         domains: array(model.domains),
         deployments: array(model.deployments),
+        accessPolicies: array(model.accessPolicies),
+        ...(model.defaultAccessPolicy ? { defaultAccessPolicy: model.defaultAccessPolicy } : {}),
         contexts: model.contexts,
         valueTypes: array(model.valueTypes),
         aggregates: array(model.aggregates),

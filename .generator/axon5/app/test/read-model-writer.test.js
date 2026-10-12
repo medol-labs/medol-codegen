@@ -619,6 +619,7 @@ test('writes export support for exportable read models', () => {
     assert.match(resource, /snapshotUpperBound = snapshotUpperBound\.toInstant\(ZoneOffset\.UTC\)/);
     assert.match(resource, /requestedLocale = task\.requestedLocale/);
     assert.match(resource, /class RuntimeNodeInventoryCatalogDataExportExecutor/);
+    assert.match(resource, /repository\.findByIdWithAccessPolicy\(id\)/);
     assert.match(resource, /criteria\.projectionUpdatedAt/);
     assert.match(resource, /projectionUpdatedAt\.getLessThanOrEqual\(\)/);
     assert.match(resource, /requestedUpperBound == null \|\| requestedUpperBound\.isAfter\(snapshotUpperBound\)/);
@@ -665,6 +666,68 @@ test('writes data export job ports for every generated backend module', () => {
         writes.get('support/dataexchange/dataexportjob/ExecuteDataExportProcessor.kt'),
         /class ExecuteDataExportProcessor/
     );
+});
+
+test('writes read model access policy filter and applies it in JPA queries', () => {
+    const writes = new Map();
+    const writer = syncWriter(writes);
+    writer.model = {
+        rootPackage: 'tech.medo',
+        defaultAccessPolicy: 'DefaultAccess',
+        accessPolicies: [{
+            name: 'DefaultAccess',
+            rules: [{kind: 'fields', fields: ['RuntimeMonitoring.RuntimeIdentityCatalog.organizationId']}]
+        }, {
+            name: 'PublicAccess',
+            rules: []
+        }]
+    };
+    const readmodel = {
+        name: 'RuntimeIdentityCatalog',
+        title: 'Runtime Identity Catalog',
+        fields: [
+            {name: 'runtimeId', type: 'UUID', idAttribute: true},
+            {name: 'organizationId', type: 'UUID', query: true}
+        ]
+    };
+    const slice = {
+        context: 'RuntimeMonitoring',
+        chapter: 'RuntimeMonitoring'
+    };
+
+    readModelWriterMethods._writeReadModelAccessPolicySupport.call(writer);
+    readModelWriterMethods._writeReadModelJpaRepository.call(
+        writer,
+        'tech.medo.runtimemonitoring.runtimeidentitycatalog',
+        'runtimemonitoring',
+        'RuntimeIdentityCatalogs',
+        slice,
+        readmodel,
+        'RuntimeIdentityCatalogReadModel',
+        [readmodel.fields[0]],
+        false
+    );
+
+    const support = writes.get('shared/shared/application/access/ReadModelAccessPolicyFilter.kt');
+    const adapter = [...writes.entries()]
+        .find(([path]) => path.endsWith('JpaRuntimeIdentityCatalogReadModelRepository.kt'))?.[1];
+    const queryService = [...writes.entries()]
+        .find(([path]) => path.endsWith('RuntimeIdentityCatalogReadModelQueryService.kt'))?.[1];
+
+    assert.match(support, /interface ReadModelAccessPolicyFilter/);
+    assert.match(support, /class PermitAllReadModelAccessPolicyFilter/);
+    assert.match(support, /Specification<T> = Specification\.where\(null\)/);
+    assert.match(adapter, /private val accessPolicyFilter: ReadModelAccessPolicyFilter/);
+    assert.match(adapter, /queryService\.createSpecification\(criteria\)\.and\(accessSpecification\(\)\)/);
+    assert.match(adapter, /jpaRepository\.findOne\(idSpecification\(id\)\.and\(accessSpecification\(\)\)\)/);
+    assert.match(adapter, /override fun findByIdWithAccessPolicy\(id: UUID\): RuntimeIdentityCatalogReadModel\?/);
+    assert.match(adapter, /contextName = "RuntimeMonitoring"/);
+    assert.match(adapter, /readModelName = "RuntimeIdentityCatalog"/);
+    assert.match(adapter, /name = "DefaultAccess"/);
+    assert.match(adapter, /fields = listOf\("RuntimeMonitoring\.RuntimeIdentityCatalog\.organizationId"\)/);
+    assert.match(queryService, /fun createSpecification\(criteria: RuntimeIdentityCatalogReadModelCriteria\?\): Specification<RuntimeIdentityCatalogReadModelEntity>/);
+    assert.doesNotMatch(queryService, /fun findByCriteria/);
+    assert.doesNotMatch(queryService, /private val repository:/);
 });
 
 function syncWriter(writes) {

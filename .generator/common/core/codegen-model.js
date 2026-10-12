@@ -22,6 +22,8 @@ function fromConfig(config = {}) {
         ...(config.translations ? { translations: config.translations } : {}),
         ...(config.locales ? { locales: config.locales } : {}),
         ...(config.defaultLocale ? { defaultLocale: config.defaultLocale } : {}),
+        ...(config.accessPolicies ? { accessPolicies: normalizeAccessPolicies(config.accessPolicies) } : {}),
+        ...(config.defaultAccessPolicy ? { defaultAccessPolicy: config.defaultAccessPolicy } : {}),
         contexts,
         concepts,
         valueTypes,
@@ -55,6 +57,8 @@ function fromCodegenModel(model = {}) {
         ...(model.translations ? { translations: model.translations } : {}),
         ...(model.locales ? { locales: model.locales } : {}),
         ...(model.defaultLocale ? { defaultLocale: model.defaultLocale } : {}),
+        ...(model.accessPolicies ? { accessPolicies: normalizeAccessPolicies(model.accessPolicies) } : {}),
+        ...(model.defaultAccessPolicy ? { defaultAccessPolicy: model.defaultAccessPolicy } : {}),
         contexts,
         concepts,
         valueTypes,
@@ -82,6 +86,8 @@ function toGeneratorConfig(model, source = {}) {
         ...(model.translations ? { translations: model.translations } : {}),
         ...(model.locales ? { locales: model.locales } : {}),
         ...(model.defaultLocale ? { defaultLocale: model.defaultLocale } : {}),
+        ...(model.accessPolicies ? { accessPolicies: model.accessPolicies } : {}),
+        ...(model.defaultAccessPolicy ? { defaultAccessPolicy: model.defaultAccessPolicy } : {}),
         ...(model.domain ? { domain: model.domain } : {}),
         ...(model.domains ? { domains: model.domains } : {}),
         ...(model.deployments ? { deployments: model.deployments } : {}),
@@ -376,9 +382,37 @@ function normalizeElements(elements = [], type, slice, sliceAggregate, valueType
             startsLifecycle: element.startsLifecycle ?? element.createsAggregate ?? false,
             ...(type === 'READMODEL' && element.sync ? { sync: true } : {}),
             ...(type === 'READMODEL' && element.syncSource ? { syncSource: element.syncSource } : {}),
-            ...(type === 'READMODEL' && element.syncFilters ? { syncFilters: element.syncFilters } : {})
+            ...(type === 'READMODEL' && element.syncFilters ? { syncFilters: element.syncFilters } : {}),
+            ...(type === 'READMODEL' && element.accessPolicy ? { accessPolicy: element.accessPolicy } : {})
         };
     });
+}
+
+function normalizeAccessPolicies(policies = []) {
+    return policies.map((policy, index) => {
+        const name = policy.name ?? policy.title ?? `AccessPolicy${index + 1}`;
+        return {
+            id: policy.id ?? stableId('access-policy', name),
+            name,
+            title: policy.title ?? humanize(name),
+            ...(policy.domain ? { domain: policy.domain } : {}),
+            rules: normalizeAccessPolicyRules(policy.rules ?? [])
+        };
+    });
+}
+
+function normalizeAccessPolicyRules(rules = []) {
+    return rules
+        .map((rule) => {
+            if (rule?.kind === 'fields') {
+                return {
+                    kind: 'fields',
+                    fields: Array.isArray(rule.fields) ? rule.fields.map(String) : []
+                };
+            }
+            return undefined;
+        })
+        .filter(Boolean);
 }
 
 function normalizeFields(fields, valueTypes = []) {

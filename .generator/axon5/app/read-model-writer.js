@@ -543,9 +543,7 @@ ${entityFields}
         const basePath = 'shared/application/access';
         this.fs.write(this._sharedKernelKotlinPath(`${basePath}/ReadModelAccessPolicyFilter.kt`), `package ${basePackage}
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.data.jpa.domain.Specification
-import org.springframework.stereotype.Component
 
 data class ReadModelAccessPolicy(
     val name: String?,
@@ -560,8 +558,6 @@ interface ReadModelAccessPolicyFilter {
     ): Specification<T>
 }
 
-@Component
-@ConditionalOnMissingBean(ReadModelAccessPolicyFilter::class)
 class PermitAllReadModelAccessPolicyFilter : ReadModelAccessPolicyFilter {
     override fun <T> specification(
         contextName: String,
@@ -570,6 +566,20 @@ class PermitAllReadModelAccessPolicyFilter : ReadModelAccessPolicyFilter {
     ): Specification<T> = Specification.where(null)
 }
 `);
+        this.fs.write(this._sharedKernelKotlinPath(`${basePath}/ReadModelAccessPolicyAutoConfiguration.kt`), `package ${basePackage}
+
+import org.springframework.boot.autoconfigure.AutoConfiguration
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
+import org.springframework.context.annotation.Bean
+
+@AutoConfiguration
+class ReadModelAccessPolicyAutoConfiguration {
+    @Bean
+    @ConditionalOnMissingBean(ReadModelAccessPolicyFilter::class)
+    fun readModelAccessPolicyFilter(): ReadModelAccessPolicyFilter = PermitAllReadModelAccessPolicyFilter()
+}
+`);
+        this.fs.write(this._sharedKernelResourcePath('META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports'), `${basePackage}.ReadModelAccessPolicyAutoConfiguration\n`);
     },
 
     _writeDictionaryDataExportLabelProviderIfNeeded(packageName, context, slicePackage, slice, readmodel) {

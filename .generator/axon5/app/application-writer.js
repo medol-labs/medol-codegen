@@ -680,6 +680,11 @@ ${eventMethods}
         return this.destinationPath((this.writingSharedKernel || this._usesSharedKernelModule()) ? `${SHARED_KERNEL_MODULE}/${base}` : this._modulePath(base));
     },
 
+    _sharedKernelResourcePath(relative) {
+        const base = `src/main/resources/${relative}`;
+        return this.destinationPath((this.writingSharedKernel || this._usesSharedKernelModule()) ? `${SHARED_KERNEL_MODULE}/${base}` : this._modulePath(base));
+    },
+
     _testKotlinPath(relative) {
         return this.destinationPath(this._modulePath(`src/test/kotlin/${this.model.rootPackage.split('.').join('/')}/context/${relative}`));
     },

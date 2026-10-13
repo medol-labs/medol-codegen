@@ -716,6 +716,12 @@ test('writes read model access policy filter and applies it in JPA queries', () 
 
     assert.match(support, /interface ReadModelAccessPolicyFilter/);
     assert.match(support, /class PermitAllReadModelAccessPolicyFilter/);
+    assert.doesNotMatch(support, /@Component|@ConditionalOnMissingBean/);
+    const autoConfiguration = writes.get('shared/shared/application/access/ReadModelAccessPolicyAutoConfiguration.kt');
+    assert.match(autoConfiguration, /@AutoConfiguration/);
+    assert.match(autoConfiguration, /@Bean\s+@ConditionalOnMissingBean\(ReadModelAccessPolicyFilter::class\)/);
+    assert.equal(writes.get('shared/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports'),
+        'tech.medo.shared.application.access.ReadModelAccessPolicyAutoConfiguration\n');
     assert.match(support, /Specification<T> = Specification\.where\(null\)/);
     assert.match(adapter, /private val accessPolicyFilter: ReadModelAccessPolicyFilter/);
     assert.match(adapter, /queryService\.createSpecification\(criteria\)\.and\(accessSpecification\(\)\)/);
@@ -741,6 +747,9 @@ function syncWriter(writes) {
         },
         _sharedKernelKotlinPath(relative) {
             return `shared/${relative}`;
+        },
+        _sharedKernelResourcePath(relative) {
+            return `shared/resources/${relative}`;
         },
         _kotlinPath(relative) {
             return `kotlin/${relative}`;

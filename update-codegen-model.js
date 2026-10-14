@@ -254,7 +254,7 @@ function loadLocalTranslationBundle(options) {
 
   const bundles = paths
     .map((candidate) => normalizeTranslationBundle(readFileJson(candidate)))
-    .filter(Boolean);
+    .filter((bundle) => hasRelevantTranslations(bundle, options.locale));
   if (bundles.length === 0) return undefined;
 
   return {
@@ -307,6 +307,15 @@ function normalizeTranslationBundle(bundle) {
     ...(Array.isArray(source.locales) ? { locales: source.locales } : {}),
     ...(typeof source.defaultLocale === "string" ? { defaultLocale: source.defaultLocale } : {}),
   };
+}
+
+function hasRelevantTranslations(bundle, locale) {
+  if (!bundle) return false;
+  if (locale) {
+    return Object.keys(bundle.translations?.[locale] ?? {}).length > 0;
+  }
+  return Object.values(bundle.translations ?? {})
+    .some((translations) => Object.keys(translations ?? {}).length > 0);
 }
 
 function withTranslationBundle(model, bundle, options = {}) {

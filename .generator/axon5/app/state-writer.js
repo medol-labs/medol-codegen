@@ -263,24 +263,29 @@ ${properties}
         const fields = uniqueFields(events.flatMap((event) => event.fields))
             .filter((field) => !(hasChildMemberState && childTransitionKeyFields.has(field.name)));
         const imports = kotlinFieldImports(uniqueFields([...fields, ...(selection.fields ?? [])]), this.model.rootPackage);
-        const stateEnumName = concept ? conceptStateEnumName(concept) : undefined;
+        const stateConcept = concept
+            ? (this.model.concepts ?? [])
+                .find((candidate) => candidate.name === concept && (!slice.context || candidate.context === slice.context))
+            : undefined;
+        const hasConceptState = Boolean(stateConcept?.states?.length);
+        const stateEnumName = hasConceptState ? conceptStateEnumName(concept) : undefined;
         const stateFields = [
-            ...(concept ? [`    var currentState: ${stateEnumName}? = null`] : []),
+            ...(hasConceptState ? [`    var currentState: ${stateEnumName}? = null`] : []),
             ...fields.map((field) => `    var ${field.name}: ${stateFieldType(field)} = ${stateFieldDefault(field)}`),
             ...(hasChildMemberState ? ['    private val members: MutableMap<String, String> = mutableMapOf()'] : [])
         ].join('\n');
         const sourcingHandlers = events.map((event) => {
             const transition = childTransitionByEventId.get(event.id);
             const stateTransition = transitionByEventId.get(event.id);
-            const inferredState = concept && !stateTransition
+            const inferredState = hasConceptState && !stateTransition
                 ? bestStateForEvent(event, (this.model.concepts ?? [])
                     .find((candidate) => candidate.name === concept && (!slice.context || candidate.context === slice.context))
                     ?.states
                     ?? [])
                 : undefined;
             const assignments = [
-                ...(concept && stateTransition && stateTransition.from !== stateTransition.to && !transition && conceptHasState(this.model, slice.context, concept, stateTransition.to) ? [`        currentState = ${stateEnumName}.${stateEnumEntry(stateTransition.to)}`] : []),
-                ...(concept && inferredState && !transition ? [`        currentState = ${stateEnumName}.${stateEnumEntry(inferredState)}`] : []),
+                ...(hasConceptState && stateTransition && stateTransition.from !== stateTransition.to && !transition && conceptHasState(this.model, slice.context, concept, stateTransition.to) ? [`        currentState = ${stateEnumName}.${stateEnumEntry(stateTransition.to)}`] : []),
+                ...(hasConceptState && inferredState && !transition ? [`        currentState = ${stateEnumName}.${stateEnumEntry(inferredState)}`] : []),
                 ...event.fields
                     .filter((field) => !(transition?.keyField && field.name === transition.keyField))
                     .map((field) => `        ${field.name} = event.${field.name}`),
@@ -289,7 +294,7 @@ ${properties}
             return `    @EventSourcingHandler\n    fun evolve(event: ${_eventTitle(event.title)}): ${stateName} = apply {\n${assignments}\n    }`;
         }).join('\n\n');
         const eventImports = events.map((event) => `import ${this._eventPackage(event, slice)}.${_eventTitle(event.title)}`).join('\n');
-        const stateImport = concept ? `import ${this.model.rootPackage}.${contextPackage(slice.context)}.domain.states.${stateEnumName}\n` : '';
+        const stateImport = hasConceptState ? `import ${this.model.rootPackage}.${contextPackage(slice.context)}.domain.states.${stateEnumName}\n` : '';
         const singleTag = selection.fields.length === 1;
         const tagOwner = pascal(selection.metadataOwner ?? slice.name);
         const idType = singleTag ? selection.fields[0].selectionType.replace(/\?$/, '') : undefined;

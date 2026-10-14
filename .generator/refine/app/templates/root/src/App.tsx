@@ -18,6 +18,7 @@ import authProvider from "./providers/auth";
 import { commandDataProvider, commandProvider } from "./providers/command-provider";
 import { dataProvider } from "./providers/data";
 import {
+  getBrowserLocale,
   getCurrentLocale,
   getPersistedLocale,
   i18nProvider,
@@ -60,9 +61,9 @@ function RefineApplication() {
     const handleLocaleChange = () => setLocaleVersion((version) => version + 1);
 
     window.addEventListener(LOCALE_CHANGE_EVENT, handleLocaleChange);
-    const persistedLocale = getPersistedLocale();
-    if (persistedLocale && persistedLocale !== getCurrentLocale()) {
-      void i18nProvider.changeLocale(persistedLocale);
+    const initialLocale = getPersistedLocale() ?? getBrowserLocale();
+    if (initialLocale && initialLocale !== getCurrentLocale()) {
+      void i18nProvider.changeLocale(initialLocale);
     }
 
     return () => window.removeEventListener(LOCALE_CHANGE_EVENT, handleLocaleChange);

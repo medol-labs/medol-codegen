@@ -5,6 +5,7 @@ import { useState } from "react";
 import { CircleHelp } from "lucide-react";
 
 import { InputPassword } from "@/components/refine-ui/form/input-password";
+import { LanguageSwitcher } from "@/components/refine-ui/layout/header";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -20,13 +21,14 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { authProviderMode } from "@/providers/api-auth";
-import { useLink, useLogin, useRefineOptions } from "@refinedev/core";
+import { useLink, useLogin, useRefineOptions, useTranslate } from "@refinedev/core";
 
 export const SignInForm = () => {
   const [rememberMe, setRememberMe] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
+  const t = useTranslate();
   const Link = useLink();
 
   const { title } = useRefineOptions();
@@ -68,6 +70,10 @@ export const SignInForm = () => {
         "min-h-svh"
       )}
     >
+      <div className={cn("fixed", "right-4", "top-4")}>
+        <LanguageSwitcher />
+      </div>
+
       <div className={cn("w-full", "max-w-[420px]")}>
         <div className={cn("flex", "flex-col", "items-center", "gap-3")}>
           <div
@@ -114,12 +120,12 @@ export const SignInForm = () => {
               "font-semibold"
             )}
           >
-            Sign in
+            {t("auth.signIn.title", "Sign in")}
           </CardTitle>
           <CardDescription
             className={cn("text-muted-foreground", "font-medium")}
           >
-            Welcome back
+            {t("auth.signIn.description", "Welcome back")}
           </CardDescription>
         </CardHeader>
 
@@ -128,7 +134,7 @@ export const SignInForm = () => {
         <CardContent className={cn("px-0")}>
           <form onSubmit={handleSignIn}>
             <div className={cn("flex", "flex-col", "gap-2")}>
-              <Label htmlFor="email">{isLocalAuth ? "Username" : "Email"}</Label>
+              <Label htmlFor="email">{isLocalAuth ? t("auth.fields.username", "Username") : t("auth.fields.email", "Email")}</Label>
               <Input
                 id="email"
                 type={isLocalAuth ? "text" : "email"}
@@ -141,7 +147,7 @@ export const SignInForm = () => {
             <div
               className={cn("relative", "flex", "flex-col", "gap-2", "mt-6")}
             >
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">{t("auth.fields.password", "Password")}</Label>
               <InputPassword
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -165,7 +171,7 @@ export const SignInForm = () => {
                     setRememberMe(checked === "indeterminate" ? false : checked)
                   }
                 />
-                <Label htmlFor="remember">Remember me</Label>
+                <Label htmlFor="remember">{t("auth.signIn.rememberMe", "Remember me")}</Label>
               </div>
               {!isLocalAuth && (
                 <Link
@@ -178,26 +184,26 @@ export const SignInForm = () => {
                     "text-primary hover:underline"
                   )}
                 >
-                  <span>Forgot password</span>
+                  <span>{t("auth.signIn.forgotPassword", "Forgot password")}</span>
                   <CircleHelp className={cn("w-4", "h-4")} />
                 </Link>
               )}
             </div>
 
             <Button type="submit" size="lg" className={cn("w-full", "mt-6")}>
-              Sign in
+              {t("auth.signIn.submit", "Sign in")}
             </Button>
 
             {!isLocalAuth && (
               <>
                 <div className={cn("flex", "items-center", "gap-4", "mt-6")}>
                   <Separator className={cn("flex-1")} />
-                  <span className={cn("text-sm", "text-muted-foreground")}>or</span>
+                  <span className={cn("text-sm", "text-muted-foreground")}>{t("auth.signIn.or", "or")}</span>
                   <Separator className={cn("flex-1")} />
                 </div>
 
                 <div className={cn("flex", "flex-col", "gap-4", "mt-6")}>
-                  <p className={cn("text-sm", "font-medium")}>Sign in using</p>
+                  <p className={cn("text-sm", "font-medium")}>{t("auth.signIn.using", "Sign in using")}</p>
                   <div className={cn("grid grid-cols-2", "gap-6")}>
                     <Button
                       variant="outline"
@@ -254,7 +260,7 @@ export const SignInForm = () => {
         <CardFooter>
           <div className={cn("w-full", "text-center text-sm")}>
             <span className={cn("text-sm", "text-muted-foreground")}>
-              {isLocalAuth ? "Need initialization? " : "No account? "}
+              {isLocalAuth ? t("auth.signIn.needInitialization", "Need initialization? ") : t("auth.signIn.noAccount", "No account? ")}
             </span>
             <Link
               to="/register"
@@ -264,7 +270,7 @@ export const SignInForm = () => {
                 "underline"
               )}
             >
-              {isLocalAuth ? "Setup admin" : "Sign up"}
+              {isLocalAuth ? t("auth.signIn.setupAdmin", "Setup admin") : t("auth.signIn.signUp", "Sign up")}
             </Link>
           </div>
         </CardFooter>

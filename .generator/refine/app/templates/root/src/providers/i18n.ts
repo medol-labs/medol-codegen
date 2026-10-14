@@ -31,6 +31,15 @@ export function getPersistedLocale(): SupportedLocale | undefined {
   return normalizeSupportedLocale(locale);
 }
 
+export function getBrowserLocale(): SupportedLocale | undefined {
+  if (typeof navigator === "undefined") {
+    return undefined;
+  }
+
+  const locales = [navigator.language, ...(navigator.languages ?? [])];
+  return locales.map(normalizeSupportedLocale).find(Boolean);
+}
+
 export function getCurrentLocale(): SupportedLocale {
   return currentLocale;
 }

@@ -337,7 +337,7 @@ function ModuleSwitcher({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function LanguageSwitcher({ compact = false }: { compact?: boolean }) {
+export function LanguageSwitcher({ compact = false }: { compact?: boolean }) {
   const getLocale = useGetLocale();
   const setLocale = useSetLocale();
   const currentLocale = normalizeLocale(getLocale());

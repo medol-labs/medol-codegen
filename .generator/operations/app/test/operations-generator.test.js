@@ -66,6 +66,30 @@ test('builds operations model applications, infrastructure, gateway, and environ
     assert.equal(model.environments.find((environment) => environment.name === 'prod').applicationOverrides['federation-service'].exposePorts, false);
 });
 
+test('uses explicit backend ports in generated service URLs', () => {
+    const model = buildOperationsModel(sampleModel, {
+        operations: {
+            applications: {
+                'federation-service': { servicePort: 8091 },
+                'dataset-service': { servicePort: 8092 }
+            }
+        }
+    });
+    const federation = model.applications.find((application) => application.name === 'federation-service');
+    const dataset = model.applications.find((application) => application.name === 'dataset-service');
+
+    assert.equal(federation.servicePort, 8091);
+    assert.equal(dataset.servicePort, 8092);
+    assert.deepEqual(
+        federation.environmentVariables.find((entry) => entry.name === 'DATASET_SERVICE_URL'),
+        { name: 'DATASET_SERVICE_URL', value: 'http://dataset-service:8092' }
+    );
+    assert.deepEqual(
+        dataset.environmentVariables.find((entry) => entry.name === 'FEDERATION_SERVICE_URL'),
+        { name: 'FEDERATION_SERVICE_URL', value: 'http://federation-service:8091' }
+    );
+});
+
 test('builds operations topology for multiple frontend applications', () => {
     const model = buildOperationsModel({
         ...sampleModel,

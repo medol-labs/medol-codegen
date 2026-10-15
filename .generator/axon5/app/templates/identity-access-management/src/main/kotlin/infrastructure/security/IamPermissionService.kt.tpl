@@ -1,9 +1,12 @@
 package <%= rootPackage %>.iam.infrastructure.security
 
 import java.util.UUID
+import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.security.oauth2.jwt.Jwt
+import org.springframework.web.context.request.RequestContextHolder
+import org.springframework.web.context.request.ServletRequestAttributes
 import org.springframework.web.server.ResponseStatusException
 import <%= rootPackage %>.shared.security.CurrentUser
 import <%= rootPackage %>.shared.security.CurrentUserJwtResolver
@@ -12,6 +15,8 @@ import <%= rootPackage %>.shared.security.CurrentUserJwtResolver
 class IamPermissionService(
     private val authIdentityRepository: AuthIdentityRepository,
 ) : CurrentUserJwtResolver {
+    private val logger = LoggerFactory.getLogger(javaClass)
+
     override fun resolve(jwt: Jwt, fallback: CurrentUser): CurrentUser =
         if (jwt.getClaimAsString("provider") == "service-account") {
             fallback
@@ -26,6 +31,8 @@ class IamPermissionService(
         val user = authIdentityRepository.findBySubject(subject) ?: id?.let(authIdentityRepository::findById)
 
         if (user == null || !user.active) {
+            val request = (RequestContextHolder.getRequestAttributes() as? ServletRequestAttributes)?.request
+            logger.warn("JWT subject is not registered in this service. method={} path={}", request?.method, request?.requestURI)
             throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authenticated user is not registered.")
         }
 

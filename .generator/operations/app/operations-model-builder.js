@@ -77,7 +77,8 @@ function buildBackendApplications(source, operationsConfig, imagePrefix) {
         const otherModules = backendModules.filter((candidate) => candidate !== module);
         const integrationEnvironment = otherModules.map((target) => {
             const targetName = operationsKebab(target.name ?? target.dataProviderName ?? target.label);
-            const targetPort = parsePort(target.defaultApiUrl) ?? 8080 + backendModules.indexOf(target);
+            const targetOverride = applicationConfig[targetName] ?? applicationConfig[target.name] ?? {};
+            const targetPort = targetOverride.servicePort ?? parsePort(target.defaultApiUrl) ?? 8080 + backendModules.indexOf(target);
             return {
                 name: `${snakeCase(targetName).toUpperCase()}_URL`,
                 value: `http://${targetName}:${targetPort}`

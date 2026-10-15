@@ -4,6 +4,7 @@
  */
 
 const assert = require('node:assert/strict');
+const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -106,6 +107,44 @@ test('builds operations topology for multiple frontend applications', () => {
     assert.doesNotMatch(script, /"console": "console-images\.tar"/);
 });
 
+test('collects backend and frontend technology stacks from generated build manifests', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'medol-doc-facts-'));
+    try {
+        const model = buildOperationsModel(sampleModel);
+        const generated = generateOperationsFiles(model, { target: 'model', environment: 'dev' });
+        for (const file of [
+            'operations/dev/operations-model.json',
+            'docs/document-support/collect-engineering-facts.mjs',
+            'docs/document-support/config/engineering-facts-sources.json'
+        ]) {
+            fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+            fs.writeFileSync(path.join(root, file), generated[file]);
+        }
+        const backendPom = path.join(root, 'backend', 'federation-service', 'pom.xml');
+        fs.mkdirSync(path.dirname(backendPom), { recursive: true });
+        fs.writeFileSync(backendPom, '<project><parent><artifactId>spring-boot-starter-parent</artifactId><version>3.5.11</version></parent><properties><java.version>21</java.version><kotlin.version>2.3.20</kotlin.version><axon.version>5.1.1</axon.version></properties></project>');
+        const frontendPackage = path.join(root, 'console', 'package.json');
+        fs.mkdirSync(path.dirname(frontendPackage), { recursive: true });
+        fs.writeFileSync(frontendPackage, JSON.stringify({ dependencies: { react: '19.1.0', '@refinedev/core': '^5.0.8' }, devDependencies: { vite: '^6.3.5' } }));
+
+        execFileSync('node', [path.join(root, 'docs/document-support/collect-engineering-facts.mjs')], { cwd: root });
+        const facts = JSON.parse(fs.readFileSync(path.join(root, 'docs/generated/facts/engineering-facts.json'), 'utf8'));
+        assert.deepEqual(facts.technologyStacks.find((stack) => stack.application === 'federation-service').technologies.slice(0, 4), [
+            { name: 'Java', version: '21' },
+            { name: 'Kotlin', version: '2.3.20' },
+            { name: 'Axon Framework', version: '5.1.1' },
+            { name: 'Spring Boot', version: '3.5.11' }
+        ]);
+        assert.deepEqual(facts.technologyStacks.find((stack) => stack.application === 'console').technologies, [
+            { name: 'React', version: '19.1.0' },
+            { name: 'Refine', version: '^5.0.8' },
+            { name: 'Vite', version: '^6.3.5' }
+        ]);
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
 test('derives gateway paths from service naming conventions', () => {
     assert.equal(gatewayPathForApplication('federation-service', {}), '/api/federations');
     assert.equal(gatewayPathForApplication('dataset-service', {}), '/api/datasets');
@@ -153,6 +192,14 @@ test('generates operations target file sets', () => {
     assert(files['operations/dev/operations-model.json']);
     assert(files['operations/dev/infrastructure/apisix/apisix.yaml']);
     assert(files['operations/dev/images.mjs']);
+    assert(files['docs/document-support/collect-engineering-facts.mjs']);
+    assert(files['docs/document-support/i18n.mjs']);
+    assert(files['docs/document-support/i18n/base.json']);
+    assert(files['docs/document-support/i18n/en-US.json']);
+    assert(files['docs/document-support/i18n/zh-CN.json']);
+    assert(files['docs/document-support/config/engineering-facts-sources.json']);
+    assert.match(files['docs/document-support/collect-engineering-facts.mjs'], /docs\/generated\/facts\/engineering-facts\.json/);
+    assert.match(files['docs/document-support/i18n.mjs'], /fallbackLanguage/);
     assert.match(files['operations/dev/images.mjs'], /node operations\/dev\/images\.mjs package/);
     assert.match(files['operations/dev/images.mjs'], /--exclude-service <name\[,name\]>/);
     assert.match(files['operations/dev/images.mjs'], /projectImageArgs\(project\)/);
@@ -250,7 +297,7 @@ test('derives image names and K3s registry configuration from optional registry 
     assert.equal(model.registry.imagePrefix, 'registry.internal:5000/team');
     assert.match(
         k3s['dev/k3s/base/applications.yaml'],
-        /image: "medol\/federation-service:0\.0\.1-SNAPSHOT"/
+        /image: "team\/federation-service:0\.0\.1-SNAPSHOT"/
     );
     assert.match(
         k3s['dev/k3s/environments/dev-registry/kustomization.yaml'],
@@ -280,10 +327,23 @@ test('derives image names and K3s registry configuration from optional registry 
         k3s['dev/k3s/cluster/registries.yaml'],
         /"http:\/\/registry\.internal:5000"/
     );
-    assert.match(
-        generateOperationsFiles(model, { target: 'model', environment: 'dev' })['operations/dev/images.mjs'],
-        /DOCKER_IMAGE_PREFIX \?\? 'registry\.internal:5000\/team'/
-    );
+    const modelFiles = generateOperationsFiles(model, { target: 'model', environment: 'dev' });
+    assert.match(modelFiles['operations/dev/.gitignore'], /operations-model\.local\.json/);
+    const generatedModel = JSON.parse(modelFiles['operations/dev/operations-model.json']);
+    assert.equal(generatedModel.imagePrefix, 'team');
+    assert.equal(generatedModel.registry, undefined);
+    assert.equal(generatedModel.applications[0].imageName, 'team/learning-platform-console');
+    assert.doesNotMatch(modelFiles['operations/dev/operations-model.json'], /registry\.internal:5000/);
+    const localModel = JSON.parse(modelFiles['operations/dev/operations-model.local.json']);
+    assert.equal(localModel.registry.host, 'registry.internal:5000');
+    assert.deepEqual(Object.keys(localModel), ['registry']);
+    assert.match(modelFiles['operations/dev/images.mjs'], /DOCKER_IMAGE_PREFIX \?\? readLocalRegistryPrefix\(\) \?\? 'team'/);
+    assert.doesNotMatch(modelFiles['operations/dev/images.mjs'], /registry\.internal:5000/);
+    const deployFiles = generateOperationsFiles(model, { target: 'all', environment: 'dev' });
+    assert.doesNotMatch(deployFiles['operations/dev/docker-compose/docker-compose.yml'], /registry\.internal:5000/);
+    assert.doesNotMatch(deployFiles['operations/dev/.env-example'], /registry\.internal:5000/);
+    assert.match(deployFiles['docs/document-support/collect-engineering-facts.mjs'], /app\.artifactName \?\? app\.name/);
+    assert.match(deployFiles['operations/dev/k3s/environments/dev-registry/kustomization.yaml'], /registry\.internal:5000/);
 });
 
 test('loads operations registry configuration from .medol/medol.yml', () => {

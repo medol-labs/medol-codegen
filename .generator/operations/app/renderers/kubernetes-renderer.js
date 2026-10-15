@@ -263,7 +263,7 @@ function registryEnvironmentFiles(baseModel, registryModel, options) {
     files[`${options.root}/environments/${environmentName}/kustomization.yaml`] = renderYaml({
         resources: [`../${options.environmentName}`],
         images: baseModel.applications.map((application) => ({
-            name: localApplicationImageName(application),
+            name: localApplicationImageName(baseModel, application),
             newName: registryApplicationImageName(registryModel, application),
             newTag: registryModel.imageTag
         })),
@@ -280,10 +280,10 @@ function registryEnvironmentFiles(baseModel, registryModel, options) {
 function withoutRegistryImages(model) {
     return {
         ...model,
-        imagePrefix: 'medol',
+        imagePrefix: localImagePrefix(model),
         registry: undefined,
         applications: model.applications.map((application) => {
-            const imageName = localApplicationImageName(application);
+            const imageName = localApplicationImageName(model, application);
             return {
                 ...application,
                 imageName,
@@ -293,8 +293,12 @@ function withoutRegistryImages(model) {
     };
 }
 
-function localApplicationImageName(application) {
-    return `medol/${application.artifactName ?? application.name}`;
+function localApplicationImageName(model, application) {
+    return `${localImagePrefix(model)}/${application.artifactName ?? application.name}`;
+}
+
+function localImagePrefix(model) {
+    return model.registry ? (model.registry.namespace ?? model.name) : (model.imagePrefix ?? model.name);
 }
 
 function registryApplicationImageName(model, application) {
@@ -730,7 +734,7 @@ function renderKubernetesReadme(name, model) {
     const isK3s = name.toLowerCase() === 'k3s';
     const namespace = model.name;
     const environmentName = model.environment.name;
-    const applicationImages = model?.applications?.map((application) => imageWithTag(localApplicationImageName(application), model.imageTag)) ?? [];
+    const applicationImages = model?.applications?.map((application) => imageWithTag(localApplicationImageName(model, application), model.imageTag)) ?? [];
     const dependencyImages = model?.infrastructure
         ?.filter((component) => component.enabled !== false)
         .map((component) => component.image)
@@ -831,7 +835,7 @@ function renderKubernetesReadme(name, model) {
             '',
             '## Registry',
             '',
-            `The committed \`environments/${environmentName}\` overlay keeps images in the \`medol/<service>:<tag>\` form.`,
+            `The committed \`environments/${environmentName}\` overlay keeps images in the \`${localImagePrefix(model)}/<service>:<tag>\` form.`,
             '',
             'For machine-specific registry settings, keep `operations.registry` in `.medol/medol.local.yml` and regenerate operations files. Local registry overlays and `cluster/registries.yaml` are ignored by git.',
             '',

@@ -240,7 +240,7 @@ function renderEnvironmentExample(model, environmentName) {
     ];
 
     resolved.applications.forEach((application) => {
-        lines.push(`${application.envVarPrefix}_IMAGE=${imageWithTag(localApplicationImageName(application), resolved.imageTag)}`);
+        lines.push(`${application.envVarPrefix}_IMAGE=${imageWithTag(localApplicationImageName(resolved, application), resolved.imageTag)}`);
         lines.push(`${application.envVarPrefix}_CONTAINER_NAME=${application.name}`);
         if (application.exposePorts) {
             lines.push(`${application.envVarPrefix}_PORT=${application.hostPort ?? application.servicePort}`);
@@ -250,8 +250,8 @@ function renderEnvironmentExample(model, environmentName) {
     lines.push(
         '',
         'MONOREPO_ROOT=../..',
-        `DOCKER_IMAGE_PREFIX=${resolved.imagePrefix ?? 'medol'}`,
-        `DEPENDENCY_IMAGE_PREFIX=${resolved.dependencyImagePrefix ?? resolved.imagePrefix ?? 'medol'}`,
+        `DOCKER_IMAGE_PREFIX=${resolved.imagePrefix ?? resolved.name}`,
+        `DEPENDENCY_IMAGE_PREFIX=${resolved.dependencyImagePrefix ?? resolved.imagePrefix ?? resolved.name}`,
         `IMAGE_VERSION=${resolved.imageTag ?? '0.0.1-SNAPSHOT'}`,
         'IMAGE_BUNDLE_OUTPUT=.work/image-bundle',
         'IMAGE_BUNDLE_ARCHIVE=.work/image-bundle.tar.gz',
@@ -287,8 +287,8 @@ function databaseName(application) {
     return dbUrl?.split('/').pop();
 }
 
-function localApplicationImageName(application) {
-    return `medol/${application.artifactName ?? application.name}`;
+function localApplicationImageName(model, application) {
+    return `${model.imagePrefix ?? model.name}/${application.artifactName ?? application.name}`;
 }
 
 function imageWithTag(imageName, tag) {

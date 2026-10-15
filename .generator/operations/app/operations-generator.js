@@ -4,6 +4,7 @@
  */
 
 const { apisixFiles } = require('./renderers/apisix-renderer');
+const { documentSupportFiles } = require('./document-support-generator');
 const { dockerComposeFiles } = require('./renderers/docker-compose-renderer');
 const { k3sFiles, kubernetesFiles } = require('./renderers/kubernetes-renderer');
 
@@ -13,20 +14,24 @@ function generateOperationsFiles(model, options = {}) {
     const target = options.target ?? 'all';
     const environment = options.environment ?? 'dev';
     const environmentRoot = environmentDirectory(environment);
+    const baseModel = portableOperationsModel(model);
     const files = {
-        [`${environmentRoot}/operations-model.json`]: `${JSON.stringify(model, null, 2)}\n`,
-        [`${environmentRoot}/README.md`]: renderDeployReadme(model, environment),
-        [`${environmentRoot}/images.mjs`]: renderOperationsImageScript(model, environment)
+        [`${environmentRoot}/.gitignore`]: 'operations-model.local.json\n',
+        [`${environmentRoot}/operations-model.json`]: `${JSON.stringify(baseModel, null, 2)}\n`,
+        [`${environmentRoot}/operations-model.local.json`]: `${JSON.stringify({ registry: model.registry ?? null }, null, 2)}\n`,
+        [`${environmentRoot}/README.md`]: renderDeployReadme(baseModel, environment),
+        [`${environmentRoot}/images.mjs`]: renderOperationsImageScript(baseModel, environment),
+        ...documentSupportFiles(baseModel, environment)
     };
 
     if (target === 'model') return files;
     if (target === 'all' || target === 'apisix' || target === 'docker-compose' || target === 'kubernetes' || target === 'k3s') {
-        Object.assign(files, apisixFiles(model, {
+        Object.assign(files, apisixFiles(baseModel, {
             root: `${environmentRoot}/infrastructure/apisix`
         }));
     }
     if (target === 'all' || target === 'docker-compose') {
-        Object.assign(files, dockerComposeFiles(model, environment, {
+        Object.assign(files, dockerComposeFiles(baseModel, environment, {
             root: environmentRoot
         }));
     }
@@ -43,17 +48,32 @@ function generateOperationsFiles(model, options = {}) {
         }));
     }
     if (target === 'all' || target === 'harbor') {
-        Object.assign(files, harborFiles(model, environment, {
+        Object.assign(files, harborFiles(baseModel, environment, {
             root: `${environmentRoot}/harbor`
         }));
     }
     if (target === 'all' || target === 'zot') {
-        Object.assign(files, zotFiles(model, environment, {
+        Object.assign(files, zotFiles(baseModel, environment, {
             root: `${environmentRoot}/zot`
         }));
     }
 
     return files;
+}
+
+function portableOperationsModel(model) {
+    const imagePrefix = model.registry
+        ? (model.registry.namespace ?? model.name)
+        : (model.imagePrefix ?? model.name);
+    return {
+        ...model,
+        imagePrefix,
+        registry: undefined,
+        applications: model.applications.map((application) => ({
+            ...application,
+            imageName: `${imagePrefix}/${application.artifactName ?? application.name}`
+        }))
+    };
 }
 
 function renderDeployReadme(model, environment) {
@@ -92,6 +112,8 @@ function renderDeployReadme(model, environment) {
         '  -> EnvironmentResolver',
         '  -> Docker Compose / Kubernetes / K3s / APISIX renderers',
         '```',
+        '',
+        'Commit `operations-model.json` as the portable deployment model. `operations-model.local.json` contains machine-specific registry settings from `.medol/medol.local.yml` and must remain ignored by Git. The image script reads that local override for its default registry prefix.',
         '',
         '## Image Bundle Command',
         '',
@@ -173,7 +195,7 @@ const command = args._[0] ?? 'help';
 const monorepoRoot = resolve(scriptDir, args.root ?? process.env.MONOREPO_ROOT ?? '../..');
 const platform = String(args.platform ?? process.env.DOCKER_DEFAULT_PLATFORM ?? '').trim();
 const dependencyPlatform = platform || hostDockerPlatform();
-const imagePrefix = String(args.prefix ?? process.env.DOCKER_IMAGE_PREFIX ?? '${defaultPrefix}').replace(/\\/+$/g, '');
+const imagePrefix = String(args.prefix ?? process.env.DOCKER_IMAGE_PREFIX ?? readLocalRegistryPrefix() ?? '${defaultPrefix}').replace(/\\/+$/g, '');
 const dependencyImagePrefix = String(args['dependency-prefix'] ?? process.env.DEPENDENCY_IMAGE_PREFIX ?? defaultDependencyImagePrefix(imagePrefix)).replace(/\\/+$/g, '');
 const imageVersion = String(args.version ?? process.env.IMAGE_VERSION ?? '${model.imageTag ?? '0.0.1-SNAPSHOT'}');
 const outputRoot = resolve(scriptDir, args.output ?? process.env.IMAGE_BUNDLE_OUTPUT ?? '.work/image-bundle');
@@ -199,6 +221,13 @@ const appArchives = {
     ]))
 };
 const dependencyArchive = join(outputRoot, 'images', 'dependency-images.tar');
+
+function readLocalRegistryPrefix() {
+    const modelPath = join(scriptDir, 'operations-model.local.json');
+    if (!existsSync(modelPath)) return undefined;
+    const localModel = JSON.parse(readFileSync(modelPath, 'utf8'));
+    return localModel.registry?.imagePrefix;
+}
 
 switch (command) {
     case 'list':

@@ -383,13 +383,15 @@ Those workspace file contents live under
 Supported operations targets are:
 
 - `all`: operations model, APISIX, Docker Compose, Kubernetes, K3s, Harbor, and zot
-- `model`: only `<environment>/operations-model.json`
+- `model`: operations model and shared operations/document-support files
 - `apisix`: APISIX standalone/declarative configuration
 - `docker-compose`: Docker Compose operations files
 - `kubernetes`: Kubernetes base manifests plus the selected environment kustomization
 - `k3s`: K3s-flavored manifests rendered from the same Kubernetes renderer
 - `harbor`: optional Harbor registry operations assets
 - `zot`: optional lightweight OCI registry operations assets with ARM64-friendly container deployment
+
+Each operations target also writes `docs/document-support/` with an engineering-facts collector. Run the collector after backend and frontend generation to read technology versions from their `pom.xml` and `package.json` files; operations generation alone does not create the final project documents.
 
 Generated operations files are written under `operations/<environment>`:
 

@@ -244,6 +244,7 @@ test('generates operations target file sets', () => {
     assert.match(files['operations/dev/k3s/scripts/k3d-dev.sh'], /PRE_APPLY_FILE="\$\{PRE_APPLY_FILE:-\}"/);
     assert.match(files['operations/dev/k3s/scripts/k3d-dev.sh'], /KUBECTL_APPLY_VALIDATE="\$\{KUBECTL_APPLY_VALIDATE:-false\}"/);
     assert.match(files['operations/dev/k3s/scripts/k3d-dev.sh'], /kubectl_apply\(\)/);
+    assert.match(files['operations/dev/k3s/scripts/k3d-dev.sh'], /kind: Kustomization\nnamespace: "\$\{NAMESPACE\}"\nresources:/);
     assert.match(files['operations/dev/k3s/scripts/k3d-dev.sh'], /kubectl -n "\$\{NAMESPACE\}" apply --validate="\$\{KUBECTL_APPLY_VALIDATE\}" -f "\$\{PRE_APPLY_FILE\}"/);
     assert.match(files['operations/dev/k3s/scripts/k3d-dev.sh'], /kubectl -n "\$\{NAMESPACE\}" rollout restart/);
     assert(files['operations/dev/harbor/README.md']);

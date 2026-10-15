@@ -1158,6 +1158,7 @@ apply_overlay() {
         cat > "\${combined}/kustomization.yaml" <<YAML
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+namespace: "\${NAMESPACE}"
 resources:
   - "$(kustomize_path "\${overlay}")"
 components:

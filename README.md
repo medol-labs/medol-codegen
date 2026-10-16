@@ -403,6 +403,7 @@ federation-learning/
     dev/
       operations-model.json
       README.md
+      network-topology.md
       .env-example
       docker-compose/docker-compose.yml
       infrastructure/apisix/config.yaml
@@ -415,6 +416,47 @@ federation-learning/
       harbor/
       zot/
 ```
+
+`network-topology.md` contains a Mermaid diagram of configured entry points,
+gateway routes, service ports, and active application dependencies for the
+selected environment. It is generated from the resolved operations model and
+does not claim to describe physical hosts, firewall policy, or observed traffic.
+
+To represent applications deployed in separate locations, declare
+`operations.networkTopology.sites` in `.medol/medol.yml`. Each named site lists
+its applications and local infrastructure instances; exactly one site owns the
+gateway when enabled. Optional `connections` describe directed inter-site API
+calls. The YAML configuration uses named mappings rather than lists:
+
+```yaml
+operations:
+  networkTopology:
+    sites:
+      central:
+        gateway: true
+        applications:
+          console: true
+          backend: true
+        infrastructure:
+          postgres: true
+          umadb: true
+      remote:
+        applications:
+          agent: true
+        infrastructure:
+          postgres: true
+          umadb: true
+    connections:
+      dispatch:
+        from: backend
+        to: agent
+        protocol: HTTP
+```
+
+The diagram marks cross-site routes and connections as dashed links. It does
+not make generated single-stack Compose/Kubernetes manifests multi-site or
+configure APISIX with reachable cross-site upstream addresses; those require
+deployment-specific configuration.
 
 Each operations environment also includes `images.mjs`, a monorepo-level image
 orchestrator for backend, frontend, and infrastructure images. With multiple

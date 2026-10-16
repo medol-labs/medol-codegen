@@ -33,6 +33,7 @@ function buildOperationsModel(source = {}, config = {}) {
     const gateway = operationsConfig.gateway?.enabled === false
         ? undefined
         : buildGateway(applications, backendApplications, operationsConfig);
+    const networkTopology = buildNetworkTopology(operationsConfig.networkTopology, applications, infrastructure, gateway);
 
     const model = {
         version: 'medol.operations/v1',
@@ -45,10 +46,76 @@ function buildOperationsModel(source = {}, config = {}) {
         applications,
         infrastructure,
         ...(gateway ? { gateway } : {}),
+        ...(networkTopology ? { networkTopology } : {}),
         environments: buildEnvironments(applications, infrastructure, operationsConfig, imageTag)
     };
     if (source.tenancy) for (const environment of model.environments) resolveOperationsModel(model, environment.name);
     return model;
+}
+
+function buildNetworkTopology(config, applications, infrastructure, gateway) {
+    const entries = (value) => Array.isArray(value)
+        ? value.map((item) => [item.name, item])
+        : Object.entries(value ?? {});
+    const names = (value) => Array.isArray(value)
+        ? value
+        : Object.entries(value ?? {}).filter(([, enabled]) => enabled).map(([name]) => name);
+    const siteEntries = entries(config?.sites);
+    if (!config) return undefined;
+    if (!siteEntries.length) throw new Error('networkTopology must define at least one site.');
+    const applicationNames = new Set(applications.map((application) => application.name));
+    const infrastructureNames = new Set(infrastructure.map((component) => component.name));
+    const assignedApplications = new Set();
+    let gatewaySites = 0;
+    const sites = siteEntries.map(([siteName, site]) => {
+        const placedApplications = names(site.applications);
+        const placedInfrastructure = names(site.infrastructure);
+        if (!siteName) throw new Error('networkTopology site name is required.');
+        if (site.gateway) gatewaySites += 1;
+        for (const name of placedApplications) {
+            if (!applicationNames.has(name)) throw new Error(`networkTopology references unknown application ${name}.`);
+            if (assignedApplications.has(name)) throw new Error(`networkTopology assigns application ${name} to multiple sites.`);
+            assignedApplications.add(name);
+        }
+        for (const name of placedInfrastructure) {
+            if (!infrastructureNames.has(name)) throw new Error(`networkTopology references unknown infrastructure ${name}.`);
+        }
+        return {
+            name: siteName,
+            title: site.title ?? siteName,
+            applications: placedApplications,
+            infrastructure: placedInfrastructure,
+            gateway: Boolean(site.gateway)
+        };
+    });
+    if (new Set(sites.map((site) => site.name)).size !== sites.length) {
+        throw new Error('networkTopology site names must be unique.');
+    }
+    const unassigned = applications.filter((application) => !assignedApplications.has(application.name));
+    if (unassigned.length) {
+        throw new Error(`networkTopology must place every application: ${unassigned.map((application) => application.name).join(', ')}.`);
+    }
+    if (gateway && gatewaySites !== 1) throw new Error('networkTopology must place the gateway in exactly one site.');
+    if (!gateway && gatewaySites) throw new Error('networkTopology cannot place a disabled gateway.');
+    for (const application of applications) {
+        for (const dependency of application.dependencies ?? []) {
+            if (infrastructureNames.has(dependency) && !sites.some((site) => site.infrastructure.includes(dependency))) {
+                throw new Error(`networkTopology must place dependency ${dependency} used by ${application.name}.`);
+            }
+        }
+    }
+    const connections = entries(config.connections).map(([, connection]) => {
+        if (!applicationNames.has(connection.from) || !applicationNames.has(connection.to)) {
+            throw new Error(`networkTopology connection ${connection.from} -> ${connection.to} references an unknown application.`);
+        }
+        return {
+            from: connection.from,
+            to: connection.to,
+            ...(connection.protocol ? { protocol: connection.protocol } : {}),
+            ...(connection.label ? { label: connection.label } : {})
+        };
+    });
+    return { sites, connections };
 }
 
 function normalizeRegistryConfig(value) {

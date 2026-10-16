@@ -227,6 +227,7 @@ test('generates operations target file sets', () => {
     const model = buildOperationsModel(sampleModel);
     const files = generateOperationsFiles(model, { target: 'all', environment: 'dev' });
     assert(files['operations/dev/operations-model.json']);
+    assert(files['operations/dev/network-topology.md']);
     assert(files['operations/dev/infrastructure/apisix/apisix.yaml']);
     assert(files['operations/dev/images.mjs']);
     assert(files['docs/document-support/collect-engineering-facts.mjs']);
@@ -235,6 +236,7 @@ test('generates operations target file sets', () => {
     assert(files['docs/document-support/i18n/en-US.json']);
     assert(files['docs/document-support/i18n/zh-CN.json']);
     assert(files['docs/document-support/config/engineering-facts-sources.json']);
+    assert.match(files['docs/document-support/config/engineering-facts-sources.json'], /network-topology\.md/);
     assert.match(files['docs/document-support/collect-engineering-facts.mjs'], /docs\/generated\/facts\/engineering-facts\.json/);
     assert.match(files['docs/document-support/i18n.mjs'], /fallbackLanguage/);
     assert.match(files['operations/dev/images.mjs'], /node operations\/dev\/images\.mjs package/);
@@ -268,6 +270,105 @@ test('generates operations target file sets', () => {
     assert(files['operations/dev/zot/.env-example']);
     assert(files['operations/dev/zot/docker-compose.yml']);
     assert(files['operations/dev/zot/config.json']);
+});
+
+test('renders network topology from configured gateway routes and active service dependencies', () => {
+    const model = buildOperationsModel(sampleModel);
+    const topology = generateOperationsFiles(model, { target: 'model', environment: 'dev' })['operations/dev/network-topology.md'];
+
+    assert.match(topology, /```mermaid\nflowchart LR/);
+    assert.match(topology, /Client \/ Browser/);
+    assert.match(topology, /apisix :9080/);
+    assert.match(topology, /federation-service :8080/);
+    assert.match(topology, /dataset-service :8081/);
+    assert.match(topology, /postgres :5432/);
+    assert.match(topology, /umadb :50051/);
+    assert.doesNotMatch(topology, /axon-server :8124/);
+    assert.doesNotMatch(topology, /registry\.internal|192\.168\./);
+});
+
+test('omits gateway routes when disabled and follows environment exposure', () => {
+    const model = buildOperationsModel(sampleModel, {
+        operations: { gateway: { enabled: false } }
+    });
+    const topology = generateOperationsFiles(model, { target: 'model', environment: 'dev' })['operations/dev/network-topology.md'];
+
+    assert.doesNotMatch(topology, /apisix :/);
+    assert.match(topology, /Client \/ Browser/);
+    assert.match(topology, /federation-service :8080/);
+});
+
+test('places services and local data dependencies in configured deployment sites', () => {
+    const model = buildOperationsModel(sampleModel, {
+        operations: {
+            networkTopology: {
+                sites: [{
+                    name: 'central', title: 'Central environment', gateway: true,
+                    applications: ['console', 'federation-service'], infrastructure: ['postgres', 'umadb']
+                }, {
+                    name: 'remote', title: 'Remote environment',
+                    applications: ['dataset-service'], infrastructure: ['postgres', 'umadb']
+                }],
+                connections: [{ from: 'federation-service', to: 'dataset-service', protocol: 'HTTP', label: 'Dispatch' }]
+            }
+        }
+    });
+    const topology = generateOperationsFiles(model, { target: 'model', environment: 'dev' })['operations/dev/network-topology.md'];
+
+    assert.match(topology, /subgraph Site1\["Central environment"\]/);
+    assert.match(topology, /subgraph Site2\["Remote environment"\]/);
+    assert.match(topology, /N\d+ -.->\|HTTP \/ Dispatch\| N\d+/);
+    assert.match(topology, /configured cross-site route/);
+    assert.equal((topology.match(/\["postgres :5432"\]/g) ?? []).length, 2);
+    assert.equal((topology.match(/\["umadb :50051"\]/g) ?? []).length, 2);
+    assert.match(topology, /A container service name alone will not resolve across sites/);
+    assert.match(topology, /must be split or configured separately/);
+});
+
+test('rejects incomplete or ambiguous deployment site assignments', () => {
+    const sites = [{ name: 'central', gateway: true, applications: ['console', 'federation-service'], infrastructure: ['postgres', 'umadb'] }];
+    assert.throws(() => buildOperationsModel(sampleModel, { operations: { networkTopology: { sites } } }),
+        /must place every application: dataset-service/);
+    assert.throws(() => buildOperationsModel(sampleModel, { operations: { networkTopology: { sites: [
+        sites[0], { name: 'remote', applications: ['dataset-service', 'console'], infrastructure: ['postgres', 'umadb'] }
+    ] } } }), /assigns application console to multiple sites/);
+});
+
+test('accepts named topology maps from the workspace YAML parser', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'operations-topology-'));
+    try {
+        fs.mkdirSync(path.join(root, '.medol'));
+        fs.writeFileSync(path.join(root, '.medol/medol.yml'), [
+            'operations:',
+            '  networkTopology:',
+            '    sites:',
+            '      central:',
+            '        gateway: true',
+            '        applications:',
+            '          console: true',
+            '          federation-service: true',
+            '        infrastructure:',
+            '          postgres: true',
+            '          umadb: true',
+            '      remote:',
+            '        applications:',
+            '          dataset-service: true',
+            '        infrastructure:',
+            '          postgres: true',
+            '          umadb: true',
+            '    connections:',
+            '      dispatch:',
+            '        from: federation-service',
+            '        to: dataset-service',
+            '        protocol: HTTP'
+        ].join('\n'));
+        const workspace = loadMedolWorkspace(root);
+        const model = buildOperationsModel(sampleModel, loadOperationsConfig(root, workspace));
+        assert.deepEqual(model.networkTopology.sites.map((site) => site.name), ['central', 'remote']);
+        assert.equal(model.networkTopology.connections[0].protocol, 'HTTP');
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
 });
 
 test('renders Kubernetes and K3s manifests from the same operations model', () => {

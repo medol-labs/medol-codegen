@@ -28,6 +28,7 @@ function engineeringFactsSources(model, environment) {
         dockerCompose: `operations/${environment}/docker-compose/docker-compose.yml`,
         operationsReadmes: [
             `operations/${environment}/README.md`,
+            `operations/${environment}/network-topology.md`,
             `operations/${environment}/docker-compose/README.md`,
             `operations/${environment}/k3s/README.md`,
             `operations/${environment}/kubernetes/README.md`

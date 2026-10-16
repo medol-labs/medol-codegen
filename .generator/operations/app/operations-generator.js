@@ -8,6 +8,7 @@ const { documentSupportFiles } = require('./document-support-generator');
 const { dockerComposeFiles } = require('./renderers/docker-compose-renderer');
 const { k3sFiles, kubernetesFiles } = require('./renderers/kubernetes-renderer');
 const { resolveOperationsModel } = require('./environment-resolver');
+const { renderNetworkTopology } = require('./renderers/network-topology-renderer');
 
 const targets = ['all', 'model', 'apisix', 'docker-compose', 'kubernetes', 'k3s', 'harbor', 'zot'];
 
@@ -24,6 +25,7 @@ function generateOperationsFiles(model, options = {}) {
         [`${environmentRoot}/operations-model.json`]: `${JSON.stringify(baseModel, null, 2)}\n`,
         [`${environmentRoot}/operations-model.local.json`]: `${JSON.stringify({ registry: model.registry ?? null }, null, 2)}\n`,
         [`${environmentRoot}/README.md`]: renderDeployReadme(baseModel, environment),
+        [`${environmentRoot}/network-topology.md`]: renderNetworkTopology(baseModel, environment),
         [`${environmentRoot}/images.mjs`]: renderOperationsImageScript(baseModel, environment),
         ...documentSupportFiles(baseModel, environment)
     };
@@ -107,6 +109,12 @@ function renderDeployReadme(model, environment) {
         '## Gateway Routes',
         '',
         routes || '- APISIX gateway disabled',
+        '',
+        '## Network Topology',
+        '',
+        model.networkTopology
+            ? 'See [network-topology.md](network-topology.md) for configured deployment sites, local dependencies, and cross-site links. Cross-site routes require separately configured reachable upstreams.'
+            : 'See [network-topology.md](network-topology.md) for the generated entry-point and service-dependency diagram.',
         '',
         '## Flow',
         '',

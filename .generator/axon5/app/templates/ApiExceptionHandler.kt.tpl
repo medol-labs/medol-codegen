@@ -11,6 +11,16 @@ import java.util.concurrent.CompletionException
 
 @RestControllerAdvice
 class ApiExceptionHandler {
+<% if (typeof tenancyEnabled !== 'undefined' && tenancyEnabled) { %>
+    @ExceptionHandler(org.springframework.security.access.AccessDeniedException::class)
+    fun accessDenied(exception: org.springframework.security.access.AccessDeniedException): ProblemDetail =
+        ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, exception.message ?: "Access is denied.").apply {
+            title = "Forbidden"
+            setProperty("code", "ACCESS_DENIED")
+            setProperty("i18nKey", "errors.http.403")
+            setProperty("args", mapOf("status" to 403))
+        }
+<% } %>
     @ExceptionHandler(ResponseStatusException::class)
     fun responseStatus(exception: ResponseStatusException): ProblemDetail =
         ProblemDetail.forStatusAndDetail(
@@ -69,6 +79,11 @@ class ApiExceptionHandler {
     @ExceptionHandler(CompletionException::class)
     fun commandFailure(exception: CompletionException): ProblemDetail {
         val cause = exception.cause ?: exception
+<% if (typeof tenancyEnabled !== 'undefined' && tenancyEnabled) { %>
+        generateSequence<Throwable>(exception) { it.cause }
+            .filterIsInstance<org.springframework.security.access.AccessDeniedException>().firstOrNull()
+            ?.let { return accessDenied(it) }
+<% } %>
         if (cause is CommandRejectedException) {
             return rejectedCommand(cause)
         }

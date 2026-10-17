@@ -1,0 +1,60 @@
+import identity-access-management deploy Support
+import tenant-management deploy Support
+import system-notification deploy Support
+import data-exchange as Exchange deploy Support
+
+context Records {
+  slice CreateRecord {
+    startsLifecycle
+    actor RecordOperator
+    command CreateRecord {
+      importable by Exchange
+      recordId: UUID id generated technical
+      recordName: String
+    }
+    event RecordCreated {
+      recordId: UUID id technical
+      recordName: String
+    }
+    state Created
+    specification "Record Name Unique" {
+      expression { unique Record.recordName }
+      scenario "Reject duplicate name" {
+        given RecordCreated { recordName = "same" }
+        when CreateRecord { recordName = "same" }
+        then reject "Record name already exists."
+      }
+    }
+  }
+  slice RecordCatalog {
+    readmodel RecordCatalog[] {
+      exportable by Exchange
+      recordId: UUID id
+      recordName: String display query
+      subscribe RecordCreated
+      subscribe RecordRenamed
+    }
+  }
+  slice RenameRecord {
+    actor RecordOperator
+    reactsTo RecordCreated
+    reactsTo RecordRenamed
+    command RenameRecord {
+      recordId: UUID id technical
+      recordName: String
+    }
+    event RecordRenamed {
+      recordId: UUID id technical
+      recordName: String
+      previousName: String from RecordCreated.recordName
+    }
+  }
+  concept Record {
+    state Created
+    slice CreateRecord
+    slice RecordCatalog
+    slice RenameRecord
+  }
+}
+
+deployment Business { includes Records }

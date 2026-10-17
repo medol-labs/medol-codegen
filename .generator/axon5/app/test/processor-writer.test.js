@@ -3,7 +3,7 @@ const test = require('node:test');
 const {processorWriterMethods} = require('../processor-writer');
 const {configureValueTypes} = require('../../../common/util/value-types');
 
-test('writes system notification processors for notifiable events', () => {
+for (const tenantEnabled of [false, true]) test(`writes system notification processors with tenant mode ${tenantEnabled}`, () => {
     const model = {
         rootPackage: 'tech.medo',
         contexts: [
@@ -52,6 +52,7 @@ test('writes system notification processors for notifiable events', () => {
             }
         ]
     };
+    if (tenantEnabled) model.tenancy = {enabled: true};
     configureValueTypes(model.valueTypes, model.rootPackage, []);
     const writes = new Map();
     const writer = {
@@ -66,7 +67,15 @@ test('writes system notification processors for notifiable events', () => {
 
     const processor = writes.get('kotlin/trainingoperations/completetrainingjob/TrainingJobCompletedEventSystemNotification1Processor.kt');
     assert.match(processor, /class TrainingJobCompletedEventSystemNotification1Processor/);
-    assert.match(processor, /fun on\(event: TrainingJobCompletedEvent\)/);
+    assert.match(processor, /return commandGateway.send\(/);
+    assert.match(processor, /\): java.util.concurrent.CompletableFuture<\*>/);
+    if (tenantEnabled) {
+        assert.match(processor, /fun on\(event: TrainingJobCompletedEvent, message: org.axonframework.messaging.eventhandling.EventMessage\)/);
+        assert.match(processor, /\), message.metadata\(\)\s*\).resultMessage/);
+    } else {
+        assert.match(processor, /fun on\(event: TrainingJobCompletedEvent\)/);
+        assert.doesNotMatch(processor, /message.metadata\(\)/);
+    }
     assert.match(processor, /PublishSystemNotificationCommand/);
     assert.match(processor, /category = NotificationCategory\.TRAINING/);
     assert.match(processor, /severity = NotificationSeverity\.SUCCESS/);

@@ -878,6 +878,11 @@ function safeDatabaseIdentifier(value, maxLength = 63) {
     return `${prefix}_${hash}`.slice(0, maxLength);
 }
 
+function readModelTableName(model, context, readmodel) {
+    return safeDatabaseIdentifier(readmodel.tableName ?? (model.tenancy
+        ? `${context}_${readmodel.name ?? readmodel.title}` : readmodel.title));
+}
+
 function safeIdentifier(value) {
     const result = String(value ?? '').replace(/[^A-Za-z0-9_]/g, '');
     return result && /^[A-Za-z_]/.test(result) ? result : `tag${pascal(result)}`;
@@ -1051,6 +1056,7 @@ module.exports = {
     kebab,
     safeDatabaseName,
     safeDatabaseIdentifier,
+    readModelTableName,
     safeIdentifier,
     httpRoute,
     constant,

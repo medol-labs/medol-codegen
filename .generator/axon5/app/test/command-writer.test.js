@@ -4,6 +4,27 @@ const test = require('node:test');
 const {commandWriterMethods} = require('../command-writer');
 const {selectionFor} = require('../model-helpers');
 
+test('tenant references are checked for existence even without business eligibility', () => {
+    const command = {id: 'create', name: 'CreateEntry', title: 'Create Entry', startsLifecycle: true, fields: [
+        {name: 'entryId', type: 'UUID', idAttribute: true},
+        {name: 'parentId', type: 'UUID', source: {kind: 'direct', from: ['Entries.EntryCatalog.entryId']}}
+    ]};
+    const slice = {name: 'CreateEntry', title: 'Create Entry', context: 'Entries', concepts: ['Entry'], commands: [command], events: [], readmodels: []};
+    const catalogSlice = {context: 'Entries', name: 'EntryCatalog', title: 'Entry Catalog', commands: [], events: [], readmodels: [{
+        name: 'EntryCatalog', title: 'Entry Catalog', fields: [{name: 'entryId', type: 'UUID', idAttribute: true}]
+    }]};
+    const model = {rootPackage: 'sample.app', slices: [slice, catalogSlice], concepts: [], valueTypes: [], transitions: [], tenancy: {
+        enabled: true, directory: {context: 'Admin', readModel: 'Tenants', mappings: {id: 'id', state: 'state'}},
+        memberships: {context: 'Admin', readModel: 'Members', mappings: {id: 'id', tenant: 'tenant', user: 'user', state: 'state'}}, managementContexts: ['Admin']
+    }};
+    let result;
+    const writer = {model, fs: {write: (_, content) => { result = content; }}, _kotlinPath: (value) => value};
+    commandWriterMethods._writeCommandHandlers.call(writer, 'sample.app.entries.createentry', 'entries', 'createentry', slice, selectionFor(slice, model), [], []);
+    assert.match(result, /findById\(command.parentId\)/);
+    assert.match(result, /entryCatalogReadModelSelection != null && true/);
+    assert.match(result, /TenantScope.withIdentity/);
+});
+
 test('generates backend command handler guards for projection eligibility selectors', () => {
     const command = {
         name: 'DefineTrainingRunConfiguration',

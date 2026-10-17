@@ -11,7 +11,7 @@ import org.springframework.test.web.servlet.get
 @SpringBootTest(properties = [
     "spring.docker.compose.enabled=false",
     "spring.flyway.enabled=false",
-    "spring.datasource.url=jdbc:h2:mem:medol-test;DB_CLOSE_DELAY=-1",
+    "spring.datasource.url=jdbc:h2:mem:medol-test;DB_CLOSE_DELAY=-1<%= typeof tenancyFixture !== 'undefined' && tenancyFixture ? ';DATABASE_TO_LOWER=TRUE' : '' %>",
     "spring.datasource.driver-class-name=org.h2.Driver",
     "spring.datasource.username=sa",
     "spring.datasource.password=",
@@ -23,6 +23,7 @@ import org.springframework.test.web.servlet.get
 class <%= applicationClass %>Test(
     @Autowired private val mockMvc: MockMvc
 ) {
+<%- typeof tenancyFixture !== 'undefined' ? tenancyFixture : '' %>
     @Test
     fun contextLoads() {
     }

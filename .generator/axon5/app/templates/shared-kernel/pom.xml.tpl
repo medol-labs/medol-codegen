@@ -101,10 +101,20 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+<% if (typeof tenancyEnabled !== 'undefined' && tenancyEnabled) { %>
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>test</scope>
+        </dependency>
+<% } %>
     </dependencies>
 
     <build>
         <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>
+<% if (typeof tenancyEnabled !== 'undefined' && tenancyEnabled) { %>
+        <testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>
+<% } %>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>

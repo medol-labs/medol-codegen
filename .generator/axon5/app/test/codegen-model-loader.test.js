@@ -60,6 +60,24 @@ function deployedMultiDomainModel() {
     };
 }
 
+test('full model loading retains tenant provider sources when a single deployment is selected', () => {
+    const previousDomain = process.env.CODEGEN_DOMAIN;
+    const previousDeployment = process.env.CODEGEN_DEPLOYMENT;
+    process.env.CODEGEN_DEPLOYMENT = 'Support';
+    process.env.CODEGEN_DOMAIN = 'BusinessDomain';
+    try {
+        const source = deployedMultiDomainModel();
+        source.contexts.push({name: 'ExternalTenantDirectory', domain: 'Other'});
+        source.slices.push({name: 'TenantCatalog', title: 'Tenant Catalog', context: 'ExternalTenantDirectory'});
+        const directory = writeModel(source);
+        assert.equal(loadCodegenModel(directory).contexts.some((context) => context.name === 'ExternalTenantDirectory'), false);
+        assert.equal(loadCodegenModel(directory, {fullModel: true}).contexts.some((context) => context.name === 'ExternalTenantDirectory'), true);
+    } finally {
+        restoreEnv('CODEGEN_DOMAIN', previousDomain);
+        restoreEnv('CODEGEN_DEPLOYMENT', previousDeployment);
+    }
+});
+
 test('keeps deployed built-in contexts when no domain is explicitly selected', () => {
     const previousDomain = process.env.CODEGEN_DOMAIN;
     const previousDeployment = process.env.CODEGEN_DEPLOYMENT;

@@ -4,6 +4,7 @@
  */
 
 const { buildBackendModules } = require('../../refine/app/backend-modules');
+const {tenantDatabaseName} = require('../../common/core/tenant-storage');
 const {
     cleanTitle,
     kebab,
@@ -71,7 +72,7 @@ function buildBackendApplications(source, operationsConfig, imagePrefix) {
     return backendModules.map((module, index) => {
         const name = operationsKebab(module.name ?? module.dataProviderName ?? module.label) || `backend-${index + 1}`;
         const port = parsePort(module.defaultApiUrl) ?? 8080 + index;
-        const dbName = safeDatabaseName(name);
+        const dbName = tenantDatabaseName(source) ?? safeDatabaseName(name);
         const envVarPrefix = snakeCase(name).toUpperCase();
         const override = applicationConfig[name] ?? applicationConfig[module.name] ?? {};
         const otherModules = backendModules.filter((candidate) => candidate !== module);
@@ -87,6 +88,7 @@ function buildBackendApplications(source, operationsConfig, imagePrefix) {
 
         return {
             kind: 'backend',
+            ...(source.tenancy ? {tenantIsolation: true} : {}),
             name,
             title: module.label,
             artifactName: name,
@@ -99,6 +101,11 @@ function buildBackendApplications(source, operationsConfig, imagePrefix) {
                 { name: 'SERVER_PORT', value: String(override.servicePort ?? port) },
                 { name: 'SPRING_DOCKER_COMPOSE_ENABLED', value: 'false' },
                 { name: 'DB_URL', value: `jdbc:postgresql://postgres:5432/${dbName}` },
+                ...(source.tenancy ? [{name: 'DB_SCHEMA', value: '${DB_SCHEMA:-public}'}] : []),
+                ...(source.tenancy ? [
+                    {name: 'MEDOL_SECURITY_INTERNAL_TOKEN', value: '${MEDOL_SECURITY_INTERNAL_TOKEN:?Set a shared tenant relay secret of at least 32 characters}'},
+                    {name: 'MEDOL_SECURITY_JWT_SECRET', value: '${MEDOL_SECURITY_JWT_SECRET:?Set a shared JWT signing secret}'}
+                ] : []),
                 { name: 'DB_USERNAME', value: '${POSTGRES_USER:-medol}' },
                 { name: 'DB_PASSWORD', value: '${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}' },
                 { name: 'MEDOL_AXON_EVENT_STORAGE', value: `\${MEDOL_AXON_EVENT_STORAGE:-${eventStorage}}` },

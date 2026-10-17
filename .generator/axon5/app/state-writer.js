@@ -87,6 +87,7 @@ const {
 const {contextPackage} = require('../../common/util/value-types');
 const {_commandTitle, _eventTitle, _readmodelTitle, _sliceTitle} = require('../../common/util/naming');
 const {infrastructurePortForCommand} = require('./infrastructure-port-writer');
+const {tenantScoped} = require('./tenant-support');
 
 function normalizeOutcomeName(value) {
     return String(value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -222,6 +223,8 @@ const stateWriterMethods = {
         const eventName = _eventTitle(event.title);
         const eventTagFields = eventTagFieldsFor(ownerSlice, event, selection, true);
         const eventFields = eventFieldsWithTags(event.fields ?? [], eventTagFields);
+        const scoped = tenantScoped(this.model, eventSlice.context);
+        if (scoped && eventFields.some((field) => field.name === 'medolTenantScope')) throw new Error('medolTenantScope is reserved for tenant isolation event tags.');
         const imports = kotlinFieldImports(eventFields, this.model.rootPackage);
         const annotated = new Set();
         const properties = eventFields.map((field) => {
@@ -245,12 +248,13 @@ ${imports}
 ${note}
 @Event
 data class ${eventName}(
-${properties}
+${properties}${scoped ? `,\n    @EventTag(key = "__medol_tenant")\n    val medolTenantScope: String = ${this.model.rootPackage}.shared.application.tenancy.TenantScope.requireTenant()` : ''}
 )
 `);
     },
 
     _writeState(packageName, context, slicePackage, slice, selection, events, overrideStateName, childTransitions = []) {
+        const scoped = tenantScoped(this.model, slice.context);
         const stateName = overrideStateName ?? `${pascal(slice.name)}State`;
         const concept = primaryConcept(slice);
         const childTransitionByEventId = new Map(childTransitions.map((transition) => [transition.eventId, transition]));
@@ -295,14 +299,14 @@ ${properties}
         }).join('\n\n');
         const eventImports = events.map((event) => `import ${this._eventPackage(event, slice)}.${_eventTitle(event.title)}`).join('\n');
         const stateImport = hasConceptState ? `import ${this.model.rootPackage}.${contextPackage(slice.context)}.domain.states.${stateEnumName}\n` : '';
-        const singleTag = selection.fields.length === 1;
+        const singleTag = selection.fields.length === 1 && !scoped;
         const tagOwner = pascal(selection.metadataOwner ?? slice.name);
         const idType = singleTag ? selection.fields[0].selectionType.replace(/\?$/, '') : undefined;
         const entityAnnotation = singleTag
             ? `@EventSourced(idType = ${idType}::class, tagKey = ${tagOwner}Tags.${constant(selection.fields[0].tag.name)})`
             : `@EventSourced(idType = ${selection.name}::class)`;
         const criteria = selection.fields
-            .map((field) => `EventCriteria.havingTags(Tag.of(${tagOwner}Tags.${constant(field.tag.name)}, ${selectionTagValueExpression(field)}))`)
+            .map((field) => `EventCriteria.havingTags(Tag.of(${tagOwner}Tags.${constant(field.tag.name)}, ${selectionTagValueExpression(field)})${scoped ? ', Tag.of("__medol_tenant", selection.medolTenantScope)' : ''})`)
             .join(',\n                ');
         const criteriaFunction = singleTag
             ? ''

@@ -81,11 +81,14 @@ const {
 } = require('./model-helpers');
 const {contextPackage} = require('../../common/util/value-types');
 const {_commandTitle, _eventTitle, _readmodelTitle, _sliceTitle} = require('../../common/util/naming');
+const {tenantScoped} = require('./tenant-support');
 
 const selectionWriterMethods = {
     _writeSelection(packageName, pathPrefix, slice, selection) {
         const imports = kotlinFieldImports(selection.fields, this.model.rootPackage);
-        const properties = selection.fields.map((field) => `    val ${field.alias}: ${field.selectionType}`).join(',\n');
+        const scoped = tenantScoped(this.model, slice.context);
+        if (scoped && selection.fields.some((field) => field.alias === 'medolTenantScope')) throw new Error('medolTenantScope is a reserved tenant selection property.');
+        const properties = [...selection.fields.map((field) => `    val ${field.alias}: ${field.selectionType}`), ...(scoped ? ['    val medolTenantScope: String'] : [])].join(',\n');
         const tags = uniqueTags(selection.tags ?? []);
         const tagConstants = tags.map((tag) => `    const val ${constant(tag.name)} = "${escapeKotlin(tag.name)}"`).join('\n');
         const metadataOwner = selection.metadataOwner ?? slice.name;
@@ -109,6 +112,7 @@ object ${pascal(metadataOwner)}Metadata {
     },
 
     _writeReservationArtifacts(context, reservation) {
+        const scoped = tenantScoped(this.model, (this.model.contexts ?? []).find((item) => contextPackage(item.name) === context)?.name ?? context);
         const fields = [
             ...reservation.idFields,
             ...reservation.originalFields,
@@ -121,7 +125,8 @@ object ${pascal(metadataOwner)}Metadata {
                 ? `    @EventTag(key = "${escapeKotlin(field.tagName)}")\n`
                 : '';
                 return `${tag}    val ${field.name}: ${mappedType(field, false)}`;
-            })
+            }),
+            ...(scoped ? [`    @EventTag(key = "__medol_tenant")\n    val medolTenantScope: String = ${this.model.rootPackage}.shared.application.tenancy.TenantScope.requireTenant()`] : [])
         ].join(',\n');
         this.fs.write(this._kotlinPath(`${context}/events/${reservation.eventName}.kt`), `package ${this.model.rootPackage}.${context}.events
 
@@ -135,7 +140,7 @@ ${eventProperties}
 )
 `);
 
-        const selectionProperties = reservation.selectionFields.map((field) => `    val ${field.name}: String`).join(',\n');
+        const selectionProperties = [...reservation.selectionFields.map((field) => `    val ${field.name}: String`), ...(scoped ? ['    val medolTenantScope: String'] : [])].join(',\n');
         this.fs.write(this._kotlinPath(`${reservation.packagePath}/${reservation.selectionName}.kt`), `package ${reservation.packageName}
 
 data class ${reservation.selectionName}(
@@ -175,7 +180,7 @@ ${reservation.idFields.map((field) => `    var ${field.name}: ${stateFieldType(f
         @JvmStatic
         @EventCriteriaBuilder
         fun resolveCriteria(selection: ${reservation.selectionName}): EventCriteria = EventCriteria.havingTags(
-                ${criteria}
+                ${criteria}${scoped ? ',\n                Tag.of("__medol_tenant", selection.medolTenantScope)' : ''}
         )
     }
 

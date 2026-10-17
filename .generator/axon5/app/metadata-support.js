@@ -6,6 +6,7 @@
 const {AUDIT_TRAIL_PROCESSING_GROUP} = require('./axon-processing');
 
 function writeMetadataSupport(generator) {
+        const tenancy = Boolean(generator.model.tenancy);
         generator.fs.write(generator._sharedKernelKotlinPath('shared/application/metadata/MetadataKeys.kt'), `package ${generator.model.rootPackage}.shared.application.metadata
 
 object MetadataKeys {
@@ -43,6 +44,8 @@ object MetadataHeaders {
 import jakarta.servlet.http.HttpServletRequest
 import org.axonframework.messaging.core.Metadata
 import java.util.UUID
+${tenancy ? `import ${generator.model.rootPackage}.shared.application.tenancy.TenantScope\n` : ''}
+${tenancy ? `import ${generator.model.rootPackage}.shared.security.CurrentUser\nimport org.springframework.security.core.context.SecurityContextHolder\n` : ''}
 
 object MetadataFactory {
     const val DEFAULT_USER_ID = "anonymous"
@@ -51,12 +54,12 @@ object MetadataFactory {
         val correlationId = header(request, MetadataHeaders.CORRELATION_ID) ?: UUID.randomUUID().toString()
         val values = linkedMapOf<String, String?>()
 
-        put(values, MetadataKeys.USER_ID, header(request, MetadataHeaders.USER_ID) ?: request.userPrincipal?.name ?: DEFAULT_USER_ID)
+        put(values, MetadataKeys.USER_ID, ${tenancy ? 'TenantScope.current()?.userId ?: (SecurityContextHolder.getContext().authentication?.principal as? CurrentUser)?.id?.toString() ?: request.userPrincipal?.name ?: DEFAULT_USER_ID' : 'header(request, MetadataHeaders.USER_ID) ?: request.userPrincipal?.name ?: DEFAULT_USER_ID'})
         put(values, MetadataKeys.SESSION_ID, header(request, MetadataHeaders.SESSION_ID) ?: request.requestedSessionId ?: request.getSession(false)?.id ?: UUID.randomUUID().toString())
         put(values, MetadataKeys.CORRELATION_ID, correlationId)
         put(values, MetadataKeys.CAUSATION_ID, header(request, MetadataHeaders.CAUSATION_ID) ?: correlationId)
         put(values, MetadataKeys.TRACE_ID, header(request, MetadataHeaders.TRACE_ID) ?: traceIdFromTraceParent(request) ?: correlationId)
-        put(values, MetadataKeys.TENANT_ID, header(request, MetadataHeaders.TENANT_ID))
+        put(values, MetadataKeys.TENANT_ID, ${tenancy ? 'TenantScope.current()?.tenantId' : 'header(request, MetadataHeaders.TENANT_ID)'})
 
         return Metadata.from(values)
     }
@@ -261,8 +264,9 @@ class AuditLogEntry {
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
+${tenancy ? 'import org.springframework.data.jpa.repository.JpaSpecificationExecutor\n' : ''}
 
-interface AuditLogRepository : JpaRepository<AuditLogEntry, Long> {
+interface AuditLogRepository : JpaRepository<AuditLogEntry, Long>${tenancy ? ', JpaSpecificationExecutor<AuditLogEntry>' : ''} {
     fun findAllByCorrelationId(correlationId: String, pageable: Pageable): Page<AuditLogEntry>
     fun findAllByUserId(userId: String, pageable: Pageable): Page<AuditLogEntry>
     fun findAllBySessionId(sessionId: String, pageable: Pageable): Page<AuditLogEntry>
@@ -318,6 +322,7 @@ import org.springframework.web.bind.annotation.RestController
 @RestController
 @RequestMapping("/audit-trail")
 class AuditTrailResource(private val repository: AuditLogRepository) {
+${tenancy ? '    @org.springframework.security.access.prepost.PreAuthorize("hasAuthority(\'*:*\') or hasAuthority(\'audit-trail:read\')")\n' : ''}\
     @GetMapping
     fun findAll(
         @RequestParam(required = false) correlationId: String?,
@@ -327,14 +332,21 @@ class AuditTrailResource(private val repository: AuditLogRepository) {
         @RequestParam(required = false) tenantId: String?,
         @PageableDefault(size = 20) pageable: Pageable
     ): Page<AuditLogEntry> =
-        when {
+${tenancy ? `        repository.findAll(org.springframework.data.jpa.domain.Specification<AuditLogEntry> { root, _, builder ->
+            val predicates = mutableListOf(builder.equal(root.get<String>("tenantId"), ${generator.model.rootPackage}.shared.application.tenancy.TenantScope.requireTenant()))
+            correlationId?.let { predicates.add(builder.equal(root.get<String>("correlationId"), it)) }
+            userId?.let { predicates.add(builder.equal(root.get<String>("userId"), it)) }
+            sessionId?.let { predicates.add(builder.equal(root.get<String>("sessionId"), it)) }
+            traceId?.let { predicates.add(builder.equal(root.get<String>("traceId"), it)) }
+            builder.and(*predicates.toTypedArray())
+        }, pageable)` : `        when {
             !correlationId.isNullOrBlank() -> repository.findAllByCorrelationId(correlationId, pageable)
             !userId.isNullOrBlank() -> repository.findAllByUserId(userId, pageable)
             !sessionId.isNullOrBlank() -> repository.findAllBySessionId(sessionId, pageable)
             !traceId.isNullOrBlank() -> repository.findAllByTraceId(traceId, pageable)
             !tenantId.isNullOrBlank() -> repository.findAllByTenantId(tenantId, pageable)
             else -> repository.findAll(pageable)
-        }
+        }`}
 }
 `);
 }

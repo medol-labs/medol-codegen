@@ -95,7 +95,7 @@ class Axon5Generator extends Generator {
             this.destinationRoot(this.destinationPath(outputRoot));
         }
         this.model = loadCodegenModel(this.env.cwd, this.opts);
-        this.fullModel = this.model;
+        this.fullModel = this.model.tenancy ? loadCodegenModel(this.env.cwd, {...this.opts, fullModel: true}) : this.model;
         this.modulePrefix = '';
         this.currentDeployment = null;
         this.currentDeploymentIndex = 0;

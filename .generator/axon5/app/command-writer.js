@@ -91,6 +91,7 @@ const {
     commandResultFields,
     infrastructurePortForCommand
 } = require('./infrastructure-port-writer');
+const {tenantScoped} = require('./tenant-support');
 
 function lowerCamel(value) {
     const name = pascal(value);
@@ -190,25 +191,35 @@ function eligibilityGuardsForCommand(model, command, slice, warningsTarget) {
 }
 
 function eligibilityGuardForField(model, command, slice, field, source, readModels, warningsTarget) {
-    const [sourceOwner, sourceField] = source.split('.').filter(Boolean);
+    const sourceParts = source.split('.').filter(Boolean);
+    const sourceField = sourceParts.pop();
+    const sourceOwner = sourceParts.pop();
+    const sourceContext = sourceParts.join('.');
     if (!sourceOwner || !sourceField) return null;
-    const info = readModels.find(({readmodel}) =>
-        readModelMatchesSource(readmodel, sourceOwner)
+    const matches = readModels.filter(({readmodel, context}) =>
+        (!sourceContext || context === sourceContext) && readModelMatchesSource(readmodel, sourceOwner)
         && (readmodel.fields ?? []).some((candidate) => candidate.name === sourceField)
     );
+    if (model.tenancy && matches.length > 1) throw new Error(`Ambiguous tenant selection source ${source}; qualify its context.`);
+    const info = matches[0];
     if (!info) return null;
-    const eligibility = eligibilityForCommand(info.readmodel.eligibility, command, slice);
+    const tenantReference = tenantScoped(model, info.context)
+        && (info.readmodel.fields ?? []).filter((candidate) => candidate.idAttribute).length === 1
+        && (info.readmodel.fields ?? []).some((candidate) => candidate.idAttribute && candidate.name === sourceField);
+    const eligibility = eligibilityForCommand(info.readmodel.eligibility, command, slice)
+        ?? (tenantReference ? {conditions: []} : null);
     if (!eligibility) return null;
     const fieldByName = new Map((info.readmodel.fields ?? []).map((candidate) => [candidate.name, candidate]));
     const eligibilityConditions = normalizeArray(eligibility.conditions);
     const conditions = eligibilityConditions
         .map((condition) => eligibilityConditionForReadModel(condition, info.readmodel, fieldByName, model.rootPackage));
-    if (conditions.length === 0 || !conditions.every(Boolean)) {
+    if ((!tenantReference && conditions.length === 0) || !conditions.every(Boolean)) {
         const unmappedConditions = eligibilityConditions.filter((condition, index) => !conditions[index]);
         reportGenerationWarning(
             warningsTarget,
             `Projection eligibility for ${cleanTitle(info.readmodel.title)}${eligibility.profile ? ` profile ${cleanTitle(eligibility.profile)}` : ''} cannot be generated as backend guard for command ${cleanTitle(command?.title ?? command?.name)} field ${field.name}: unmapped condition(s) ${unmappedConditions.map(eligibilityConditionText).join(', ')}. Materialize these fields on the projection or enforce the rule in command policy.`
         );
+        if (tenantReference) throw new Error('Tenant selection eligibility cannot be mapped to its projection fields.');
         return null;
     }
     const readModelName = _readmodelTitle(info.readmodel.title);
@@ -347,7 +358,7 @@ function eligibilityConditionText(condition) {
 function renderEligibilityGuard(guard) {
     const checks = guard.conditions
         .map((condition) => `${guard.projectionVariable}.${condition.expression}`)
-        .join(' && ');
+        .join(' && ') || 'true';
     const lookup = guard.field.optional
         ? `command.${guard.field.name}?.let { ${guard.repositoryVariable}.findById(it) }`
         : `${guard.repositoryVariable}.findById(command.${guard.field.name})`;
@@ -393,8 +404,18 @@ function storedUploadName(command) {
 
 const commandWriterMethods = {
     _writeCommand(packageName, context, slicePackage, command, selection, selectionPackageName = packageName, reservations = []) {
+        const scoped = tenantScoped(this.model, command.context ?? (this.model.slices ?? []).find((slice) => slice.commands?.some((item) => item.id === command.id))?.context);
+        const ownerSlice = (this.model.slices ?? []).find((slice) => slice.commands?.some((item) => item.id === command.id));
+        const related = scoped && ownerSlice ? relatedStateForCommand(this.model, ownerSlice, command, relatedEventsForSlice(this.model, ownerSlice)) : undefined;
+        const relatedSelection = related ? selectionFor(related.slice, this.model) : undefined;
+        const relatedProperty = relatedSelection ? `\n    @get:com.fasterxml.jackson.annotation.JsonIgnore
+    val medolRelatedSelection: ${related.stateTarget.packageName}.${relatedSelection.name}
+        get() = ${related.stateTarget.packageName}.${relatedSelection.name}(${relatedSelection.fields.map((field) => `${field.alias} = ${relatedSelection.fields.length === 1 ? `this.${related.idProperty}` : `this.${field.alias}`}`).join(', ')}, medolTenantScope = requireNotNull(medolTenantScope))\n` : '';
         const commandName = _commandTitle(command.title);
         const commandFields = commandFieldsWithSelection(command, selection).filter((field) => !field.portOutput);
+        if (this.model.tenancy && commandFields.some((field) => ['medolTenantScope', 'medolTenantUser', 'medolTenantScoped'].includes(field.name))) {
+            throw new Error('medolTenantScope, medolTenantUser and medolTenantScoped are reserved technical command properties when tenancy is enabled.');
+        }
         const commandReservations = commandStartsLifecycle(command) ? reservations : [];
         const imports = uniqueBy([
             kotlinFieldImports(commandFields, this.model.rootPackage),
@@ -405,13 +426,13 @@ const commandWriterMethods = {
             const defaultValue = field.generated ? ` = ${fallbackValue(field)}` : '';
             return `    val ${field.name}: ${mappedType(field, field.optional)}${defaultValue}`;
         }).join(',\n');
-        const selectionArgs = selection.fields.map((field) => `${field.alias} = ${field.commandExpression}`).join(', ');
+        const selectionArgs = [...selection.fields.map((field) => `${field.alias} = ${field.commandExpression}`), ...(scoped ? ['medolTenantScope = requireNotNull(medolTenantScope) { "Tenant command has not been verified." }'] : [])].join(', ');
         const selectionEntityIds = selection.fields
             .filter((field) => field.derived)
             .map((field) => `    val ${selectionEntityIdProperty(field)}: String = ${field.commandExpression}`)
             .join('\n');
         const reservationSelections = commandReservations.map((reservation) =>
-            `    val ${reservation.selectionProperty}: ${reservation.selectionName} = ${reservation.selectionName}(${reservation.selectionArgs.join(', ')})`
+            `${scoped ? '    @get:com.fasterxml.jackson.annotation.JsonIgnore\n' : ''}    val ${reservation.selectionProperty}: ${reservation.selectionName}${scoped ? '\n        get()' : ''} = ${reservation.selectionName}(${[...reservation.selectionArgs, ...(scoped ? ['medolTenantScope = requireNotNull(medolTenantScope)'] : [])].join(', ')})`
         ).join('\n');
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${commandName}.kt`), `package ${packageName}
 
@@ -422,9 +443,19 @@ ${selectionImport}${imports}
 @Command
 data class ${commandName}(
 ${properties}
-) {
-    @TargetEntityId
-    val selection: ${selection.name} = ${selection.name}(${selectionArgs})
+)${this.model.tenancy ? ` : ${this.model.rootPackage}.shared.application.tenancy.TenantCommand` : ''} {
+${this.model.tenancy ? `    @get:com.fasterxml.jackson.annotation.JsonIgnore
+    override val medolTenantScoped: Boolean = ${scoped}
+    @get:com.fasterxml.jackson.annotation.JsonIgnore
+    @set:com.fasterxml.jackson.annotation.JsonIgnore
+    override var medolTenantScope: String? = ${scoped ? `${this.model.rootPackage}.shared.application.tenancy.TenantScope.current()?.tenantId` : 'null'}
+    @get:com.fasterxml.jackson.annotation.JsonIgnore
+    @set:com.fasterxml.jackson.annotation.JsonIgnore
+    override var medolTenantUser: String? = ${scoped ? `${this.model.rootPackage}.shared.application.tenancy.TenantScope.current()?.userId` : 'null'}
+` : ''}
+${scoped ? '    @get:com.fasterxml.jackson.annotation.JsonIgnore\n' : ''}    @${scoped ? 'get:' : ''}TargetEntityId
+    val selection: ${selection.name}${scoped ? '\n        get()' : ''} = ${selection.name}(${selectionArgs})
+${relatedProperty}
 ${selectionEntityIds ? `\n${selectionEntityIds}` : ''}
 ${reservationSelections ? `\n${reservationSelections}` : ''}
 }
@@ -432,10 +463,11 @@ ${reservationSelections ? `\n${reservationSelections}` : ''}
     },
 
     _writeCommandHandlers(packageName, context, slicePackage, slice, selection, events, reservations = []) {
+        const scoped = tenantScoped(this.model, slice.context);
         const stateTarget = stateTargetFor(this.model, slice);
         const stateName = stateTarget.name;
         const decisionName = `${pascal(slice.name)}Decision`;
-        const injectEntity = injectEntityExpression(selection);
+        const injectEntity = scoped ? '(idProperty = "selection")' : injectEntityExpression(selection);
         const handlers = slice.commands.map((command) => {
             const commandName = _commandTitle(command.title);
             const port = infrastructurePortForCommand(command, events, slice, this.model);
@@ -451,7 +483,7 @@ ${reservationSelections ? `\n${reservationSelections}` : ''}
             const commandStateTarget = relatedState?.stateTarget ?? stateTarget;
             const commandStateName = commandStateTarget.name;
             const commandInjectEntity = relatedState
-                ? `(idProperty = "${escapeKotlin(relatedState.idProperty)}")`
+                ? `(idProperty = "${scoped ? 'medolRelatedSelection' : escapeKotlin(relatedState.idProperty)}")`
                 : injectEntity;
             const methodParameters = [
                 `command: ${commandName}`,
@@ -485,15 +517,19 @@ ${port?.failureEvent ? '        val now = java.time.LocalDateTime.now()\n' : ''}
             const appendEvents = `eventAppender.append(decision.decide(${decisionArgs}))`;
             const bodyEnd = returnsPortResult
                 ? `        ${appendEvents}
-        return portResult`
+        ${scoped ? '' : 'return '}portResult`
                 : `        ${appendEvents}`;
             return `    @CommandHandler
     fun handle(
 ${methodParameters}
     )${returnType} {
+${scoped ? `        return ${this.model.rootPackage}.shared.application.tenancy.TenantScope.withIdentity(
+            ${this.model.rootPackage}.shared.application.tenancy.TenantIdentity(requireNotNull(command.medolTenantScope), requireNotNull(command.medolTenantUser))
+        ) {\n` : ''}
 ${eligibilityStatements ? `${eligibilityStatements}\n` : ''}\
 ${portStatements}\
 ${bodyEnd}
+${scoped ? '        }' : ''}
     }`;
         }).join('\n\n');
         const commandImports = slice.commands.map((command) => `import ${packageName}.${_commandTitle(command.title)}`).join('\n');
@@ -907,7 +943,7 @@ class DataImportService(
         }
         val requestHash = requestHash(commandName, resourceName, bytes, requestedLocale)
         val jobId = UUID.nameUUIDFromBytes(requestHash.toByteArray(StandardCharsets.UTF_8))
-        val directory = Path.of(properties.storagePath, jobId.toString()).createDirectories()
+        val directory = ${this.model.tenancy ? `${this.model.rootPackage}.shared.application.tenancy.TenantFiles.directory(properties.storagePath).resolve(jobId.toString())` : 'Path.of(properties.storagePath, jobId.toString())'}.createDirectories()
         val safeFileName = originalFileName.replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "import.csv" }
         val path = directory.resolve(safeFileName).normalize()
         Files.write(path, bytes)
@@ -936,7 +972,7 @@ class DataImportService(
     fun processCsv(filePath: String, consumer: (Long, Map<String, String>, String) -> Unit): Long {
         var headers: List<String>? = null
         var totalRows = 0L
-        Files.newBufferedReader(Path.of(filePath), StandardCharsets.UTF_8).useLines { lines ->
+        Files.newBufferedReader(${this.model.tenancy ? `${this.model.rootPackage}.shared.application.tenancy.TenantFiles.owned(filePath, properties.storagePath)` : 'Path.of(filePath)'}, StandardCharsets.UTF_8).useLines { lines ->
             lines.forEachIndexed { index, line ->
                 val normalizedLine = if (index == 0) line.removePrefix("\\uFEFF") else line
                 if (normalizedLine.isBlank()) return@forEachIndexed
@@ -961,7 +997,7 @@ class DataImportService(
 
     fun writeFailureIndex(task: DataImportExecutionTask, errors: List<DataImportRowError>): String? {
         if (errors.isEmpty()) return null
-        val directory = Path.of(properties.storagePath, task.dataImportJobId.toString()).createDirectories()
+        val directory = ${this.model.tenancy ? `${this.model.rootPackage}.shared.application.tenancy.TenantFiles.directory(properties.storagePath).resolve(task.dataImportJobId.toString())` : 'Path.of(properties.storagePath, task.dataImportJobId.toString())'}.createDirectories()
         val path = directory.resolve("failure-index.csv").normalize()
         val builder = StringBuilder()
         builder.append("rowNumber,rowHash,errorCode,message\\n")
@@ -1003,9 +1039,9 @@ class DataImportService(
         raw(row, field, required)?.let { LocalDate.parse(it) }
 
     fun dateTime(row: Map<String, String>, field: String, required: Boolean = true): LocalDateTime? =
-        raw(row, field, required)?.let {
-            runCatching { LocalDateTime.parse(it) }
-                .getOrElse { OffsetDateTime.parse(it).toLocalDateTime() }
+        raw(row, field, required)?.let { value ->
+            runCatching { LocalDateTime.parse(value) }
+                .getOrElse { OffsetDateTime.parse(value).toLocalDateTime() }
         }
 
     private fun raw(row: Map<String, String>, field: String, required: Boolean): String? {
@@ -1019,6 +1055,7 @@ class DataImportService(
 
     private fun requestHash(commandName: String, resourceName: String, bytes: ByteArray, requestedLocale: String?): String {
         val digest = MessageDigest.getInstance("SHA-256")
+${this.model.tenancy ? `        digest.update(${this.model.rootPackage}.shared.application.tenancy.TenantScope.requireTenant().toByteArray(StandardCharsets.UTF_8))\n        digest.update(0.toByte())\n` : ''}\
         digest.update(commandName.toByteArray(StandardCharsets.UTF_8))
         digest.update(0.toByte())
         digest.update(resourceName.toByteArray(StandardCharsets.UTF_8))
@@ -1059,12 +1096,14 @@ class DataImportService(
         return values
     }
 
-    private fun csvCell(value: String): String =
-        if (value.contains(',') || value.contains('"') || value.contains('\\n') || value.contains('\\r')) {
-            "\"" + value.replace("\"", "\"\"") + "\""
+    private fun csvCell(value: String): String {
+        val quote = '"'.toString()
+        return if (value.contains(',') || value.contains(quote) || value.contains('\\n') || value.contains('\\r')) {
+            quote + value.replace(quote, quote + quote) + quote
         } else {
             value
         }
+    }
 }
 `);
     },
@@ -1188,12 +1227,15 @@ import java.time.ZoneOffset
 @Component
 class ${processorClass}(
     private val registry: DataImportCommandExecutorRegistry,
-    private val lifecyclePort: DataImportJobLifecyclePort
+    private val lifecyclePort: DataImportJobLifecyclePort${this.model.tenancy ? `,\n    private val tenantAccess: ${this.model.rootPackage}.shared.application.tenancy.SameSchemaTenantAccess` : ''}
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
     @EventHandler
     fun on(event: DataImportRequestedEvent, message: EventMessage) {
+${this.model.tenancy ? `        ${this.model.rootPackage}.shared.application.tenancy.TenantScope.withIdentity(
+            tenantAccess.verify(requireNotNull(message.metadata()["tenantId"]), requireNotNull(message.metadata()["userId"]))
+        ) {\n` : ''}
         val task = DataImportExecutionTask(
             dataImportJobId = event.dataImportJobId,
             commandName = event.commandName,
@@ -1217,6 +1259,7 @@ class ${processorClass}(
             log.warn("Data import job {} failed", event.dataImportJobId, ex)
             lifecyclePort.fail(event.dataImportJobId, ex.message ?: "Data import failed.")
         }
+${this.model.tenancy ? '        }' : ''}
     }
 }
 `);

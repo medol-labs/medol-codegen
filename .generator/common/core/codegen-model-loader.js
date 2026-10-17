@@ -20,8 +20,8 @@ function loadCodegenModel(cwd, options = {}) {
         }
     }
 
-    const selectedDeployment = selectDeployment(raw);
-    const selectedDomain = selectedDeployment ? undefined : selectDomain(raw);
+    const selectedDeployment = options.fullModel ? undefined : selectDeployment(raw);
+    const selectedDomain = options.fullModel || selectedDeployment ? undefined : selectDomain(raw);
     const model = selectedDeployment
         ? filterByDeployment(raw, selectedDeployment)
         : selectedDomain

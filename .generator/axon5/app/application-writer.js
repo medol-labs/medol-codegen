@@ -4,11 +4,12 @@
  */
 
 const path = require('path');
+const {tenantDatabaseName} = require('../../common/core/tenant-storage');
 const {configureValueTypes} = require('../../common/util/generator');
-const {pascal, kebab, safeDatabaseName, safeIdentifier, filterModelByDeployment} = require('./model-helpers');
+const {pascal, kebab, safeDatabaseName, safeDatabaseIdentifier, safeIdentifier, filterModelByDeployment} = require('./model-helpers');
 const {manualInfrastructurePortPathForCommand} = require('./infrastructure-port-writer');
 const {writeMetadataSupport} = require('./metadata-support');
-const {writeTenantRuntimeContract, writeTenantBootstrap} = require('./tenant-support');
+const {tenantTestFixture, writeTenantRuntimeContract, writeTenantBootstrap} = require('./tenant-support');
 const {actorSecurityModel, iamSecurityContract} = require('./security-model');
 const {
     AUDIT_TRAIL_PROCESSING_GROUP,
@@ -193,7 +194,8 @@ const applicationWriterMethods = {
         });
         this.fs.copyTpl(this.templatePath('ApplicationTest.kt.tpl'), this._rootTestKotlinPath('ApplicationTest.kt'), {
             rootPackage: this.model.rootPackage,
-            applicationClass
+            applicationClass,
+            tenancyFixture: tenantTestFixture(this.model)
         });
         if (!this._usesSharedKernelModule()) {
             this._writeSharedKernelArtifacts({hasInfra});
@@ -202,7 +204,9 @@ const applicationWriterMethods = {
             ...runtime,
             moduleEnvFile: this.modulePrefix ? `${this.modulePrefix}/.env` : '.env',
             rootPackage: this.model.rootPackage,
-            hasInfra
+            hasInfra,
+            tenancyEnabled: Boolean(this.model.tenancy),
+            migrationTable: safeDatabaseIdentifier(`${appName}_flyway_history`)
         });
         this.fs.copyTpl(this.templatePath('logback-spring.xml.tpl'), this._destPath('src/main/resources/logback-spring.xml'), {
             rootPackage: this.model.rootPackage
@@ -299,7 +303,8 @@ ${beanMethods}
 
     _writeSharedKernelModule() {
         this.fs.copyTpl(this.templatePath('shared-kernel/pom.xml.tpl'), this.destinationPath(`${SHARED_KERNEL_MODULE}/pom.xml`), {
-            rootPackage: this.model.rootPackage
+            rootPackage: this.model.rootPackage,
+            tenancyEnabled: Boolean(this.model.tenancy)
         });
         const previousWritingSharedKernel = this.writingSharedKernel;
         this.writingSharedKernel = true;
@@ -320,7 +325,8 @@ ${beanMethods}
             rootPackage: this.model.rootPackage
         });
         this.fs.copyTpl(this.templatePath('ApiExceptionHandler.kt.tpl'), this._sharedKernelKotlinPath('shared/infrastructure/web/ApiExceptionHandler.kt'), {
-            rootPackage: this.model.rootPackage
+            rootPackage: this.model.rootPackage,
+            tenancyEnabled: Boolean(this.model.tenancy)
         });
         this.fs.copyTpl(this.templatePath('CommandRejectedException.kt.tpl'), this._sharedKernelKotlinPath('shared/domain/CommandRejectedException.kt'), {
             rootPackage: this.model.rootPackage
@@ -350,7 +356,8 @@ ${beanMethods}
             'MeResource.kt'
         ].forEach((fileName) => {
             this.fs.copyTpl(this.templatePath(`security/${fileName}.tpl`), this._sharedKernelKotlinPath(`shared/security/${fileName}`), {
-                rootPackage: this.model.rootPackage
+                rootPackage: this.model.rootPackage,
+                tenancyEnabled: Boolean(this.model.tenancy)
             });
         });
     },
@@ -415,16 +422,17 @@ ${beanMethods}
 
     _runtimeConfig(appName) {
         const index = this.currentDeployment ? this.currentDeploymentIndex : 0;
+        const sharedDatabase = tenantDatabaseName(this.fullModel ?? this.model);
         const appPort = 8080 + index;
         return {
             appName,
             appPort,
-            dbPort: 5432 + index,
+            dbPort: sharedDatabase ? 5432 : 5432 + index,
             umadbPort: 50051 + index,
-            dbName: safeDatabaseName(appName),
+            dbName: sharedDatabase ?? safeDatabaseName(appName),
             composeFile: 'docker-compose.yml',
             envFile: '.env',
-            dockerComposeEnabled: 'true',
+            dockerComposeEnabled: sharedDatabase && index > 0 ? 'false' : 'true',
             deploymentFrontends: this._deploymentFrontends(appName, appPort),
             externalSystems: this._externalSystemConfigs(),
             integrationClients: this._integrationClientConfigs(),

@@ -26,6 +26,7 @@ const {
 } = require('./model-helpers');
 const {infrastructurePortForCommand, resultFieldsForEvent} = require('./infrastructure-port-writer');
 const {_commandTitle, _eventTitle} = require('../../common/util/naming');
+const {tenantScoped, tenantTestFixture} = require('./tenant-support');
 
 function testMethodName(value) {
     return safeIdentifier(String(value ?? 'command').replace(/[^A-Za-z0-9]+/g, ' '));
@@ -306,7 +307,9 @@ const testWriterMethods = {
 ${imports.join('\n')}
 
 class ${testName} {
-${tests.map((test) => test.body).join('\n\n')}
+${tests.map((test) => tenantScoped(this.model, slice.context)
+    ? test.body.replace('() {', `() {\n        ${this.model.rootPackage}.shared.application.tenancy.TenantScope.withIdentity(\n            ${this.model.rootPackage}.shared.application.tenancy.TenantIdentity("test-tenant", "test-user")\n        ) {`).replace(/\n    }$/, '\n        }\n    }')
+    : test.body).join('\n\n')}
 }
 `);
     },
@@ -334,7 +337,7 @@ ${fieldImports.join('\n')}
 @SpringBootTest(properties = [
     "spring.docker.compose.enabled=false",
     "spring.flyway.enabled=false",
-    "spring.datasource.url=jdbc:h2:mem:${kebab(testName)};DB_CLOSE_DELAY=-1",
+    "spring.datasource.url=jdbc:h2:mem:${kebab(testName)};DB_CLOSE_DELAY=-1${this.model.tenancy ? ';DATABASE_TO_LOWER=TRUE' : ''}",
     "spring.datasource.driver-class-name=org.h2.Driver",
     "spring.datasource.username=sa",
     "spring.datasource.password=",
@@ -346,7 +349,10 @@ ${fieldImports.join('\n')}
 class ${testName}(
     @Autowired private val commandGateway: CommandGateway
 ) {
-${tests.map((test) => test.body).join('\n\n')}
+${tenantTestFixture(this.model)}
+${tests.map((test) => tenantScoped(this.model, slice.context)
+    ? test.body.replace('() {', `() {\n        ${this.model.rootPackage}.shared.application.tenancy.TenantScope.withIdentity(\n            ${this.model.rootPackage}.shared.application.tenancy.TenantIdentity("test-tenant", "test-user")\n        ) {`).replace(/\n    }$/, '\n        }\n    }')
+    : test.body).join('\n\n')}
 }
 `);
     },

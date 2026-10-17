@@ -22,12 +22,24 @@ spring:
     username: ${DB_USERNAME:medol}
     password: ${DB_PASSWORD:medol}
     driver-class-name: org.postgresql.Driver
+<% if (typeof tenancyEnabled !== 'undefined' && tenancyEnabled) { %>
+    hikari:
+      schema: ${DB_SCHEMA:public}
+<% } %>
   jpa:
     open-in-view: false
+<% if (typeof tenancyEnabled !== 'undefined' && tenancyEnabled) { %>
+    properties:
+      hibernate.default_schema: ${DB_SCHEMA:public}
+<% } %>
     hibernate:
       ddl-auto: update
   flyway:
     enabled: true
+<% if (typeof tenancyEnabled !== 'undefined' && tenancyEnabled) { %>
+    default-schema: ${DB_SCHEMA:public}
+    table: <%= migrationTable %>
+<% } %>
     locations: classpath:db/migration
 
 axon:

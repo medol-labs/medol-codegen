@@ -507,7 +507,7 @@ function environmentSecretExamples(model, environmentName) {
     const postgres = model.infrastructure.find((component) => component.type === 'postgres');
     const applicationSecrets = model.applications
         .map((application) => {
-            const stringData = Object.fromEntries(applicationSecretVariables(application).map((name) => [name, secretPlaceholder(name)]));
+            const stringData = Object.fromEntries(applicationSecretVariables(application).map((name) => [name, secretPlaceholder(name, application)]));
             return {
                 apiVersion: 'v1',
                 kind: 'Secret',
@@ -608,7 +608,8 @@ function isSecretVariable(name) {
         || /^PORTAL_SSO_/i.test(String(name ?? ''));
 }
 
-function secretPlaceholder(name) {
+function secretPlaceholder(name, application) {
+    if (application?.tenantIsolation && ['MEDOL_SECURITY_INTERNAL_TOKEN', 'MEDOL_SECURITY_JWT_SECRET'].includes(name)) return '';
     if (name === 'DB_USERNAME') return 'medol';
     if (name === 'UMADB_API_KEY') return '';
     if (name === 'MEDOL_SECURITY_INTERNAL_TOKEN') return 'local-dev-internal-token';

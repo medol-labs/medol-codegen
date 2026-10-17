@@ -21,6 +21,7 @@ const {
 const {automationProcessingGroup, integrationProcessingGroup} = require('./axon-processing');
 const {contextPackage, valueTypeImport} = require('../../common/util/value-types');
 const {_commandTitle, _eventTitle, _readmodelTitle, _sliceTitle} = require('../../common/util/naming');
+const {tenantScoped} = require('./tenant-support');
 
 function lowerCamel(value) {
     const name = pascal(value);
@@ -346,8 +347,8 @@ class ${className}(
     private val objectMapper: ObjectMapper
 ) {
     @EventHandler
-    fun on(event: ${eventClass}) {
-        commandGateway.send(
+    fun on(event: ${eventClass}${this.model.tenancy ? ', message: org.axonframework.messaging.eventhandling.EventMessage' : ''}): java.util.concurrent.CompletableFuture<*> {
+        return commandGateway.send(
             ${commandClass}(
                 notificationId = UUID.randomUUID(),
                 recipientUserId = "GLOBAL",
@@ -364,7 +365,7 @@ class ${className}(
                 toastPolicy = NotificationToastPolicy.${toastPolicy},
                 publishedAt = LocalDateTime.now(),
                 status = "UNREAD"
-            )
+            )${this.model.tenancy ? ', message.metadata()' : ''}
         ).resultMessage
     }
 }
@@ -453,10 +454,11 @@ import org.springframework.stereotype.Component
 @Component
 class ${processorClass}(
     private val repository: ${readmodelClass}Repository,
-    private val commandGateway: CommandGateway
+    private val commandGateway: CommandGateway${tenantScoped(this.model, readmodelRef.slice.context) ? `,\n    private val tenants: ${this.model.rootPackage}.shared.application.tenancy.TenantBackgroundRunner` : ''}
 ) {
     @Scheduled(fixedDelayString = "\\${'${'}automation.${kebab(processor.name)}.fixed-delay-ms:5000}")
     fun processTodo() {
+${tenantScoped(this.model, readmodelRef.slice.context) ? '        tenants.forEachTenant {\n' : ''}
         repository.${readModelRepositoryPageCall(readmodelRef.readmodel)}
             .content
             .asSequence()
@@ -464,12 +466,14 @@ class ${processorClass}(
             .forEach { todo ->
                 commandGateway.send(${commandExpression(command, readmodelRef.readmodel, 'todo', selection, true)})
             }
+${tenantScoped(this.model, readmodelRef.slice.context) ? '        }' : ''}
     }
 }
 `);
     },
 
     _writeLocalCommandProcessor(packageName, context, slicePackage, processorClass, eventImport, commandRef, eventRef, processor, slice) {
+        const metadataArgument = this.model.tenancy ? ', message.metadata()' : '';
         const command = commandRef.command;
         const selection = selectionFor(commandRef.slice, this.model);
         const commandClass = _commandTitle(command.title);
@@ -486,9 +490,9 @@ class ${processorClass}(
         };
         const commandSend = fanOutSource && fanOutAlias
             ? `        java.util.concurrent.CompletableFuture.allOf(*${fanOutSource}.map { ${fanOutAlias} ->
-            commandGateway.send(${commandExpression(command, sourceEvent, 'event', selection, false, {alias: fanOutAlias, itemParameter: fanOutAlias})}).resultMessage
+            commandGateway.send(${commandExpression(command, sourceEvent, 'event', selection, false, {alias: fanOutAlias, itemParameter: fanOutAlias})}${metadataArgument}).resultMessage
         }.toTypedArray())`
-            : `        commandGateway.send(${commandExpression(command, sourceEvent, 'event', selection)}).resultMessage`;
+            : `        commandGateway.send(${commandExpression(command, sourceEvent, 'event', selection)}${metadataArgument}).resultMessage`;
         const body = condition === 'true'
             ? commandSend
             : `        if (${condition}) {
@@ -513,13 +517,14 @@ import org.springframework.stereotype.Component
 @Component
 class ${processorClass}(private val commandGateway: CommandGateway) {
     @EventHandler
-    fun on(event: ${eventClassName(eventImport)}): java.util.concurrent.CompletableFuture<*> =
+    fun on(event: ${eventClassName(eventImport)}${this.model.tenancy ? ', message: org.axonframework.messaging.eventhandling.EventMessage' : ''}): java.util.concurrent.CompletableFuture<*> =
 ${body}
 }
 `);
     },
 
     _writeRemoteCommandProcessor(packageName, context, slicePackage, processorClass, eventImport, clientClass, commandRef, eventRef, slice) {
+        const scoped = tenantScoped(this.model, commandRef.slice.context);
         const requestClass = commandRequestClass(commandRef.command);
         const selection = selectionFor(commandRef.slice, this.model);
         const eventSelection = selectionFor(eventRef.slice, this.model);
@@ -540,8 +545,12 @@ import org.springframework.stereotype.Component
 @Component
 class ${processorClass}(private val client: ${clientClass}) {
     @EventHandler
-    fun on(event: ${eventClassName(eventImport)}) {
+    fun on(event: ${eventClassName(eventImport)}${scoped ? ', message: org.axonframework.messaging.eventhandling.EventMessage' : ''}) {
+${scoped ? `        ${this.model.rootPackage}.shared.application.tenancy.TenantScope.withIdentity(
+            ${this.model.rootPackage}.shared.application.tenancy.TenantIdentity(requireNotNull(message.metadata()["tenantId"]), requireNotNull(message.metadata()["userId"]))
+        ) {\n` : ''}
         client.${lowerCamel(commandRef.command.name)}(${payloadExpression(commandRef.command, sourceEvent)})
+${scoped ? '        }' : ''}
     }
 }
 `);

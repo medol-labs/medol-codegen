@@ -2,11 +2,12 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
-const {tenantContract, writeTenantRuntimeContract, writeTenantBootstrap} = require('../tenant-support');
+const {tenantContract, tenantScoped, tenantAccessQuery, writeTenantRuntimeContract, writeTenantBootstrap} = require('../tenant-support');
 const {filterModelByDeployment, readModelMetadataFields} = require('../model-helpers');
 const {readModelWriterMethods} = require('../read-model-writer');
 const {writeMetadataSupport} = require('../metadata-support');
 const {fromConfig, fromCodegenModel, toGeneratorConfig} = require('../../../common/core/codegen-model');
+const {applicationWriterMethods} = require('../application-writer');
 
 const tenancy = () => ({
     enabled: true,
@@ -17,9 +18,16 @@ const tenancy = () => ({
 
 function generator(model) {
     const files = new Map();
+    const eligibility = [{operator: 'AND', conditions: [{left: 'status', operator: '==', right: 'Ready'}]}];
+    const slices = [{context: 'Customers', readmodels: [
+        {name: 'Accounts', title: 'Customer Accounts', fields: [{name: 'accountKey', type: 'UUID'}, {name: 'status', type: 'String'}], eligibility: structuredClone(eligibility)},
+        {name: 'Members', title: 'Customer Members', fields: [{name: 'memberKey', type: 'UUID'}, {name: 'accountKey', type: 'UUID'}, {name: 'personKey', type: 'UUID'}, {name: 'status', type: 'String'}], eligibility: structuredClone(eligibility)}
+    ]}];
     return {
-        model: {rootPackage: 'sample.app', ...model}, files,
-        fs: {write: (path, content) => files.set(path, content), delete: (path) => files.delete(path)},
+        model: {rootPackage: 'sample.app', slices, ...model}, files,
+        fs: {write: (path, content) => files.set(path, content), delete: (path) => files.delete(path),
+            copyTpl: (source, target, data) => files.set(target, require('ejs').render(fs.readFileSync(source, 'utf8'), data))},
+        templatePath: (source) => path.join(__dirname, '../templates', source),
         _rootKotlinPath: (path) => `application/${path}`,
         _sharedKernelKotlinPath: (path) => `shared/${path}`
     };
@@ -33,6 +41,60 @@ test('tenant bootstrap is opt-in and removing capability removes stale generated
     writeTenantBootstrap(gen);
     assert.equal(gen.files.size, 0);
     assert.equal(tenantContract(gen.model), undefined);
+});
+
+test('runtime generation is absent without configuration and removes stale generated files', () => {
+    const gen = generator({tenancy: tenancy()});
+    writeTenantRuntimeContract(gen);
+    assert(gen.files.has('shared/shared/application/tenancy/TenantScope.kt'));
+    gen.model.tenancy = undefined;
+    writeTenantRuntimeContract(gen);
+    assert.equal(gen.files.size, 0);
+    assert.equal(tenantScoped(gen.model, 'Orders'), false);
+});
+
+test('only tenant-enabled backend defaults share a database and schema endpoint', () => {
+    const gen = generator({domain: 'ExampleSystem', tenancy: tenancy()});
+    Object.assign(gen, {currentDeployment: {name: 'Business'}, currentDeploymentIndex: 1,
+        _deploymentFrontends: () => [], _externalSystemConfigs: () => [], _integrationClientConfigs: () => [], _syncSourceContextConfigs: () => []});
+    const shared = applicationWriterMethods._runtimeConfig.call(gen, 'business');
+    assert.equal(shared.dbName, 'example_system_shared');
+    assert.equal(shared.dbPort, 5432);
+    assert.equal(shared.dockerComposeEnabled, 'false');
+    delete gen.model.tenancy;
+    const ordinary = applicationWriterMethods._runtimeConfig.call(gen, 'business');
+    assert.equal(ordinary.dbName, 'business');
+    assert.equal(ordinary.dbPort, 5433);
+    assert.equal(ordinary.dockerComposeEnabled, 'true');
+});
+
+test('tenant access SQL uses modeled sources, eligibility and bounded indexed lookups', () => {
+    const gen = generator({tenancy: tenancy()});
+    const query = tenantAccessQuery(gen.model);
+    assert.match(query.sql, /JOIN "customers_members"/);
+    assert.match(query.sql, /d\."account_key" = :tenant/);
+    assert.match(query.sql, /m\."person_key" = :user/);
+    assert.match(query.sql, /FETCH FIRST 1 ROW ONLY/);
+    assert.deepEqual(query.parameters, {d0: 'Ready', m0: 'Ready'});
+    assert.equal(tenantScoped(gen.model, 'Customers'), false);
+    assert.equal(tenantScoped(gen.model, 'Orders'), true);
+    assert.equal(tenantScoped(gen.model, 'IdentityAccessManagement'), true);
+    delete gen.model.slices[0].readmodels[0].eligibility;
+    assert.throws(() => tenantAccessQuery(gen.model), /default eligible when/);
+});
+
+test('tenant availability never guesses unrelated owners or treats field references as literals', () => {
+    const gen = generator({tenancy: tenancy()});
+    const directory = gen.model.slices[0].readmodels[0];
+    const condition = directory.eligibility[0].conditions[0];
+    condition.left = 'Other.status';
+    assert.throws(() => tenantAccessQuery(gen.model), /not materialized/);
+    condition.left = 'Accounts.status';
+    condition.right = 'Accounts.status';
+    condition.rightReference = 'Accounts.status';
+    assert.match(tenantAccessQuery(gen.model).sql, /d\."status" = d\."status"/);
+    condition.rightReference = 'Other.status';
+    assert.throws(() => tenantAccessQuery(gen.model), /not materialized/);
 });
 
 test('provider names do not enable tenant bootstrap without an explicit exported contract', () => {

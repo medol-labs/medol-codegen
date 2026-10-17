@@ -68,6 +68,7 @@ const {
     kebab,
     safeDatabaseName,
     safeDatabaseIdentifier,
+    readModelTableName,
     safeIdentifier,
     httpRoute,
     constant,
@@ -84,6 +85,7 @@ const {
 const {readModelProcessingGroup} = require('./axon-processing');
 const {contextPackage} = require('../../common/util/value-types');
 const {_commandTitle, _eventTitle, _readmodelTitle, _sliceTitle} = require('../../common/util/naming');
+const {tenantScoped} = require('./tenant-support');
 
 function deploymentName(generator) {
     return kebab(generator.currentDeployment?.name ?? generator.model.deployment ?? generator.modulePrefix ?? 'application');
@@ -405,11 +407,22 @@ const readModelWriterMethods = {
 
     _writeReadModel(packageName, context, slicePackage, slice, readmodel) {
         const name = _readmodelTitle(readmodel.title);
-        const tableName = safeDatabaseIdentifier(readmodel.tableName ?? readmodel.title);
+        const tableName = readModelTableName(this.model, slice.context ?? context, readmodel);
         const imports = readModelStorageImports(readmodel.fields, this.model.rootPackage);
         const entityImports = jpaEntityImports(readmodel.fields, this.model.rootPackage);
         const hasJsonJpaFields = (readmodel.fields ?? []).some(isJsonJpaField);
         const metadataFields = readModelMetadataFields(readmodel);
+        const scoped = tenantScoped(this.model, slice.context);
+        const tenantField = metadataFields.find((field) => field.key === 'TENANT_ID');
+        const tenantIndexes = scoped ? [tenantField.name] : [];
+        const membershipProvider = this.model.tenancy?.memberships;
+        if (membershipProvider && membershipProvider.context === slice.context && membershipProvider.readModel === readmodel.name) {
+            tenantIndexes.push(`${membershipProvider.mappings.user},${membershipProvider.mappings.tenant}`);
+        }
+        const indexAnnotation = tenantIndexes.length ? `, indexes = [${tenantIndexes.map((fields, index) => `Index(name = "${safeDatabaseIdentifier(`${tableName}_tenant_${index}_idx`)}", columnList = "${fields.split(',').map(safeDatabaseName).join(',')}")`).join(', ')}]` : '';
+        if (scoped && (readmodel.sync || this._isSyncReadModelSource?.(slice, readmodel))) {
+            throw new Error('Tenant-scoped readmodel sync requires a tenant-partitioned checkpoint/outbox adapter; default unpartitioned sync is not allowed.');
+        }
         const metadataImports = metadataFields.some((field) => field.type.startsWith('LocalDateTime'))
             ? 'import java.time.LocalDateTime'
             : '';
@@ -426,7 +439,7 @@ const readModelWriterMethods = {
                 const columnAnnotation = jpaEntityColumnAnnotation(field);
                 return `${annotation}${enumAnnotation}${columnAnnotation}    var ${field.name}: ${jpaEntityFieldType(field)} = ${jpaEntityFieldDefault(field)}`;
             }),
-            ...metadataFields.map((field) => `    var ${field.name}: ${field.type} = null`)
+            ...metadataFields.map((field) => `${scoped && field.key === 'TENANT_ID' ? '    @Id\n    @Column(nullable = false)\n' : ''}    var ${field.name}: ${field.type} = null`)
         ].join('\n');
         const keyName = `${name}Key`;
         const keyDeclaration = compositeId
@@ -440,7 +453,9 @@ const readModelWriterMethods = {
     override fun assignMetadata(metadata: ${this.model.rootPackage}.shared.application.metadata.MetadataSnapshot, updateTimestamp: Boolean) {
 ${metadataFields.map((field) => `        ${field.sourceName === 'projectionUpdatedAt' ? 'if (updateTimestamp) ' : ''}this.${field.name} = metadata.${field.sourceName}`).join('\n')}
     }`;
-        const idClassAnnotation = compositeId ? `@IdClass(${keyName}::class)\n` : '';
+        const storageKeyName = scoped ? `${name}TenantKey` : keyName;
+        const storageKeyDeclaration = scoped ? `data class ${storageKeyName}(\n${[...idFields.map((field) => `    var ${field.name}: ${readModelStorageType(field, true)} = null`), `    var ${tenantField.name}: String? = null`].join(',\n')}\n) : java.io.Serializable\n\n` : '';
+        const idClassAnnotation = compositeId || scoped ? `@IdClass(${storageKeyName}::class)\n` : '';
         const resultFields = [
             ...readmodel.fields.map((field) => `    val ${field.name}: ${readModelStorageType(field, true)}`),
             ...metadataFields.map((field) => `    val ${field.name}: ${field.type} = null`)
@@ -515,10 +530,11 @@ import jakarta.persistence.Enumerated
 import jakarta.persistence.Id
 import jakarta.persistence.IdClass
 import jakarta.persistence.Table
+${tenantIndexes.length ? 'import jakarta.persistence.Index\n' : ''}
 ${metadataFields.length > 0 ? `import ${this.model.rootPackage}.shared.application.metadata.MetadataProjection\n` : ''}${compositeId ? `import ${packageName}.${keyName}\n` : ''}${allEntityImports}
 
-${idClassAnnotation}@Entity
-@Table(name = "${tableName}")
+${storageKeyDeclaration}${idClassAnnotation}@Entity
+@Table(name = "${tableName}"${indexAnnotation})
 class ${name}Entity${metadataFields.length > 0 ? ' : MetadataProjection' : ''} {
 ${entityFields}
 ${assignMetadata}
@@ -901,8 +917,8 @@ class DataExportService(
         fetchPage: (Pageable) -> Page<T>
     ): DataExportExecutionResult {
         val rendered = renderCsv(columns, firstPage, fetchPage, requestedLocale)
-        val directory = Path.of(properties.storagePath).createDirectories()
-        val path = directory.resolve(fileName).normalize()
+        val directory = ${this.model.tenancy ? `${this.model.rootPackage}.shared.application.tenancy.TenantFiles.directory(properties.storagePath)` : 'Path.of(properties.storagePath)'}.createDirectories()
+        val path = directory.resolve(${this.model.tenancy ? 'Path.of(fileName).fileName' : 'fileName'}).normalize()
         Files.write(path, rendered.content)
         return DataExportExecutionResult(fileName, path.toString(), rendered.rowCount)
     }
@@ -1044,7 +1060,7 @@ class DataExportService(
         requestedLocale: String?,
         snapshotUpperBound: Instant
     ): String {
-        val value = listOf(resourceName, criteriaJson, sortJson, columnsJson, requestedLocale.orEmpty(), snapshotUpperBound.toString()).joinToString("\\u001F")
+        val value = listOf(${this.model.tenancy ? `${this.model.rootPackage}.shared.application.tenancy.TenantScope.requireTenant(), ` : ''}resourceName, criteriaJson, sortJson, columnsJson, requestedLocale.orEmpty(), snapshotUpperBound.toString()).joinToString("\\u001F")
         val digest = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(StandardCharsets.UTF_8))
         return digest.joinToString("") { "%02x".format(it) }
     }
@@ -1079,7 +1095,7 @@ import java.nio.file.Path
 @RestController("dataExportJobDownloadResource")
 @RequestMapping("/data-export/jobs")
 class DataExportJobResource(
-    private val dataExportService: DataExportService
+    private val dataExportService: DataExportService${this.model.tenancy ? ',\n    private val properties: DataExportProperties' : ''}
 ) {
     @PreAuthorize("isAuthenticated()")
     @GetMapping("/download")
@@ -1087,7 +1103,7 @@ class DataExportJobResource(
         @RequestParam filePath: String,
         @RequestParam fileName: String
     ): ResponseEntity<Any> {
-        val path = Path.of(filePath).normalize()
+        val path = ${this.model.tenancy ? `${this.model.rootPackage}.shared.application.tenancy.TenantFiles.owned(filePath, properties.storagePath)` : 'Path.of(filePath).normalize()'}
         if (!Files.exists(path)) return ResponseEntity.notFound().build()
         return dataExportService.csvResponse(fileName, Files.readAllBytes(path))
     }
@@ -1155,7 +1171,7 @@ class AxonDataExportJobRequestPort(
 class AxonDataExportJobLifecyclePort(
     private val commandGateway: CommandGateway
 ) : DataExportJobLifecyclePort {
-    private val metadata: Metadata = Metadata.from(mapOf(MetadataKeys.DEPLOYMENT_NAME to AxonDataExportJobRequestPort.DEPLOYMENT_NAME))
+    private val metadata: Metadata${this.model.tenancy ? '\n        get()' : ''} = Metadata.from(mapOf(MetadataKeys.DEPLOYMENT_NAME to AxonDataExportJobRequestPort.DEPLOYMENT_NAME${this.model.tenancy ? `, MetadataKeys.TENANT_ID to ${this.model.rootPackage}.shared.application.tenancy.TenantScope.requireTenant(), MetadataKeys.USER_ID to ${this.model.rootPackage}.shared.application.tenancy.TenantScope.requireIdentity().userId` : ''}))
 
     override fun markProcessing(dataExportJobId: UUID) {
         commandGateway.send(MarkDataExportProcessingCommand(dataExportJobId, DataExportJobStatus.PROCESSING), metadata).resultMessage.toCompletableFuture().join()
@@ -1204,7 +1220,7 @@ import java.time.ZoneOffset
 @Component
 class ${processorClass}(
     private val registry: DataExportResourceExecutorRegistry,
-    private val lifecyclePort: DataExportJobLifecyclePort
+    private val lifecyclePort: DataExportJobLifecyclePort${this.model.tenancy ? `,\n    private val tenantAccess: ${this.model.rootPackage}.shared.application.tenancy.SameSchemaTenantAccess` : ''}
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -1213,6 +1229,9 @@ class ${processorClass}(
         if (message.metadata()[MetadataKeys.DEPLOYMENT_NAME]?.toString() != AxonDataExportJobRequestPort.DEPLOYMENT_NAME) {
             return
         }
+${this.model.tenancy ? `        ${this.model.rootPackage}.shared.application.tenancy.TenantScope.withIdentity(
+            tenantAccess.verify(requireNotNull(message.metadata()["tenantId"]), requireNotNull(message.metadata()["userId"]))
+        ) {\n` : ''}
         val task = DataExportExecutionTask(
             dataExportJobId = event.dataExportJobId,
             resourceName = event.resourceName,
@@ -1232,6 +1251,7 @@ class ${processorClass}(
             log.warn("Data export job {} failed", event.dataExportJobId, ex)
             lifecyclePort.fail(event.dataExportJobId, ex.message ?: "Data export failed.")
         }
+${this.model.tenancy ? '        }' : ''}
     }
 }
 `);
@@ -2249,6 +2269,8 @@ ${assignments}
     },
 
     _writeReadModelJpaRepository(readModelPackageName, context, slicePackage, slice, readmodel, name, idFields, hasJsonJpaFields = false) {
+        const scoped = tenantScoped(this.model, slice.context);
+        const tenantField = readModelMetadataFields(readmodel).find((field) => field.key === 'TENANT_ID').name;
         const entityName = `${name}Entity`;
         const springDataRepositoryName = `SpringData${name}Repository`;
         const repositoryName = `${name}Repository`;
@@ -2270,7 +2292,7 @@ ${assignments}
         const projectionLookupMethods = idFields.length > 1
             ? idFields.map((field) =>
                 `    override fun findProjectionsBy${pascal(field.name)}(${field.name}: ${readModelStorageType(field, false)}): List<${name}Projection> =
-        jpaRepository.findAllBy${pascal(field.name)}(${field.name}).map { it.toProjection() }`
+        ${scoped ? `jpaRepository.findAll(Specification<${entityName}> { root, _, builder -> builder.equal(root.get<${readModelStorageType(field, false)}>("${field.name}"), ${field.name}) }.and(tenantSpecification()))` : `jpaRepository.findAllBy${pascal(field.name)}(${field.name})`}.map { it.toProjection() }`
             ).join('\n\n')
             : '';
         const packageName = readModelPersistencePackage(this.model.rootPackage, context, name);
@@ -2330,7 +2352,7 @@ import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor
 ${imports}
 ${idFields.length > 1 ? `import ${readModelPackageName}.${name}Key\n` : ''}
-interface ${springDataRepositoryName} : JpaRepository<${entityName}, ${idType}>, JpaSpecificationExecutor<${entityName}> {
+interface ${springDataRepositoryName} : JpaRepository<${entityName}, ${scoped ? `${name}TenantKey` : idType}>, JpaSpecificationExecutor<${entityName}> {
 ${partialLookupMethods}
 }
 `);
@@ -2361,26 +2383,34 @@ ${findAllImplementation}
 ${criteriaImplementation}
 
     override fun findById(id: ${idType}): ${name}? =
-        jpaRepository.findById(id).map { it.toProjection().toReadModel() }.orElse(null)
+        ${scoped ? 'jpaRepository.findOne(idSpecification(id).and(tenantSpecification()))' : 'jpaRepository.findById(id)'}.map { it.toProjection().toReadModel() }.orElse(null)
 
     override fun findByIdWithAccessPolicy(id: ${idType}): ${name}? =
         jpaRepository.findOne(idSpecification(id).and(accessSpecification())).map { it.toProjection().toReadModel() }.orElse(null)
 
     override fun findProjectionById(id: ${idType}): ${name}Projection? =
-        jpaRepository.findById(id).map { it.toProjection() }.orElse(null)
+        ${scoped ? 'jpaRepository.findOne(idSpecification(id).and(tenantSpecification()))' : 'jpaRepository.findById(id)'}.map { it.toProjection() }.orElse(null)
 
 ${projectionLookupMethods ? `${projectionLookupMethods}\n\n` : ''}    override fun save(projection: ${name}Projection) {
+${scoped ? `        val tenant = ${this.model.rootPackage}.shared.application.tenancy.TenantScope.requireTenant()
+        if (projection.${tenantField} != null && projection.${tenantField} != tenant) throw org.springframework.security.access.AccessDeniedException("Cross-tenant projection write is forbidden.")
+        projection.${tenantField} = tenant\n` : ''}\
         jpaRepository.save(projection.toEntity())
     }${filterSpecification}
 
 ${idSpecification}
 
-    private fun accessSpecification(): Specification<${entityName}> =
-        accessPolicyFilter.specification(
+${scoped ? `    private fun tenantSpecification(): Specification<${entityName}> {
+        val tenant = ${this.model.rootPackage}.shared.application.tenancy.TenantScope.requireTenant()
+        return Specification { root, _, builder -> builder.equal(root.get<String>("${tenantField}"), tenant) }
+    }
+
+` : ''}    private fun accessSpecification(): Specification<${entityName}> =
+        accessPolicyFilter.specification${scoped ? `<${entityName}>` : ''}(
             contextName = "${escapeKotlin(contextName)}",
             readModelName = "${escapeKotlin(readModelName)}",
             policy = ${accessPolicyLiteral}
-        )
+        )${scoped ? '.and(tenantSpecification())' : ''}
 
     private fun ${entityName}.toProjection(): ${name}Projection =
         ${name}Projection().also {
@@ -2823,6 +2853,7 @@ class ${resourceName}(
     },
 
     _writeReadModelProjector(packageName, context, slicePackage, slice, readmodel, name, idFields) {
+        const scoped = tenantScoped(this.model, slice.context);
         if (readmodel.name === 'SystemNotificationSummary') {
             this._writeSystemNotificationSummaryProjector(packageName, context, slicePackage, readmodel, name);
             return;
@@ -2837,6 +2868,11 @@ class ${resourceName}(
         if (events.length === 0) {
             return;
         }
+
+        if (scoped && events.some((event) => {
+            const owner = this.model.slices.find((candidate) => candidate.events?.some((item) => item.id === event.id));
+            return !tenantScoped(this.model, owner?.context);
+        })) throw new Error('A tenant-scoped projection cannot consume an unpartitioned control-plane event. Model a tenant-scoped delivery explicitly.');
 
         const repositoryName = `${name}Repository`;
         const keyName = `${name}Key`;
@@ -2970,7 +3006,9 @@ ${appendOutbox(readModelKey, '            ')}
         event: ${_eventTitle(event.title)},
         message: EventMessage
     ) {
-${scopedDataExchangeReadModel ? '        if (!accepts(message)) return\n' : ''}        updater.update(event, message)
+${scopedDataExchangeReadModel ? '        if (!accepts(message)) return\n' : ''}${scoped ? `        ${this.model.rootPackage}.shared.application.tenancy.TenantScope.withIdentity(
+            ${this.model.rootPackage}.shared.application.tenancy.TenantIdentity(event.medolTenantScope, message.metadata()["userId"] ?: "event-projector")
+        ) { updater.update(event, message) }` : '        updater.update(event, message)'}
     }`).join('\n\n');
 
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${name}Projector.kt`), `package ${packageName}
@@ -3027,6 +3065,7 @@ ${scopedDataExchangeReadModel ? `    private fun accepts(message: EventMessage):
     },
 
     _writeSystemNotificationSummaryProjector(packageName, context, slicePackage, readmodel, name) {
+        const scoped = tenantScoped(this.model, (this.model.contexts ?? []).find((item) => contextPackage(item.name) === context)?.name ?? context);
         const eventRefsByName = new Map(this.model.slices
             .flatMap((candidateSlice) => (candidateSlice.events ?? []).map((event) => [event.name, {slice: candidateSlice, event}])));
         const published = eventRefsByName.get('SystemNotificationPublished');
@@ -3140,7 +3179,9 @@ class ${name}Projector(
         event: ${_eventTitle(published.event.title)},
         message: EventMessage
     ) {
-        updater.update(event, message)
+${scoped ? `        ${this.model.rootPackage}.shared.application.tenancy.TenantScope.withIdentity(
+            ${this.model.rootPackage}.shared.application.tenancy.TenantIdentity(event.medolTenantScope, message.metadata()["userId"] ?: "event-projector")
+        ) { updater.update(event, message) }` : '        updater.update(event, message)'}
     }
 
     @EventHandler
@@ -3148,7 +3189,9 @@ class ${name}Projector(
         event: ${_eventTitle(read.event.title)},
         message: EventMessage
     ) {
-        updater.update(event, message)
+${scoped ? `        ${this.model.rootPackage}.shared.application.tenancy.TenantScope.withIdentity(
+            ${this.model.rootPackage}.shared.application.tenancy.TenantIdentity(event.medolTenantScope, message.metadata()["userId"] ?: "event-projector")
+        ) { updater.update(event, message) }` : '        updater.update(event, message)'}
     }
 
     @EventHandler
@@ -3156,7 +3199,9 @@ class ${name}Projector(
         event: ${_eventTitle(allRead.event.title)},
         message: EventMessage
     ) {
-        updater.update(event, message)
+${scoped ? `        ${this.model.rootPackage}.shared.application.tenancy.TenantScope.withIdentity(
+            ${this.model.rootPackage}.shared.application.tenancy.TenantIdentity(event.medolTenantScope, message.metadata()["userId"] ?: "event-projector")
+        ) { updater.update(event, message) }` : '        updater.update(event, message)'}
     }
 }
 `);

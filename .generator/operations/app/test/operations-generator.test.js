@@ -16,6 +16,7 @@ const { generateOperationsFiles } = require('../operations-generator');
 const { renderApisixStandaloneConfig } = require('../renderers/apisix-renderer');
 const { renderDockerCompose } = require('../renderers/docker-compose-renderer');
 const { k3sFiles, kubernetesFiles } = require('../renderers/kubernetes-renderer');
+const {tenantDatabaseName} = require('../../../common/core/tenant-storage');
 
 const sampleModel = {
     domain: 'LearningPlatform',
@@ -36,6 +37,18 @@ const sampleModel = {
         title: 'Dataset Context'
     }]
 };
+
+test('tenant-enabled deployments share database and schema while ordinary deployments remain separate', () => {
+    const model = buildOperationsModel({...sampleModel, tenancy: {enabled: true}});
+    const backends = model.applications.filter((application) => application.kind === 'backend');
+    const urls = backends.map((application) => application.environmentVariables.find((item) => item.name === 'DB_URL').value);
+    assert.equal(new Set(urls).size, 1);
+    assert.equal(urls[0], `jdbc:postgresql://postgres:5432/${tenantDatabaseName({...sampleModel, tenancy: {enabled: true}})}`);
+    assert(backends.every((application) => application.environmentVariables.some((item) => item.name === 'DB_SCHEMA')));
+    const ordinary = buildOperationsModel(sampleModel).applications.filter((application) => application.kind === 'backend');
+    assert.equal(new Set(ordinary.map((application) => application.environmentVariables.find((item) => item.name === 'DB_URL').value)).size, 2);
+    assert(ordinary.every((application) => !application.environmentVariables.some((item) => item.name === 'DB_SCHEMA')));
+});
 
 test('builds operations model applications, infrastructure, gateway, and environment defaults', () => {
     const model = buildOperationsModel(sampleModel);

@@ -8,6 +8,7 @@ const {configureValueTypes} = require('../../common/util/generator');
 const {pascal, kebab, safeDatabaseName, safeIdentifier, filterModelByDeployment} = require('./model-helpers');
 const {manualInfrastructurePortPathForCommand} = require('./infrastructure-port-writer');
 const {writeMetadataSupport} = require('./metadata-support');
+const {writeTenantRuntimeContract, writeTenantBootstrap} = require('./tenant-support');
 const {actorSecurityModel, iamSecurityContract} = require('./security-model');
 const {
     AUDIT_TRAIL_PROCESSING_GROUP,
@@ -176,6 +177,7 @@ const applicationWriterMethods = {
             applicationClass
         });
         this._writeEventProcessorConfiguration();
+        writeTenantBootstrap(this);
         this.fs.copyTpl(this.templatePath('README.md.tpl'), this._destPath('README.md'), {
             appName,
             domain: this.model.domain,
@@ -324,6 +326,7 @@ ${beanMethods}
             rootPackage: this.model.rootPackage
         });
         this._writeMetadataSupport();
+        writeTenantRuntimeContract(this);
         this.fs.copyTpl(this.templatePath('AxonFlowLoggingConfiguration.kt.tpl'), this._sharedKernelKotlinPath('shared/application/axon/AxonFlowLoggingConfiguration.kt'), {
             rootPackage: this.model.rootPackage
         });

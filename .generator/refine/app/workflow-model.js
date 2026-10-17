@@ -879,7 +879,8 @@ function stateControlForTransition(transition, readModel) {
 
 function eligibilityStateControlForCommand(command, readModel, slice) {
     const eligibility = eligibilityForCommand(eligibilityForReadModel(readModel), command, slice);
-    if (!eligibility || String(eligibility.operator ?? 'AND').toUpperCase() !== 'AND') {
+    // Default eligibility governs selection; row actions require an explicit command profile.
+    if (!eligibility?.profile || String(eligibility.operator ?? 'AND').toUpperCase() !== 'AND') {
         return null;
     }
 

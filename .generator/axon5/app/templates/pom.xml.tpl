@@ -17,6 +17,7 @@
         <axon.version>5.1.1</axon.version>
         <jhipster-framework.version>8.9.0</jhipster-framework.version>
         <spring-cloud.version>2025.0.0</spring-cloud.version>
+        <fabric8-kubernetes-client.version>7.8.0</fabric8-kubernetes-client.version>
         <start-class><%= rootPackage %>.ApplicationKt</start-class>
         <jib-maven-plugin.version>3.4.5</jib-maven-plugin.version>
         <jib.container.platform.os>linux</jib.container.platform.os>
@@ -80,6 +81,11 @@
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
             <version>2.8.9</version>
+        </dependency>
+        <dependency>
+            <groupId>io.fabric8</groupId>
+            <artifactId>kubernetes-client</artifactId>
+            <version>${fabric8-kubernetes-client.version}</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

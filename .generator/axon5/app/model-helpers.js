@@ -760,7 +760,15 @@ const METADATA_FIELD_DEFINITIONS = [
 
 function readModelMetadataFields(readmodel) {
     const existingNames = new Set((readmodel.fields ?? []).map((field) => field.name));
-    return METADATA_FIELD_DEFINITIONS.filter((field) => !existingNames.has(field.name));
+    return METADATA_FIELD_DEFINITIONS.map((field) => {
+        let name = field.name;
+        if (existingNames.has(name)) name = `metadata${pascal(field.name)}`;
+        const baseName = name;
+        let suffix = 2;
+        while (existingNames.has(name)) name = `${baseName}${suffix++}`;
+        existingNames.add(name);
+        return {...field, name, sourceName: field.name};
+    });
 }
 
 function readModelMetadataParameters(metadataFields, indent = '        ') {

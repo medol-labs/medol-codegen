@@ -5,6 +5,21 @@ const {buildDomainModel} = require('../domain-model');
 const {buildFrontendModel} = require('../model-builder');
 const {buildWorkflowModel, commandWorkflowFields} = require('../workflow-model');
 
+test('default selector eligibility does not restrict state-preserving management actions', () => {
+    const command = {id: 'rename', name: 'RenameWorkspace', title: 'Rename Workspace', fields: []};
+    const catalog = {
+        id: 'workspaces', title: 'Workspace Catalog', listElement: true,
+        fields: [{name: 'workspaceId', type: 'UUID', idAttribute: true}, {name: 'state', type: 'String'}],
+        eligibility: [{operator: 'AND', conditions: [{left: 'Workspace.state', operator: '==', right: 'Active'}]}]
+    };
+    const workflow = buildWorkflowModel([
+        {id: 'rename-slice', title: 'Rename Workspace', context: 'Workspaces', commands: [command], readmodels: [catalog]}
+    ], [], [], undefined, [], [], () => ({dataProviderName: 'default'}));
+    assert.deepEqual(workflow.stateControlForCommand(command, catalog).allowedStates, []);
+    catalog.eligibility = [{profile: 'RenameWorkspace', operator: 'AND', conditions: [{left: 'Workspace.state', operator: '==', right: 'Active'}]}];
+    assert.deepEqual(workflow.stateControlForCommand(command, catalog).allowedStates, ['Active']);
+});
+
 test('links producer create commands to catalog read models across aggregate routes', () => {
     const model = {
         domain: 'Demo',

@@ -426,7 +426,7 @@ const readModelWriterMethods = {
                 const columnAnnotation = jpaEntityColumnAnnotation(field);
                 return `${annotation}${enumAnnotation}${columnAnnotation}    var ${field.name}: ${jpaEntityFieldType(field)} = ${jpaEntityFieldDefault(field)}`;
             }),
-            ...metadataFields.map((field) => `    override var ${field.name}: ${field.type} = null`)
+            ...metadataFields.map((field) => `    var ${field.name}: ${field.type} = null`)
         ].join('\n');
         const keyName = `${name}Key`;
         const keyDeclaration = compositeId
@@ -434,8 +434,12 @@ const readModelWriterMethods = {
             : '';
         const projectionFields = [
             ...readmodel.fields.map((field) => `    var ${field.name}: ${readModelStorageFieldType(field)} = ${readModelStorageFieldDefault(field)}`),
-            ...metadataFields.map((field) => `    override var ${field.name}: ${field.type} = null`)
+            ...metadataFields.map((field) => `    var ${field.name}: ${field.type} = null`)
         ].join('\n');
+        const assignMetadata = `
+    override fun assignMetadata(metadata: ${this.model.rootPackage}.shared.application.metadata.MetadataSnapshot, updateTimestamp: Boolean) {
+${metadataFields.map((field) => `        ${field.sourceName === 'projectionUpdatedAt' ? 'if (updateTimestamp) ' : ''}this.${field.name} = metadata.${field.sourceName}`).join('\n')}
+    }`;
         const idClassAnnotation = compositeId ? `@IdClass(${keyName}::class)\n` : '';
         const resultFields = [
             ...readmodel.fields.map((field) => `    val ${field.name}: ${readModelStorageType(field, true)}`),
@@ -483,6 +487,7 @@ ${criteriaDeclaration}
 
 class ${name}Projection${metadataFields.length > 0 ? ' : MetadataProjection' : ''} {
 ${projectionFields}
+${assignMetadata}
 }
 
 fun ${name}Projection.toReadModel(): ${name} =
@@ -516,6 +521,7 @@ ${idClassAnnotation}@Entity
 @Table(name = "${tableName}")
 class ${name}Entity${metadataFields.length > 0 ? ' : MetadataProjection' : ''} {
 ${entityFields}
+${assignMetadata}
 }
 `);
         if (id) {

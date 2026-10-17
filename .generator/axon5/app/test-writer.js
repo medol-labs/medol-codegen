@@ -72,7 +72,7 @@ function asArray(value) {
 
 function enrichFields(fields, specElement) {
     const examples = specFields(specElement);
-    return (fields ?? []).map((field) => ({...field, example: examples.get(field.name)?.example}));
+    return (fields ?? []).map((field) => ({...field, example: examples.get(field.name)?.example ?? field.example}));
 }
 
 function commandForSpec(model, specElement) {
@@ -133,7 +133,9 @@ function testValue(field) {
         return `${valueType.name}.${constant(valueType.values[0])}`;
     }
     if (valueType?.kind === 'scalar') {
-        return `${valueType.name}(${fallbackValue({...field, type: valueType.baseType, valueType: undefined})})`;
+        const baseField = {...field, type: valueType.baseType, valueType: undefined};
+        const example = literalFromExample(baseField, field.example);
+        return `${valueType.name}(${example ?? fallbackValue(baseField)})`;
     }
     if (valueType?.kind === 'object') {
         const args = (valueType.fields ?? [])

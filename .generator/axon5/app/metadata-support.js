@@ -106,13 +106,7 @@ import java.time.LocalDateTime
 import java.time.ZoneOffset
 
 interface MetadataProjection {
-    var projectionUpdatedAt: LocalDateTime?
-    var userId: String?
-    var sessionId: String?
-    var correlationId: String?
-    var causationId: String?
-    var traceId: String?
-    var tenantId: String?
+    fun assignMetadata(metadata: MetadataSnapshot, updateTimestamp: Boolean = true)
 }
 
 data class MetadataSnapshot(
@@ -145,13 +139,7 @@ object ProjectionMetadata {
     }
 
     fun assign(target: MetadataProjection, metadata: MetadataSnapshot) {
-        target.projectionUpdatedAt = metadata.projectionUpdatedAt
-        target.userId = metadata.userId
-        target.sessionId = metadata.sessionId
-        target.correlationId = metadata.correlationId
-        target.causationId = metadata.causationId
-        target.traceId = metadata.traceId
-        target.tenantId = metadata.tenantId
+        target.assignMetadata(metadata)
     }
 
     fun assign(
@@ -163,12 +151,15 @@ object ProjectionMetadata {
         traceId: String?,
         tenantId: String?
     ) {
-        target.userId = MetadataFactory.value(userId)
-        target.sessionId = MetadataFactory.value(sessionId)
-        target.correlationId = MetadataFactory.value(correlationId)
-        target.causationId = MetadataFactory.value(causationId)
-        target.traceId = MetadataFactory.value(traceId)
-        target.tenantId = MetadataFactory.value(tenantId)
+        target.assignMetadata(MetadataSnapshot(
+            projectionUpdatedAt = null,
+            userId = MetadataFactory.value(userId),
+            sessionId = MetadataFactory.value(sessionId),
+            correlationId = MetadataFactory.value(correlationId),
+            causationId = MetadataFactory.value(causationId),
+            traceId = MetadataFactory.value(traceId),
+            tenantId = MetadataFactory.value(tenantId)
+        ), updateTimestamp = false)
     }
 }
 `);

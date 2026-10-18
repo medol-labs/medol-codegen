@@ -66,6 +66,81 @@ class SameSchemaTenantRuntimeTest {
     }
 
     @Test
+    fun storageBindingsAreValidatedAndReservedControlIdentifierCannotSelectControlStorage() {
+        assertThrows(IllegalArgumentException::class.java) {
+            TenantStorageProperties(TenantStorageMode.SEPARATE_SCHEMA, schemas = mapOf("a" to "public")).validate()
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            TenantStorageProperties(TenantStorageMode.SEPARATE_SCHEMA, schemas = mapOf("a" to "tenant_a", "b" to "tenant_a")).validate()
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            TenantStorageProperties(TenantStorageMode.SEPARATE_SCHEMA, schemas = mapOf("a" to "unsafe;schema")).validate()
+        }
+        val properties = TenantStorageProperties(TenantStorageMode.SEPARATE_SCHEMA, schemas = mapOf("__medol_control__" to "tenant_a"))
+        val resolver = ConfiguredTenantStorageResolver(properties)
+        assertEquals("tenant_a", resolver.resolve("__medol_control__").schema)
+        assertThrows(AccessDeniedException::class.java) { resolver.resolve("unknown") }
+        TenantScope.withIdentity(TenantIdentity("__medol_control__", "user")) {
+            assertEquals("tenant:__medol_control__", TenantIdentifierResolver().resolveCurrentTenantIdentifier())
+        }
+    }
+
+    @Test
+    fun controlSchemaNamesAreQuotedEvenWhenTheyAreDatabaseKeywords() {
+        val strategy = TenantSchemaNamingStrategy(TenantStorageProperties(controlSchema = "user"))
+        val environment = org.mockito.Mockito.mock(org.hibernate.engine.jdbc.env.spi.JdbcEnvironment::class.java)
+        val schema = requireNotNull(strategy.toPhysicalSchemaName(org.hibernate.boot.model.naming.Identifier.toIdentifier("__medol_control__"), environment))
+        assertTrue(schema.isQuoted)
+        assertEquals("user", schema.text)
+        val source = DriverManagerDataSource("jdbc:h2:mem:quoted-control-" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE", "sa", "")
+        val sql = JdbcTemplate(source)
+        val quoted = schema.render(org.hibernate.dialect.H2Dialect())
+        sql.execute("CREATE SCHEMA $quoted")
+        sql.execute("CREATE TABLE $quoted.control_probe(id INTEGER PRIMARY KEY)")
+        assertEquals(0, sql.queryForObject("SELECT COUNT(*) FROM $quoted.control_probe", Int::class.java))
+    }
+
+    @Test
+    fun storageGuardRejectsUnmigratedSchemaBeforeCommandDispatch() {
+        val source = DriverManagerDataSource("jdbc:h2:mem:unmigrated-" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE", "sa", "")
+        JdbcTemplate(source).execute("CREATE SCHEMA tenant_a")
+        val properties = TenantStorageProperties(TenantStorageMode.SEPARATE_SCHEMA, schemas = mapOf("a" to "tenant_a"))
+        val provider = TenantConnectionProvider(source, properties, ConfiguredTenantStorageResolver(properties), setOf("required_business_table"))
+        val guard = TenantStorageGuard(properties, provider)
+        val command = object : TenantCommand {
+            override val medolTenantScoped = true
+            override var medolTenantScope: String? = null
+            override var medolTenantUser: String? = null
+        }
+        val message = GenericCommandMessage(MessageType("test-command"), command, mapOf("tenantId" to "a", "userId" to user.toString()))
+        val chain = object : MessageDispatchInterceptorChain<CommandMessage> {
+            override fun proceed(message: CommandMessage, context: ProcessingContext?): MessageStream<*> = error("Unmigrated tenant must not dispatch commands")
+        }
+        assertThrows(AccessDeniedException::class.java) { TenantDispatchInterceptor(access, guard).interceptOnDispatch(message, null, chain) }
+        assertNull(command.medolTenantScope)
+    }
+
+    @Test
+    fun directoryQueriesStayInControlSchemaEvenOnBusinessConnections() {
+        val source = DriverManagerDataSource("jdbc:h2:mem:control-query-" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE", "sa", "")
+        val sql = JdbcTemplate(source)
+        sql.execute("CREATE SCHEMA control")
+        sql.execute("CREATE SCHEMA business")
+        sql.execute("CREATE TABLE control.tenants(id VARCHAR(100), status VARCHAR(20))")
+        sql.execute("CREATE TABLE control.members(tenant VARCHAR(100), account VARCHAR(100), status VARCHAR(20))")
+        sql.update("INSERT INTO control.tenants VALUES ('a', 'Ready')")
+        sql.update("INSERT INTO control.members VALUES ('a', ?, 'Ready')", user.toString())
+        source.connection.use { connection ->
+            connection.schema = "business"
+            val pinnedContract = contract.copy(accessQuery = contract.accessQuery.replace("FROM tenants", "FROM \"__medol_control__\".tenants").replace("JOIN members", "JOIN \"__medol_control__\".members"))
+            val pinned = SameSchemaTenantAccess(NamedParameterJdbcTemplate(org.springframework.jdbc.datasource.SingleConnectionDataSource(connection, true)), pinnedContract, TenantStorageProperties(controlSchema = "control"))
+            assertEquals("a", pinned.verify("a", user.toString()).tenantId)
+            sql.update("DELETE FROM control.members")
+            assertThrows(AccessDeniedException::class.java) { pinned.verify("a", user.toString()) }
+        }
+    }
+
+    @Test
     fun uuidIdentitiesUseOneCanonicalPartitionWhileStringsRemainUnchanged() {
         jdbc.execute("CREATE TABLE uuid_tenants(id UUID PRIMARY KEY, status VARCHAR(20))")
         jdbc.execute("CREATE TABLE uuid_members(tenant UUID, account UUID, status VARCHAR(20))")

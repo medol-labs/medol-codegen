@@ -1,7 +1,8 @@
 const {escapeKotlin, readModelTableName, safeDatabaseName, readModelStorageType} = require('./model-helpers');
 const {contextPackage} = require('../../common/util/value-types');
+const {tenantSchema, migrationIdentity} = require('./tenant-schema');
 
-const runtimeFiles = ['TenantScope.kt', 'SameSchemaTenantAccess.kt', 'TenantDispatchInterceptor.kt', 'TenantWebConfiguration.kt', 'TenantRelay.kt', 'TenantBackgroundRunner.kt', 'TenantFiles.kt'];
+const runtimeFiles = ['TenantScope.kt', 'TenantAccess.kt', 'TenantStorage.kt', 'TenantStorageMigration.kt', 'TenantSchemaVerifier.kt', 'TenantPersistenceConfiguration.kt', 'TenantControlPersistence.kt', 'TenantEventStorage.kt', 'SameSchemaTenantAccess.kt', 'TenantDispatchInterceptor.kt', 'TenantWebConfiguration.kt', 'TenantRelay.kt', 'TenantBackgroundRunner.kt', 'TenantFiles.kt'];
 
 function tenantScoped(model, context) {
     const contract = tenantContract(model);
@@ -56,7 +57,7 @@ function tenantAccessQuery(model) {
             parameters[key] = condition.right;
             return `${fieldColumn} ${operator} :${key}`;
         });
-        return {readmodel, context: binding.context, column, conditions, table: `"${readModelTableName(model, binding.context, readmodel)}"`};
+        return {readmodel, context: binding.context, column, conditions, table: `"__medol_control__"."${readModelTableName(model, binding.context, readmodel)}"`};
     };
     const directory = provider(contract.directory, 'd');
     const members = provider(contract.memberships, 'm');
@@ -103,11 +104,14 @@ function tenantContract(model) {
 function writeTenantRuntimeContract(generator) {
     const contract = tenantContract(generator.model);
     const testPath = generator._sharedKernelKotlinPath('shared/application/tenancy/SameSchemaTenantRuntimeTest.kt').replace('/src/main/kotlin/', '/src/test/kotlin/');
+    const ormPath = generator._sharedKernelKotlinPath('META-INF/medol-tenant-control.orm.xml')
+        .replace(`/src/main/kotlin/${generator.model.rootPackage.replaceAll('.', '/')}/`, '/src/main/resources/');
     if (!contract) {
         for (const file of ['TenantIsolationRuntime.kt', ...runtimeFiles]) {
             generator.fs.delete(generator._sharedKernelKotlinPath(`shared/application/tenancy/${file}`));
         }
         generator.fs.delete(testPath);
+        generator.fs.delete(ormPath);
         return;
     }
     for (const file of runtimeFiles) {
@@ -115,6 +119,7 @@ function writeTenantRuntimeContract(generator) {
             generator._sharedKernelKotlinPath(`shared/application/tenancy/${file}`), {rootPackage: generator.model.rootPackage});
     }
     generator.fs.copyTpl(generator.templatePath('tenancy/SameSchemaTenantRuntimeTest.kt.tpl'), testPath, {rootPackage: generator.model.rootPackage});
+    generator.fs.copyTpl(generator.templatePath('tenancy/tenant-control.orm.xml'), ormPath, {});
     generator.fs.write(generator._sharedKernelKotlinPath('shared/application/tenancy/TenantIsolationRuntime.kt'), `package ${generator.model.rootPackage}.shared.application.tenancy
 
 data class TenantProviderContract(
@@ -133,7 +138,13 @@ data class TenantCapabilityContract(
     val directoryIdColumn: String = "",
     val accessParameters: Map<String, Any?> = emptyMap(),
     val uuidTenantId: Boolean = true,
-    val uuidUserId: Boolean = true
+    val uuidUserId: Boolean = true,
+    val tenantTables: Set<String> = emptySet(),
+    val tenantSchema: List<TenantTableDefinition> = emptyList(),
+    val tenantSchemaHash: String = "",
+    val deploymentId: String = "application",
+    val migrationLocation: String = "db/tenant-migration/application",
+    val migrationHistoryTable: String = "application_tenant_flyway_history"
 )
 
 /**
@@ -159,6 +170,10 @@ function writeTenantBootstrap(generator) {
     }
     const quote = (value) => `"${escapeKotlin(value)}"`;
     const query = tenantAccessQuery(generator.fullModel ?? generator.model);
+    const schema = tenantSchema(generator.model);
+    const migration = migrationIdentity(generator);
+    const tableFunctions = schema.tables.map((table, index) => `    private fun tenantTable${index}(): TenantTableDefinition =
+        TenantTableDefinition(${quote(table.name)}, listOf(${table.columns.map((column) => `TenantColumnDefinition(${quote(column.name)}, ${quote(column.type)})`).join(', ')}), listOf(${table.primaryKey.map(quote).join(', ')}), listOf(${table.indexes.map((item) => `listOf(${item.map(quote).join(', ')})`).join(', ')}))`).join('\n\n');
     const controlContexts = [...new Set(contract.managementContexts)];
     const provider = (item) => `TenantProviderContract(
             context = ${quote(item.context)},
@@ -174,6 +189,8 @@ import org.springframework.context.annotation.Configuration
 import ${generator.model.rootPackage}.shared.application.tenancy.TenantCapabilityContract
 import ${generator.model.rootPackage}.shared.application.tenancy.TenantIsolationRuntime
 import ${generator.model.rootPackage}.shared.application.tenancy.TenantProviderContract
+import ${generator.model.rootPackage}.shared.application.tenancy.TenantTableDefinition
+import ${generator.model.rootPackage}.shared.application.tenancy.TenantColumnDefinition
 
 @Configuration
 class TenantCapabilityConfiguration {
@@ -188,7 +205,13 @@ class TenantCapabilityConfiguration {
         directoryIdColumn = ${quote(query.directoryIdColumn)},
         accessParameters = mapOf(${Object.entries(query.parameters).map(([key, value]) => `${quote(key)} to ${typeof value === 'string' ? quote(value) : String(value)}`).join(', ')}),
         uuidTenantId = ${query.uuidTenantId},
-        uuidUserId = ${query.uuidUserId}
+        uuidUserId = ${query.uuidUserId},
+        tenantTables = setOf(${schema.tables.map((table) => quote(table.name)).join(', ')}),
+        tenantSchema = listOf(${schema.tables.map((_, index) => `tenantTable${index}()`).join(', ')}),
+        tenantSchemaHash = ${quote(schema.hash)},
+        deploymentId = ${quote(migration.deployment)},
+        migrationLocation = ${quote(migration.location)},
+        migrationHistoryTable = ${quote(migration.historyTable)}
     )
 
     @Bean
@@ -203,6 +226,8 @@ class TenantCapabilityConfiguration {
         }
         adapters.single().initialize(contract)
     }
+
+${tableFunctions}
 }
 `);
 }

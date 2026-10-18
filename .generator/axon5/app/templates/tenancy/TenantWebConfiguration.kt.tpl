@@ -21,11 +21,12 @@ class TenantWebConfiguration(private val interceptor: TenantRequestInterceptor) 
 
 @Component
 class TenantRequestInterceptor(
-    private val access: SameSchemaTenantAccess,
+    private val access: TenantAccess,
     private val users: CurrentUserProvider,
     private val contract: TenantCapabilityContract,
     private val relay: TenantRelay,
-    private val security: MedolSecurityProperties
+    private val security: MedolSecurityProperties,
+    private val storage: TenantStorageGuard = TenantStorageGuard()
 ) : HandlerInterceptor {
             override fun preHandle(request: HttpServletRequest, response: HttpServletResponse, handler: Any): Boolean {
                 request.removeAttribute(TenantScope.REQUEST_ATTRIBUTE)
@@ -46,6 +47,7 @@ class TenantRequestInterceptor(
                 val selectedTenant = requestedIdentity?.tenantId ?: request.getHeader("X-Tenant-Id")?.trim()
                     ?: throw AccessDeniedException("Select a tenant before accessing business resources.")
                 val identity = access.verify(selectedTenant, requestedIdentity?.userId ?: users.currentUser().id.toString())
+                storage.verify(identity)
                 request.setAttribute(TenantScope.REQUEST_ATTRIBUTE, identity)
                 return true
             }

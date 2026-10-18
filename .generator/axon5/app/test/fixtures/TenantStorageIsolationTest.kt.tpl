@@ -22,11 +22,19 @@ import org.axonframework.messaging.eventstreaming.Tag
 @DataJpaTest(properties = [
     "spring.flyway.enabled=false", "spring.docker.compose.enabled=false", "spring.jpa.hibernate.ddl-auto=create-drop"
 ])
+@org.springframework.context.annotation.Import(TenantStorageIsolationTest.NamingConfiguration::class)
 class TenantStorageIsolationTest @Autowired constructor(
     private val storage: SpringDataRecordCatalogReadModelRepository,
     private val entityManager: EntityManager
 ) {
-    private val repository = JpaRecordCatalogReadModelRepository(storage, PermitAllReadModelAccessPolicyFilter(), RecordCatalogReadModelQueryService())
+    @org.springframework.boot.test.context.TestConfiguration(proxyBeanMethods = false)
+    class NamingConfiguration {
+        @org.springframework.context.annotation.Bean
+        fun tenantNamingStrategy() = org.springframework.boot.autoconfigure.orm.jpa.HibernatePropertiesCustomizer {
+            it["hibernate.physical_naming_strategy"] = TenantSchemaNamingStrategy(TenantStorageProperties())
+        }
+    }
+    private val repository = JpaRecordCatalogReadModelRepository(storage, PermitAllReadModelAccessPolicyFilter(), RecordCatalogReadModelQueryService(), TenantPersistenceBoundary(TenantStorageProperties(), entityManager.entityManagerFactory))
     private val page = PageRequest.of(0, 20)
 
     private fun <T> tenant(id: String, block: () -> T): T = TenantScope.withIdentity(TenantIdentity(id, "test-user"), block)

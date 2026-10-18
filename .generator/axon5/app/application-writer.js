@@ -10,6 +10,7 @@ const {pascal, kebab, safeDatabaseName, safeDatabaseIdentifier, safeIdentifier, 
 const {manualInfrastructurePortPathForCommand} = require('./infrastructure-port-writer');
 const {writeMetadataSupport} = require('./metadata-support');
 const {tenantTestFixture, writeTenantRuntimeContract, writeTenantBootstrap} = require('./tenant-support');
+const {writeTenantMigrations} = require('./tenant-schema');
 const {actorSecurityModel, iamSecurityContract} = require('./security-model');
 const {
     AUDIT_TRAIL_PROCESSING_GROUP,
@@ -179,6 +180,7 @@ const applicationWriterMethods = {
         });
         this._writeEventProcessorConfiguration();
         writeTenantBootstrap(this);
+        writeTenantMigrations(this);
         this.fs.copyTpl(this.templatePath('README.md.tpl'), this._destPath('README.md'), {
             appName,
             domain: this.model.domain,
@@ -341,7 +343,8 @@ ${beanMethods}
         });
         this.fs.copyTpl(this.templatePath('AxonEventStorageConfig.kt.tpl'), this._sharedKernelKotlinPath('shared/infrastructure/configuration/AxonEventStorageConfig.kt'), {
             rootPackage: this.model.rootPackage,
-            hasInfra
+            hasInfra,
+            tenancyEnabled: Boolean(this.model.tenancy)
         });
         [
             'CurrentUser.kt',
@@ -377,6 +380,11 @@ ${beanMethods}
             {rootPackage: this.model.rootPackage}
         );
         this.fs.copy(this.templatePath('infra/src/main/proto'), this.destinationPath(`${UMA_DB_EVENT_STORAGE_MODULE}/src/main/proto`));
+        if (!this.model.tenancy) {
+            for (const [folder, file] of [['main', 'RoutingUmaDbEventStorageEngine.java'], ['test', 'RoutingUmaDbEventStorageEngineTest.java']]) {
+                this.fs.delete(this.destinationPath(`${UMA_DB_EVENT_STORAGE_MODULE}/src/${folder}/java/${this.model.rootPackage.split('.').join('/')}/infra/umadb/${file}`));
+            }
+        }
     },
 
     _shouldWriteIamIntoCurrentModule() {

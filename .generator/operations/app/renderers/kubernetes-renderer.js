@@ -14,6 +14,7 @@ const {
     renderApisixStandaloneConfig
 } = require('./apisix-renderer');
 const { renderPostgresInitSql } = require('./docker-compose-renderer');
+const {tenantStorageYaml, tenantStorageChecksum, tenantDeploymentNotes} = require('../tenant-deployment');
 
 function kubernetesFiles(model, options = {}) {
     const environmentName = options.environmentName ?? 'dev';
@@ -111,6 +112,7 @@ function applicationResources(model) {
             image: application.image,
             ports: [{ containerPort: application.servicePort }],
             ...(baseEnv.length ? { env: baseEnv } : {}),
+            ...(application.tenantStorage ? {volumeMounts: [{name: 'tenant-storage', mountPath: '/etc/medol/tenant-storage.yml', subPath: 'tenant-storage.yml', readOnly: true}]} : {}),
             ...(application.healthCheck ? probes(application.healthCheck, application.servicePort) : {})
         }];
         return [{
@@ -119,8 +121,15 @@ function applicationResources(model) {
             metadata: namedMetadata(application.name, application.kind),
             spec: {
                 replicas: application.replicas,
+                ...(application.tenantStorage ? {
+                    ...(application.tenantStorage.migration.enabled ? {strategy: {type: 'Recreate'}} : {}),
+                    progressDeadlineSeconds: Math.max(600, application.tenantStorage.startupTimeoutSeconds + 120)
+                } : {}),
                 selector: selector(application.name),
-                template: podTemplate(application, containers)
+                template: {
+                    ...podTemplate(application, containers, application.tenantStorage ? [{name: 'tenant-storage', configMap: {name: tenantStorageConfigMapName(model)}}] : []),
+                    ...(application.tenantStorage ? {metadata: {labels: {app: application.name}, annotations: {'medol.dev/tenant-storage-checksum': tenantStorageChecksum(application.tenantStorage)}}} : {})
+                }
             }
         },
         service(application.name, application.servicePort)
@@ -316,13 +325,14 @@ function imageWithTag(imageName, tag) {
 
 function postgresResources(component, model) {
     const volumeName = kubernetesName(component.volumeName);
+    const initName = component.additional ? kubernetesName(component.name + '-init') : 'postgres-init';
     return [
         {
             apiVersion: 'v1',
             kind: 'ConfigMap',
-            metadata: namedMetadata('postgres-init', 'infrastructure'),
+            metadata: namedMetadata(initName, 'infrastructure'),
             data: {
-                '01-create-databases.sql': renderPostgresInitSql(model)
+                '01-create-databases.sql': renderPostgresInitSql(model, component)
             }
         },
         {
@@ -344,12 +354,13 @@ function postgresResources(component, model) {
             metadata: namedMetadata(component.name, 'infrastructure'),
             spec: {
                 replicas: 1,
+                ...(component.additional ? {strategy: {type: 'Recreate'}} : {}),
                 selector: selector(component.name),
                 template: podTemplate(component, [{
                     name: component.name,
                     image: component.image,
                     ports: [{ containerPort: component.servicePort }],
-                    env: env([
+                    env: env(component.additional ? component.environmentVariables : [
                         { name: 'POSTGRES_USER', valueFromSecret: { name: 'postgres-secret', key: 'username' } },
                         { name: 'POSTGRES_PASSWORD', valueFromSecret: { name: 'postgres-secret', key: 'password' } },
                         { name: 'POSTGRES_DB', value: 'medol' }
@@ -360,7 +371,7 @@ function postgresResources(component, model) {
                     ]
                 }], [
                     { name: volumeName, persistentVolumeClaim: { claimName: volumeName } },
-                    { name: 'postgres-init', configMap: { name: 'postgres-init' } }
+                    { name: 'postgres-init', configMap: { name: initName } }
                 ])
             }
         },
@@ -390,6 +401,7 @@ function statefulInfrastructure(component, mountPath) {
             metadata: namedMetadata(component.name, 'infrastructure'),
             spec: {
                 replicas: 1,
+                ...(component.additional ? {strategy: {type: 'Recreate'}} : {}),
                 selector: selector(component.name),
                 template: podTemplate(component, [{
                     name: component.name,
@@ -459,7 +471,8 @@ function applicationBaseEnvironmentVariables(model, application) {
 }
 
 function environmentConfigMaps(model, options) {
-    return model.applications.map((application) => {
+    const storage = model.applications.find((application) => application.tenantStorage)?.tenantStorage;
+    return [...model.applications.map((application) => {
         const variables = applicationConfigVariables(model, application, options)
             .filter((variable) => variable.name && !variable.valueFromSecret && !isSecretVariable(variable.name))
             .map((variable) => [variable.name, kubernetesLiteralValue(variable.value)]);
@@ -469,7 +482,14 @@ function environmentConfigMaps(model, options) {
             metadata: namedMetadata(applicationConfigMapName(application, options.environmentName), 'application-config'),
             data: Object.fromEntries(variables.sort(([left], [right]) => left.localeCompare(right)))
         };
-    });
+    }), ...(storage ? [{
+        apiVersion: 'v1', kind: 'ConfigMap', metadata: namedMetadata(tenantStorageConfigMapName(model), 'tenant-storage'),
+        data: {'tenant-storage.yml': tenantStorageYaml(storage)}
+    }] : [])];
+}
+
+function tenantStorageConfigMapName(model) {
+    return kubernetesName(`${model.name}-${model.environment.name}-tenant-storage`);
 }
 
 function applicationConfigVariables(model, application, options) {
@@ -581,6 +601,7 @@ function applicationSecretName(application, environmentName) {
 
 function applicationSecretVariables(application) {
     const fromApplication = application.environmentVariables
+        .filter((variable) => !variable.valueFromSecret)
         .map((variable) => variable.name)
         .filter(isSecretVariable);
     const backendDefaults = application.kind === 'backend'
@@ -602,7 +623,7 @@ function hasApplicationContext(application, contextName) {
 
 function isSecretVariable(name) {
     if (/^VITE_/i.test(String(name ?? ''))) return false;
-    return /^DB_USERNAME$/i.test(String(name ?? ''))
+    return /^(DB_USERNAME|MEDOL_TENANCY_MIGRATION_USERNAME)$/i.test(String(name ?? ''))
         || /(^|_)(PASSWORD|SECRET|TOKEN|API_KEY|PRIVATE_KEY|CLIENT_SECRET|CREDENTIALS?)$/i.test(String(name ?? ''))
         || /^SUPABASE_/i.test(String(name ?? ''))
         || /^PORTAL_SSO_/i.test(String(name ?? ''));
@@ -656,11 +677,16 @@ function probes(healthCheck, port) {
         periodSeconds: healthCheck.intervalSeconds,
         timeoutSeconds: healthCheck.timeoutSeconds,
         failureThreshold: healthCheck.retries,
-        ...(healthCheck.startPeriodSeconds ? { initialDelaySeconds: healthCheck.startPeriodSeconds } : {})
+        ...(healthCheck.startPeriodSeconds && !healthCheck.startupTimeoutSeconds ? { initialDelaySeconds: healthCheck.startPeriodSeconds } : {})
     };
     return {
         readinessProbe: probe,
-        livenessProbe: probe
+        livenessProbe: probe,
+        ...(healthCheck.startupTimeoutSeconds ? {startupProbe: {
+            httpGet: {path: healthCheck.path, port}, periodSeconds: healthCheck.intervalSeconds,
+            timeoutSeconds: healthCheck.timeoutSeconds,
+            failureThreshold: Math.ceil(healthCheck.startupTimeoutSeconds / healthCheck.intervalSeconds)
+        }} : {})
     };
 }
 
@@ -1066,7 +1092,8 @@ function renderKubernetesReadme(name, model) {
         '- The generator does not provision k3s nodes, storage classes, registry credentials, TLS certificates, or DNS.',
         '- The default k3s service exposure is intentionally simple: APISIX NodePort first, Ingress/Gateway API later.',
         '- Kustomize overlays are the right place for image tags, replica counts, resources, storage class names, node selectors, tolerations, registry pull secrets, and TLS-specific gateway changes.',
-        ''
+        '',
+        ...(model.applications.some((application) => application.tenantStorage) ? tenantDeploymentNotes() : [])
     ].join('\n');
 }
 

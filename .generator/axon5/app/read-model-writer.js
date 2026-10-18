@@ -534,7 +534,7 @@ ${tenantIndexes.length ? 'import jakarta.persistence.Index\n' : ''}
 ${metadataFields.length > 0 ? `import ${this.model.rootPackage}.shared.application.metadata.MetadataProjection\n` : ''}${compositeId ? `import ${packageName}.${keyName}\n` : ''}${allEntityImports}
 
 ${storageKeyDeclaration}${idClassAnnotation}@Entity
-@Table(name = "${tableName}"${indexAnnotation})
+@Table(name = "${tableName}"${this.model.tenancy && !scoped ? ', schema = "__medol_control__"' : ''}${indexAnnotation})
 class ${name}Entity${metadataFields.length > 0 ? ' : MetadataProjection' : ''} {
 ${entityFields}
 ${assignMetadata}
@@ -1220,7 +1220,7 @@ import java.time.ZoneOffset
 @Component
 class ${processorClass}(
     private val registry: DataExportResourceExecutorRegistry,
-    private val lifecyclePort: DataExportJobLifecyclePort${this.model.tenancy ? `,\n    private val tenantAccess: ${this.model.rootPackage}.shared.application.tenancy.SameSchemaTenantAccess` : ''}
+    private val lifecyclePort: DataExportJobLifecyclePort${this.model.tenancy ? `,\n    private val tenantAccess: ${this.model.rootPackage}.shared.application.tenancy.TenantAccess` : ''}
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -1346,7 +1346,7 @@ import org.springframework.data.jpa.repository.JpaRepository
 import java.time.LocalDateTime
 
 @Entity
-@Table(name = "medol_sync_read_model_checkpoint")
+@Table(name = "medol_sync_read_model_checkpoint"${this.model.tenancy ? ', schema = "__medol_control__"' : ''})
 class SyncReadModelCheckpoint {
     @Id
     var target: String = ""
@@ -1394,6 +1394,7 @@ import java.time.ZoneOffset
 @Entity
 @Table(
     name = "medol_outbox",
+${this.model.tenancy ? '    schema = "__medol_control__",\n' : ''}\
     uniqueConstraints = [
         UniqueConstraint(
             name = "uk_medol_outbox_event",
@@ -2373,10 +2374,11 @@ import ${readModelPackageName}.${repositoryName}
 import ${readModelPackageName}.toReadModel
 
 @Repository
+${this.model.tenancy && !scoped ? `@${this.model.rootPackage}.shared.application.tenancy.TenantControlRepository\n` : ''}\
 class ${adapterName}(
     private val jpaRepository: ${springDataRepositoryName},
     private val accessPolicyFilter: ReadModelAccessPolicyFilter,
-    private val queryService: ${name}QueryService${hasJsonJpaFields ? ',\n    private val objectMapper: ObjectMapper' : ''}
+    private val queryService: ${name}QueryService${scoped ? `,\n    private val tenantBoundary: ${this.model.rootPackage}.shared.application.tenancy.TenantPersistenceBoundary` : ''}${hasJsonJpaFields ? ',\n    private val objectMapper: ObjectMapper' : ''}
 ) : ${repositoryName} {
 ${findAllImplementation}
 
@@ -2393,6 +2395,7 @@ ${criteriaImplementation}
 
 ${projectionLookupMethods ? `${projectionLookupMethods}\n\n` : ''}    override fun save(projection: ${name}Projection) {
 ${scoped ? `        val tenant = ${this.model.rootPackage}.shared.application.tenancy.TenantScope.requireTenant()
+        tenantBoundary.assertTenantTransaction()
         if (projection.${tenantField} != null && projection.${tenantField} != tenant) throw org.springframework.security.access.AccessDeniedException("Cross-tenant projection write is forbidden.")
         projection.${tenantField} = tenant\n` : ''}\
         jpaRepository.save(projection.toEntity())
@@ -2402,6 +2405,7 @@ ${idSpecification}
 
 ${scoped ? `    private fun tenantSpecification(): Specification<${entityName}> {
         val tenant = ${this.model.rootPackage}.shared.application.tenancy.TenantScope.requireTenant()
+        tenantBoundary.assertTenantTransaction()
         return Specification { root, _, builder -> builder.equal(root.get<String>("${tenantField}"), tenant) }
     }
 
@@ -3006,8 +3010,9 @@ ${appendOutbox(readModelKey, '            ')}
         event: ${_eventTitle(event.title)},
         message: EventMessage
     ) {
-${scopedDataExchangeReadModel ? '        if (!accepts(message)) return\n' : ''}${scoped ? `        ${this.model.rootPackage}.shared.application.tenancy.TenantScope.withIdentity(
-            ${this.model.rootPackage}.shared.application.tenancy.TenantIdentity(event.medolTenantScope, message.metadata()["userId"] ?: "event-projector")
+${scopedDataExchangeReadModel ? '        if (!accepts(message)) return\n' : ''}${scoped ? `        tenantExecution.verifyEventTenant(event.medolTenantScope, message)
+        tenantExecution.project(
+            ${this.model.rootPackage}.shared.application.tenancy.TenantIdentity(event.medolTenantScope, message.metadata()["userId"] ?: "event-projector"), "${packageName}.${name}Projector", message.identifier(), message.metadata()["medol.eventSource"]
         ) { updater.update(event, message) }` : '        updater.update(event, message)'}
     }`).join('\n\n');
 
@@ -3054,7 +3059,7 @@ class ${name}ProjectionUpdaterConfiguration {
 @Namespace("${readModelProcessingGroupFor(this, context, readmodel)}")
 @Component
 class ${name}Projector(
-    private val updater: ${name}ProjectionUpdater
+    private val updater: ${name}ProjectionUpdater${scoped ? `,\n    private val tenantExecution: ${this.model.rootPackage}.shared.application.tenancy.TenantExecution = ${this.model.rootPackage}.shared.application.tenancy.TenantExecution()` : ''}
 ) {
 ${scopedDataExchangeReadModel ? `    private fun accepts(message: EventMessage): Boolean =
         message.metadata()[MetadataKeys.DEPLOYMENT_NAME]?.toString() == "${deploymentName(this)}"
@@ -3172,15 +3177,16 @@ class ${name}ProjectionUpdaterConfiguration {
 @Namespace("${readModelProcessingGroup(readmodel)}")
 @Component
 class ${name}Projector(
-    private val updater: ${name}ProjectionUpdater
+    private val updater: ${name}ProjectionUpdater${scoped ? `,\n    private val tenantExecution: ${this.model.rootPackage}.shared.application.tenancy.TenantExecution = ${this.model.rootPackage}.shared.application.tenancy.TenantExecution()` : ''}
 ) {
     @EventHandler
     fun on(
         event: ${_eventTitle(published.event.title)},
         message: EventMessage
     ) {
-${scoped ? `        ${this.model.rootPackage}.shared.application.tenancy.TenantScope.withIdentity(
-            ${this.model.rootPackage}.shared.application.tenancy.TenantIdentity(event.medolTenantScope, message.metadata()["userId"] ?: "event-projector")
+${scoped ? `        tenantExecution.verifyEventTenant(event.medolTenantScope, message)
+        tenantExecution.project(
+            ${this.model.rootPackage}.shared.application.tenancy.TenantIdentity(event.medolTenantScope, message.metadata()["userId"] ?: "event-projector"), "${packageName}.${name}Projector", message.identifier(), message.metadata()["medol.eventSource"]
         ) { updater.update(event, message) }` : '        updater.update(event, message)'}
     }
 
@@ -3189,8 +3195,9 @@ ${scoped ? `        ${this.model.rootPackage}.shared.application.tenancy.TenantS
         event: ${_eventTitle(read.event.title)},
         message: EventMessage
     ) {
-${scoped ? `        ${this.model.rootPackage}.shared.application.tenancy.TenantScope.withIdentity(
-            ${this.model.rootPackage}.shared.application.tenancy.TenantIdentity(event.medolTenantScope, message.metadata()["userId"] ?: "event-projector")
+${scoped ? `        tenantExecution.verifyEventTenant(event.medolTenantScope, message)
+        tenantExecution.project(
+            ${this.model.rootPackage}.shared.application.tenancy.TenantIdentity(event.medolTenantScope, message.metadata()["userId"] ?: "event-projector"), "${packageName}.${name}Projector", message.identifier(), message.metadata()["medol.eventSource"]
         ) { updater.update(event, message) }` : '        updater.update(event, message)'}
     }
 
@@ -3199,8 +3206,9 @@ ${scoped ? `        ${this.model.rootPackage}.shared.application.tenancy.TenantS
         event: ${_eventTitle(allRead.event.title)},
         message: EventMessage
     ) {
-${scoped ? `        ${this.model.rootPackage}.shared.application.tenancy.TenantScope.withIdentity(
-            ${this.model.rootPackage}.shared.application.tenancy.TenantIdentity(event.medolTenantScope, message.metadata()["userId"] ?: "event-projector")
+${scoped ? `        tenantExecution.verifyEventTenant(event.medolTenantScope, message)
+        tenantExecution.project(
+            ${this.model.rootPackage}.shared.application.tenancy.TenantIdentity(event.medolTenantScope, message.metadata()["userId"] ?: "event-projector"), "${packageName}.${name}Projector", message.identifier(), message.metadata()["medol.eventSource"]
         ) { updater.update(event, message) }` : '        updater.update(event, message)'}
     }
 }

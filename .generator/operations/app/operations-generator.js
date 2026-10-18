@@ -7,10 +7,14 @@ const { apisixFiles } = require('./renderers/apisix-renderer');
 const { documentSupportFiles } = require('./document-support-generator');
 const { dockerComposeFiles } = require('./renderers/docker-compose-renderer');
 const { k3sFiles, kubernetesFiles } = require('./renderers/kubernetes-renderer');
+const { resolveOperationsModel } = require('./environment-resolver');
 
 const targets = ['all', 'model', 'apisix', 'docker-compose', 'kubernetes', 'k3s', 'harbor', 'zot'];
 
 function generateOperationsFiles(model, options = {}) {
+    if (model.applications.some((application) => application.kind === 'backend' && application.tenantIsolation)) {
+        for (const environment of model.environments) resolveOperationsModel(model, environment.name);
+    }
     const target = options.target ?? 'all';
     const environment = options.environment ?? 'dev';
     const environmentRoot = environmentDirectory(environment);

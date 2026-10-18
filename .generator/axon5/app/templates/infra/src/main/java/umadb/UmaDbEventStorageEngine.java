@@ -48,6 +48,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 public final class UmaDbEventStorageEngine implements EventStorageEngine {
+    public static final Context.ResourceKey<Set<Tag>> STORED_TAGS = Context.ResourceKey.withLabel("umadb.storedTags");
     private static final Logger logger = LoggerFactory.getLogger(UmaDbEventStorageEngine.class);
     private static final String AXON_EVENT_VERSION = "axon_event_version";
     private static final String AXON_PAYLOAD_TYPE = "axon_payload_type";
@@ -475,6 +476,7 @@ public final class UmaDbEventStorageEngine implements EventStorageEngine {
     private static Context trackedContext(UmaDbClient.SequencedStoredEvent event) {
         var context = Context.empty();
         context = TrackingToken.addToContext(context, new GlobalSequenceTrackingToken(event.position() + 1));
+        context = context.withResource(STORED_TAGS, axonTags(event.event()));
         return context;
     }
 

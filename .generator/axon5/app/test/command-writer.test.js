@@ -22,7 +22,7 @@ test('tenant references are checked for existence even without business eligibil
     commandWriterMethods._writeCommandHandlers.call(writer, 'sample.app.entries.createentry', 'entries', 'createentry', slice, selectionFor(slice, model), [], []);
     assert.match(result, /findById\(command.parentId\)/);
     assert.match(result, /entryCatalogReadModelSelection != null && true/);
-    assert.match(result, /TenantScope.withIdentity/);
+    assert.match(result, /tenantExecution.run/);
 });
 
 test('generates backend command handler guards for projection eligibility selectors', () => {

@@ -54,7 +54,7 @@ class InMemoryAxonEventStorageConfig {
 <% if (hasInfra) { -%>
 @Configuration
 @ConditionalOnProperty(prefix = "medol.axon", name = ["event-storage"], havingValue = "umadb")
-class UmaDbAxonEventStorageConfig(private val environment: Environment) {
+class UmaDbAxonEventStorageConfig(private val environment: Environment<% if (typeof tenancyEnabled !== 'undefined' && tenancyEnabled) { %>, private val tenantStores: <%= rootPackage %>.shared.application.tenancy.TenantEventStores, private val tenantProperties: <%= rootPackage %>.shared.application.tenancy.TenantStorageProperties<% } %>) {
 
     @Bean
     fun axonServerConfigurationEnhancerDisabler(): ConfigurationEnhancer =
@@ -68,7 +68,7 @@ class UmaDbAxonEventStorageConfig(private val environment: Environment) {
             override fun enhance(registry: ComponentRegistry) {
                 registry.registerIfNotPresent(
                     EventStorageEngine::class.java,
-                    ComponentBuilder { UmaDbEventStorageEngine(umaDbProperties()) },
+                    ComponentBuilder { <% if (typeof tenancyEnabled !== 'undefined' && tenancyEnabled) { %>if (tenantProperties.eventStores.isNotEmpty()) tenantStores.router else tenantStores.defaultEngine<% } else { %>UmaDbEventStorageEngine(umaDbProperties())<% } %> },
                     SearchScope.ALL
                 )
             }

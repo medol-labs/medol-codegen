@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entity-mappings xmlns="https://jakarta.ee/xml/ns/persistence/orm" version="3.1">
+    <entity class="org.axonframework.messaging.eventhandling.processing.streaming.token.store.jpa.TokenEntry">
+        <table name="token_entry" schema="__medol_control__"/>
+    </entity>
+</entity-mappings>

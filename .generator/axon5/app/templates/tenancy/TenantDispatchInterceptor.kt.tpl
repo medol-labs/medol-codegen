@@ -10,7 +10,7 @@ import org.springframework.security.access.AccessDeniedException
 import <%= rootPackage %>.shared.application.metadata.MetadataKeys
 
 @Component
-class TenantDispatchInterceptor(private val access: SameSchemaTenantAccess) : MessageDispatchInterceptor<CommandMessage> {
+class TenantDispatchInterceptor(private val access: TenantAccess, private val storage: TenantStorageGuard = TenantStorageGuard()) : MessageDispatchInterceptor<CommandMessage> {
     override fun interceptOnDispatch(
         message: CommandMessage, context: ProcessingContext?, chain: MessageDispatchInterceptorChain<CommandMessage>
     ): MessageStream<*> {
@@ -29,6 +29,7 @@ class TenantDispatchInterceptor(private val access: SameSchemaTenantAccess) : Me
         val userId = TenantScope.current()?.userId ?: message.metadata()[MetadataKeys.USER_ID]
             ?: throw AccessDeniedException("User metadata is required.")
         val identity = access.verify(tenantId, userId)
+        storage.verify(identity)
         command.medolTenantScope = identity.tenantId
         command.medolTenantUser = identity.userId
         return chain.proceed(message.andMetadata(mapOf(MetadataKeys.TENANT_ID to identity.tenantId, MetadataKeys.USER_ID to identity.userId)), context)

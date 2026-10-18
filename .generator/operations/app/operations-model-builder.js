@@ -5,6 +5,7 @@
 
 const { buildBackendModules } = require('../../refine/app/backend-modules');
 const {tenantDatabaseName} = require('../../common/core/tenant-storage');
+const {resolveOperationsModel} = require('./environment-resolver');
 const {
     cleanTitle,
     kebab,
@@ -25,23 +26,29 @@ function buildOperationsModel(source = {}, config = {}) {
     const backendApplications = buildBackendApplications(source, operationsConfig, imagePrefix);
     const frontends = buildFrontendApplications(source, systemName, operationsConfig, imagePrefix, backendApplications);
     const infrastructure = buildInfrastructure(operationsConfig);
+    for (const application of backendApplications.filter((entry) => entry.tenantIsolation)) {
+        application.dependencies.push(...infrastructure.filter((component) => component.additional).map((component) => component.name));
+    }
     const applications = [...frontends, ...backendApplications];
     const gateway = operationsConfig.gateway?.enabled === false
         ? undefined
         : buildGateway(applications, backendApplications, operationsConfig);
 
-    return {
+    const model = {
         version: 'medol.operations/v1',
         name: systemName,
         title: cleanTitle(source.domain ?? source.title ?? domainName),
         imagePrefix,
         imageTag,
+        ...(source.tenancy ? {tenancy: operationsConfig.tenancy ?? {}} : {}),
         ...(registry ? { registry } : {}),
         applications,
         infrastructure,
         ...(gateway ? { gateway } : {}),
         environments: buildEnvironments(applications, infrastructure, operationsConfig, imageTag)
     };
+    if (source.tenancy) for (const environment of model.environments) resolveOperationsModel(model, environment.name);
+    return model;
 }
 
 function normalizeRegistryConfig(value) {
@@ -328,6 +335,24 @@ function buildInfrastructure(operationsConfig) {
         });
     }
 
+    for (const extra of infrastructureConfig.additional ?? []) {
+        if (!['postgres', 'umadb'].includes(extra.type) || !/^[a-z][a-z0-9-]{0,47}$/.test(extra.name ?? '') || infrastructure.some((component) => component.name === extra.name)) throw new Error('Invalid or duplicate additional storage resource.');
+        if (extra.type === 'postgres' && (!Array.isArray(extra.databases) || !extra.databases.length || extra.databases.some((name) => !/^[a-z][a-z0-9_]{0,62}$/.test(name)))) throw new Error('Additional PostgreSQL resources require explicit safe database names.');
+        if (extra.type === 'postgres' && !['POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB'].every((name) => (extra.environmentVariables ?? []).some((variable) => variable.name === name))) throw new Error('Configure credentials and the initial database for each additional PostgreSQL resource.');
+        infrastructure.push({
+            type: extra.type, name: extra.name, additional: true,
+            image: extra.image ?? (extra.type === 'postgres' ? 'postgres:16' : 'umadb/umadb:0.7.8'),
+            servicePort: extra.servicePort ?? (extra.type === 'postgres' ? 5432 : 50051),
+            volumeName: extra.volumeName ?? `${extra.name}_data`,
+            environmentVariables: extra.environmentVariables ?? [], databases: extra.databases,
+            ...(extra.type === 'postgres' ? {healthCheck: {command: 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"', intervalSeconds: 5, timeoutSeconds: 5, retries: 10}} : {}),
+            enabled: true
+        });
+    }
+    const volumes = infrastructure.flatMap((component) => [component.volumeName, ...(component.volumeNames ?? [])]).filter(Boolean);
+    const physicalName = (name) => String(name).trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+    if (new Set(volumes.map(physicalName)).size !== volumes.length) throw new Error('Storage resources must not share physical volumes, including normalized Kubernetes names.');
+    if (new Set(infrastructure.map((component) => physicalName(component.name))).size !== infrastructure.length) throw new Error('Infrastructure resource names collide after normalization.');
     return infrastructure;
 }
 
@@ -442,7 +467,7 @@ function defaultEnvironment(name, applications, infrastructure, imageTag) {
         infrastructureOverrides: Object.fromEntries(infrastructure.map((component) => [
             component.name,
             {
-                exposePorts: exposeServices && ['postgres', 'umadb', 'redis'].includes(component.type)
+                exposePorts: exposeServices && !component.additional && ['postgres', 'umadb', 'redis'].includes(component.type)
             }
         ]))
     };

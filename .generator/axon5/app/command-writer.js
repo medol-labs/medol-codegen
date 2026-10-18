@@ -523,7 +523,7 @@ ${port?.failureEvent ? '        val now = java.time.LocalDateTime.now()\n' : ''}
     fun handle(
 ${methodParameters}
     )${returnType} {
-${scoped ? `        return ${this.model.rootPackage}.shared.application.tenancy.TenantScope.withIdentity(
+${scoped ? `        return tenantExecution.run(
             ${this.model.rootPackage}.shared.application.tenancy.TenantIdentity(requireNotNull(command.medolTenantScope), requireNotNull(command.medolTenantUser))
         ) {\n` : ''}
 ${eligibilityStatements ? `${eligibilityStatements}\n` : ''}\
@@ -588,7 +588,7 @@ ${reservationStateImports}
 
 @Component
 class ${pascal(slice.name)}CommandHandler(
-    private val decision: ${decisionName}${portConstructorParams}${eligibilityConstructorParams}
+    private val decision: ${decisionName}${portConstructorParams}${eligibilityConstructorParams}${scoped ? `,\n    private val tenantExecution: ${this.model.rootPackage}.shared.application.tenancy.TenantExecution = ${this.model.rootPackage}.shared.application.tenancy.TenantExecution()` : ''}
 ) {
 ${handlers}
 }
@@ -1227,7 +1227,7 @@ import java.time.ZoneOffset
 @Component
 class ${processorClass}(
     private val registry: DataImportCommandExecutorRegistry,
-    private val lifecyclePort: DataImportJobLifecyclePort${this.model.tenancy ? `,\n    private val tenantAccess: ${this.model.rootPackage}.shared.application.tenancy.SameSchemaTenantAccess` : ''}
+    private val lifecyclePort: DataImportJobLifecyclePort${this.model.tenancy ? `,\n    private val tenantAccess: ${this.model.rootPackage}.shared.application.tenancy.TenantAccess` : ''}
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 

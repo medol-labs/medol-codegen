@@ -235,7 +235,7 @@ import jakarta.persistence.Table
 import java.time.Instant
 
 @Entity
-@Table(name = "audit_log")
+@Table(name = "audit_log"${tenancy ? ', schema = "__medol_control__"' : ''})
 class AuditLogEntry {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -266,6 +266,7 @@ import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
 ${tenancy ? 'import org.springframework.data.jpa.repository.JpaSpecificationExecutor\n' : ''}
 
+${tenancy ? `@${generator.model.rootPackage}.shared.application.tenancy.TenantControlRepository\n` : ''}\
 interface AuditLogRepository : JpaRepository<AuditLogEntry, Long>${tenancy ? ', JpaSpecificationExecutor<AuditLogEntry>' : ''} {
     fun findAllByCorrelationId(correlationId: String, pageable: Pageable): Page<AuditLogEntry>
     fun findAllByUserId(userId: String, pageable: Pageable): Page<AuditLogEntry>
@@ -332,14 +333,17 @@ ${tenancy ? '    @org.springframework.security.access.prepost.PreAuthorize("hasA
         @RequestParam(required = false) tenantId: String?,
         @PageableDefault(size = 20) pageable: Pageable
     ): Page<AuditLogEntry> =
-${tenancy ? `        repository.findAll(org.springframework.data.jpa.domain.Specification<AuditLogEntry> { root, _, builder ->
-            val predicates = mutableListOf(builder.equal(root.get<String>("tenantId"), ${generator.model.rootPackage}.shared.application.tenancy.TenantScope.requireTenant()))
+${tenancy ? `        run {
+        val verifiedTenant = ${generator.model.rootPackage}.shared.application.tenancy.TenantScope.requireTenant()
+        repository.findAll(org.springframework.data.jpa.domain.Specification<AuditLogEntry> { root, _, builder ->
+            val predicates = mutableListOf(builder.equal(root.get<String>("tenantId"), verifiedTenant))
             correlationId?.let { predicates.add(builder.equal(root.get<String>("correlationId"), it)) }
             userId?.let { predicates.add(builder.equal(root.get<String>("userId"), it)) }
             sessionId?.let { predicates.add(builder.equal(root.get<String>("sessionId"), it)) }
             traceId?.let { predicates.add(builder.equal(root.get<String>("traceId"), it)) }
             builder.and(*predicates.toTypedArray())
-        }, pageable)` : `        when {
+        }, pageable)
+        }` : `        when {
             !correlationId.isNullOrBlank() -> repository.findAllByCorrelationId(correlationId, pageable)
             !userId.isNullOrBlank() -> repository.findAllByUserId(userId, pageable)
             !sessionId.isNullOrBlank() -> repository.findAllBySessionId(sessionId, pageable)

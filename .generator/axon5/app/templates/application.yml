@@ -29,8 +29,7 @@ spring:
   jpa:
     open-in-view: false
 <% if (typeof tenancyEnabled !== 'undefined' && tenancyEnabled) { %>
-    properties:
-      hibernate.default_schema: ${DB_SCHEMA:public}
+    mapping-resources: META-INF/medol-tenant-control.orm.xml
 <% } %>
     hibernate:
       ddl-auto: update
@@ -95,6 +94,13 @@ medol:
       batch-size: ${UMADB_BATCH_SIZE:256}
       request-timeout: ${UMADB_REQUEST_TIMEOUT:PT10S}
 <% } -%>
+<% if (typeof tenancyEnabled !== 'undefined' && tenancyEnabled) { %>
+  tenancy:
+    mode: ${MEDOL_TENANCY_MODE:shared-schema}
+    control-schema: ${DB_SCHEMA:public}
+    migration:
+      enabled: ${MEDOL_TENANCY_MIGRATION_ENABLED:false}
+<% } %>
   sync:
     enabled: ${MEDOL_SYNC_ENABLED:true}
     mode: ${MEDOL_SYNC_MODE:outbox-delta}

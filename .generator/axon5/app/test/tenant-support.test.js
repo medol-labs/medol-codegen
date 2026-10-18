@@ -53,6 +53,24 @@ test('runtime generation is absent without configuration and removes stale gener
     assert.equal(tenantScoped(gen.model, 'Orders'), false);
 });
 
+test('tenant entry points depend on access contract and schema routing is independently configured', () => {
+    const gen = generator({tenancy: tenancy()});
+    writeTenantRuntimeContract(gen);
+    for (const file of ['TenantDispatchInterceptor.kt', 'TenantWebConfiguration.kt', 'TenantBackgroundRunner.kt']) {
+        const code = gen.files.get(`shared/shared/application/tenancy/${file}`);
+        assert.match(code, /access: TenantAccess/);
+        assert.doesNotMatch(code, /access: SameSchemaTenantAccess/);
+    }
+    const persistence = gen.files.get('shared/shared/application/tenancy/TenantPersistenceConfiguration.kt');
+    assert.match(persistence, /ConditionalOnMissingBean\(TenantAccess::class\)/);
+    assert.match(persistence, /ConditionalOnMissingBean\(TenantStorageResolver::class\)/);
+    assert.match(persistence, /PROPAGATION_REQUIRES_NEW/);
+    assert.match(persistence, /hibernate.default_schema/);
+    assert.match(persistence, /connection.schema = resets.remove\(connection\)/);
+    assert.match(persistence, /connection.abort/);
+    assert.match(gen.files.get('shared/META-INF/medol-tenant-control.orm.xml'), /TokenEntry/);
+});
+
 test('only tenant-enabled backend defaults share a database and schema endpoint', () => {
     const gen = generator({domain: 'ExampleSystem', tenancy: tenancy()});
     Object.assign(gen, {currentDeployment: {name: 'Business'}, currentDeploymentIndex: 1,
@@ -71,7 +89,7 @@ test('only tenant-enabled backend defaults share a database and schema endpoint'
 test('tenant access SQL uses modeled sources, eligibility and bounded indexed lookups', () => {
     const gen = generator({tenancy: tenancy()});
     const query = tenantAccessQuery(gen.model);
-    assert.match(query.sql, /JOIN "customers_members"/);
+    assert.match(query.sql, /JOIN "__medol_control__"\."customers_members"/);
     assert.match(query.sql, /d\."account_key" = :tenant/);
     assert.match(query.sql, /m\."person_key" = :user/);
     assert.match(query.sql, /FETCH FIRST 1 ROW ONLY/);

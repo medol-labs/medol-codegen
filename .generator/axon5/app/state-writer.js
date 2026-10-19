@@ -88,6 +88,7 @@ const {contextPackage} = require('../../common/util/value-types');
 const {_commandTitle, _eventTitle, _readmodelTitle, _sliceTitle} = require('../../common/util/naming');
 const {infrastructurePortForCommand} = require('./infrastructure-port-writer');
 const {tenantScoped} = require('./tenant-support');
+const {renderCommandAssertions} = require('./command-assertions');
 
 function normalizeOutcomeName(value) {
     return String(value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -371,7 +372,9 @@ ${sourcingHandlers}
                 `            ${reservation.eventName}(${reservation.eventArgs.join(', ')})`
             );
             const transition = transitionForCommand(this.model, command);
-            const guard = commandStartsLifecycle(command) ? '' : `${renderStateGuard(this.model, transition)}\n`;
+            const assertions = renderCommandAssertions(this.model, slice, command);
+            const guard = (commandStartsLifecycle(command) ? '' : `${renderStateGuard(this.model, transition)}\n`)
+                + (assertions ? assertions + '\n' : '');
             const eventExpressions = [
                 ...reservationEvents.map((expression) => ({kind: 'single', expression})),
                 ...outputs.map((event) => {

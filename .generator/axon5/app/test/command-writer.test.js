@@ -4,6 +4,25 @@ const test = require('node:test');
 const {commandWriterMethods} = require('../command-writer');
 const {selectionFor} = require('../model-helpers');
 
+test('state guards and same-concept selectors share one enum import', () => {
+    const command = {id: 'replace', name: 'ReplaceEntry', title: 'Replace Entry', port: true, fields: [
+        {name: 'entryId', type: 'UUID', idAttribute: true},
+        {name: 'replacementId', type: 'UUID', source: {kind: 'direct', from: ['EntryCatalog.entryId']}}
+    ]};
+    const event = {id: 'replaced', name: 'EntryReplaced', title: 'Entry Replaced', fields: [{name: 'entryId', type: 'UUID', idAttribute: true}]};
+    const slice = {id: 'replace-slice', name: 'ReplaceEntry', title: 'Replace Entry', context: 'Entries', concepts: ['Entry'], port: true, commands: [command], events: [event], readmodels: []};
+    const model = {rootPackage: 'sample.app', concepts: [{name: 'Entry', context: 'Entries', states: ['Active', 'Retired']}], valueTypes: [], slices: [slice, {
+        name: 'EntryCatalog', title: 'Entry Catalog', context: 'Entries', commands: [], events: [], readmodels: [{id: 'catalog', name: 'EntryCatalog', title: 'Entry Catalog', fields: [{name: 'entryId', type: 'UUID', idAttribute: true}, {name: 'state', type: 'Entry.State'}], eligibility: [{operator: 'AND', conditions: [{left: 'Entry.state', operator: '==', right: 'Active'}]}]}]
+    }], transitions: [{command, owner: {type: 'concept', name: 'Entry'}, context: 'Entries', from: 'Active', to: 'Retired'}]};
+    const writes = new Map();
+    const writer = {model, fs: {write: (path, code) => writes.set(path, code)}, _kotlinPath: path => path};
+    commandWriterMethods._writeCommandHandlers.call(writer, 'sample.app.entries.replaceentry', 'entries', 'replaceentry', slice, selectionFor(slice, model), [event], []);
+    const code = [...writes.values()][0];
+    assert.equal((code.match(/import sample.app.entries.domain.states.EntryStateEnum/g) ?? []).length, 1);
+    assert.ok(code.indexOf('state.currentState != EntryStateEnum.Active') >= 0);
+    assert.ok(code.indexOf('state.currentState != EntryStateEnum.Active') < code.indexOf('.execute(input)'));
+});
+
 test('tenant references are checked for existence even without business eligibility', () => {
     const command = {id: 'create', name: 'CreateEntry', title: 'Create Entry', startsLifecycle: true, fields: [
         {name: 'entryId', type: 'UUID', idAttribute: true},

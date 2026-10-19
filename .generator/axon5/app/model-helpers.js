@@ -536,15 +536,16 @@ function conceptHasState(model, context, conceptName, stateName) {
 }
 
 function transitionUsesConceptState(model, transition) {
+    const states = transition?.fromStates ?? (transition?.from ? [transition.from] : []);
     return Boolean(
-        transition?.from
+        states.length
         && transition.owner?.type === 'concept'
-        && conceptHasState(model, transition.context, transition.owner.name, transition.from)
+        && states.every(state => conceptHasState(model, transition.context, transition.owner.name, state))
     );
 }
 
 function renderStateGuard(model, transition) {
-    if (!transition?.from || transition.owner?.type !== 'concept') {
+    if (!(transition?.fromStates?.length || transition?.from) || transition.owner?.type !== 'concept') {
         return '        // TODO: validate domain rules against state before appending events.';
     }
     if (!transitionUsesConceptState(model, transition)) {
@@ -553,11 +554,15 @@ function renderStateGuard(model, transition) {
     const stateType = conceptStateEnumName(transition.owner.name);
     const commandName = transition.command?.name ?? 'Command';
     const ownerName = transition.owner.name;
-    const expectedState = transition.from;
+    const states = [...new Set(transition.fromStates ?? [transition.from])];
+    const expectedState = states.join(', ');
+    const condition = states.length === 1
+        ? `state.currentState != ${stateType}.${stateEnumEntry(states[0])}`
+        : `state.currentState !in setOf(${states.map(state => `${stateType}.${stateEnumEntry(state)}`).join(', ')})`;
     const i18nKey = `errors.${contextPackage(transition.context)}.${lowerCamel(commandName)}.requiresState`;
     const fallback = `${commandName} requires ${ownerName} to be ${expectedState}.`;
     return [
-        `        if (state.currentState != ${stateType}.${stateEnumEntry(transition.from)}) {`,
+        `        if (${condition}) {`,
         `            throw ${model.rootPackage}.shared.domain.CommandRejectedException(`,
         `                code = "COMMAND_REQUIRES_STATE",`,
         `                i18nKey = "${escapeKotlin(i18nKey)}",`,

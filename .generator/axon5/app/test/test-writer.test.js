@@ -3,6 +3,30 @@ const test = require('node:test');
 const {testWriterMethods} = require('../test-writer');
 const {configureValueTypes} = require('../../../common/util/value-types');
 
+test('new scalar fixtures without examples respect numeric ranges', () => {
+    configureValueTypes([{name: 'PositiveCount', context: 'Items', kind: 'scalar', baseType: 'Int', constraints: [{kind: 'range', min: 1, max: 10}]}], 'sample.app');
+    const command = {id: 'create', name: 'CreateItem', title: 'Create Item', startsLifecycle: true, fields: [{name: 'count', type: 'PositiveCount'}]};
+    const event = {id: 'created', name: 'ItemCreated', title: 'Item Created', fields: command.fields};
+    const slice = {name: 'CreateItem', title: 'Create Item', context: 'Items', commands: [command], events: [event]};
+    const files = new Map();
+    const writer = Object.assign({model: {rootPackage: 'sample.app', slices: [slice], concepts: [], transitions: []}, fs: {write: (path, code) => files.set(path, code)}, _testKotlinPath: path => path, _eventPackage: () => 'sample.app.items.events'}, testWriterMethods);
+    try {
+        writer._writeDecisionTest('sample.app.items.create', 'items', 'create', slice, {fields: [], tags: []}, [event]);
+        assert.match([...files.values()].join('\n'), /PositiveCount\(1\)/);
+        assert.doesNotMatch([...files.values()].join('\n'), /PositiveCount\(0\)/);
+    } finally { configureValueTypes([]); }
+});
+
+test('adding a required business port removes its stale generated direct integration test', () => {
+    const deleted = [];
+    const command = {id: 'create', name: 'CreateItem', title: 'Create Item', startsLifecycle: true, port: true, fields: []};
+    const event = {id: 'created', name: 'ItemCreated', title: 'Item Created', fields: []};
+    const slice = {name: 'CreateItem', title: 'Create Item', context: 'Items', port: true, commands: [command], events: [event]};
+    const writer = Object.assign({model: {rootPackage: 'sample.app', slices: [slice]}, fs: {delete: path => deleted.push(path)}, _testKotlinPath: path => path}, testWriterMethods);
+    writer._writeSliceIntegrationTest('sample.app.items.create', 'items', 'create', slice, {fields: [], tags: []}, [event]);
+    assert.deepEqual(deleted, ['items/create/CreateItemIntegrationTest.kt']);
+});
+
 test('decision fixtures preserve modeled examples for constrained scalar types', () => {
     const scalar = {name: 'ProjectCode', context: 'Projects', kind: 'scalar', baseType: 'String'};
     configureValueTypes([scalar], 'sample.app');

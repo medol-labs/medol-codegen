@@ -155,6 +155,7 @@ function buildI18nModel(source, chapters, resources) {
         ['values.boolean.true', 'True'],
         ['values.boolean.false', 'False'],
         ['errors.commandRejected', 'Command rejected'],
+        ['errors.commandAssertionFailed', 'Command validation failed.'],
         ['errors.commandFailed', 'Command failed'],
         ['errors.validationFailed', 'Validation failed for {{fields}}.'],
         ['errors.http.400', 'Bad request.'],
@@ -287,12 +288,12 @@ function buildI18nModel(source, chapters, resources) {
 
 function addGeneratedErrorI18nEntries(entries, source) {
     (source.transitions ?? []).forEach((transition) => {
-        if (!transition?.from || transition.owner?.type !== 'concept') return;
+        if (!(transition?.fromStates?.length || transition?.from) || transition.owner?.type !== 'concept') return;
         const commandName = transition.command?.name ?? transition.command?.title ?? 'Command';
         const ownerName = transition.owner.name;
         entries.push([
             `errors.${i18nContextKey(transition.context)}.${camel(commandName)}.requiresState`,
-            `${titleCase(commandName)} requires ${titleCase(ownerName)} to be ${transition.from}.`
+            `${titleCase(commandName)} requires ${titleCase(ownerName)} to be ${(transition.fromStates ?? [transition.from]).join(', ')}.`
         ]);
     });
 
@@ -463,7 +464,8 @@ function translatedDefaultValue(defaultValue, locale, translations) {
 
     const stateRequirementMatch = /^(.+) requires (.+) to be (.+)\.$/.exec(defaultValue);
     if (stateRequirementMatch) {
-        return `${translatedTerm(stateRequirementMatch[1], translations)}要求${translatedTerm(stateRequirementMatch[2], translations)}处于${translatedTerm(stateRequirementMatch[3], translations)}状态。`;
+        const states = stateRequirementMatch[3].split(', ').map(state => translatedTerm(state, translations)).join('、');
+        return `${translatedTerm(stateRequirementMatch[1], translations)}要求${translatedTerm(stateRequirementMatch[2], translations)}处于${states}状态。`;
     }
 
     const eligibilityMatch = /^(.+) selection is not eligible(?: for (.+))?\.$/.exec(defaultValue);
@@ -487,6 +489,7 @@ function builtinTranslations(locale) {
     }
     return {
         'tenancy.select': '选择租户',
+        'errors.commandAssertionFailed': '命令校验未通过。',
         'tenancy.controlPlane': '平台管理',
         'tenancy.empty': '暂无可用租户',
         'tenancy.retry': '重试',

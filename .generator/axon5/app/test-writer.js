@@ -22,11 +22,13 @@ const {
     eventTagFieldsFor,
     primaryConcept,
     relatedEventsForSlice,
-    stateEnumEntry
+    stateEnumEntry,
+    transitionForCommand
 } = require('./model-helpers');
 const {infrastructurePortForCommand, resultFieldsForEvent} = require('./infrastructure-port-writer');
 const {_commandTitle, _eventTitle} = require('../../common/util/naming');
 const {tenantScoped, tenantTestFixture} = require('./tenant-support');
+const {resolvedBaseType, resolvedConstraints} = require('../../common/util/value-types');
 
 function testMethodName(value) {
     return safeIdentifier(String(value ?? 'command').replace(/[^A-Za-z0-9]+/g, ' '));
@@ -134,8 +136,12 @@ function testValue(field) {
         return `${valueType.name}.${constant(valueType.values[0])}`;
     }
     if (valueType?.kind === 'scalar') {
-        const baseField = {...field, type: valueType.baseType, valueType: undefined};
-        const example = literalFromExample(baseField, field.example);
+        const baseField = {...field, type: resolvedBaseType(valueType), valueType: undefined};
+        const ranges = resolvedConstraints(valueType).filter(item => item.kind === 'range');
+        const min = Math.max(-Infinity, ...ranges.filter(item => item.min !== undefined).map(item => Number(item.min)));
+        const max = Math.min(Infinity, ...ranges.filter(item => item.max !== undefined).map(item => Number(item.max)));
+        const representative = ranges.length ? (min > 0 ? min : max < 0 ? max : 0) : undefined;
+        const example = literalFromExample(baseField, field.example === '' ? representative : field.example ?? representative);
         return `${valueType.name}(${example ?? fallbackValue(baseField)})`;
     }
     if (valueType?.kind === 'object') {
@@ -263,7 +269,23 @@ const testWriterMethods = {
         const fallbackTests = specificationTests.length === 0
             ? this._fallbackDecisionTests(slice, selection, events, reservations, decisionName)
             : [];
-        const tests = [...specificationTests, ...fallbackTests];
+        const lifecycleTests = (slice.commands ?? []).flatMap(command => {
+            const transition = transitionForCommand(this.model, command);
+            if (!transition?.fromStates?.length || transition.fromStates.length < 2) return [];
+            const scenario = (slice.specifications ?? []).find(spec =>
+                asArray(spec.when).some(item => item.id === command.id || item.name === command.name || item.title === command.title)
+                && asArray(spec.then).some(item => eventForSpec(this.model, item)));
+            if (!scenario) return [];
+            const concept = this.model.concepts?.find(item => item.context === transition.context && item.name === transition.owner.name);
+            return [...(concept?.states ?? []), null].map(state => {
+                const seed = (this.model.transitions ?? []).find(item => item.context === transition.context && item.owner.name === transition.owner.name && item.to === state && item.event);
+                return this._decisionSpecificationTest(
+                    {...scenario, title: `${command.name} lifecycle ${state ?? 'uninitialized'}`, given: seed ? [seed.event] : state === null ? [] : scenario.given}, packageName, slice, selection, events, reservations, decisionName, stateName,
+                    {value: state, seeded: Boolean(seed) || state === null, enumType: `${this.model.rootPackage}.${context}.domain.states.${pascal(transition.owner.name)}StateEnum`, reject: !transition.fromStates.includes(state)}
+                );
+            }).filter(Boolean);
+        });
+        const tests = [...specificationTests, ...fallbackTests, ...lifecycleTests];
         if (tests.length === 0) return;
 
         const commandImports = uniqueBy(tests.map((test) => test.command).filter(Boolean)
@@ -310,16 +332,18 @@ ${imports.join('\n')}
 class ${testName} {
 ${tests.map((test) => tenantScoped(this.model, slice.context)
     ? test.body.replace('() {', `() {\n        ${this.model.rootPackage}.shared.application.tenancy.TenantScope.withIdentity(\n            ${this.model.rootPackage}.shared.application.tenancy.TenantIdentity("test-tenant", "test-user")\n        ) {`).replace(/\n    }$/, '\n        }\n    }')
-    : test.body).join('\n\n')}
+    : test.body).join('\n\n').replace(/[ \t]+$/gm, '')}
 }
 `);
     },
 
     _writeSliceIntegrationTest(packageName, context, slicePackage, slice, selection, events) {
         const tests = this._sliceIntegrationTests(slice, selection, events);
-        if (tests.length === 0) return;
-
         const testName = `${pascal(slice.name)}IntegrationTest`;
+        if (tests.length === 0) {
+            this.fs.delete(this._testKotlinPath(`${context}/${slicePackage}/${testName}.kt`));
+            return;
+        }
         const commandImports = uniqueBy(tests.map((test) => test.command)
             .map((command) => `import ${packageName}.${_commandTitle(command.title)}`), (value) => value);
         const fieldImports = importLines([
@@ -418,7 +442,7 @@ ${commandArguments(command, selection)}
         };
     },
 
-    _decisionSpecificationTest(specification, packageName, slice, selection, events, reservations, decisionName, stateName) {
+    _decisionSpecificationTest(specification, packageName, slice, selection, events, reservations, decisionName, stateName, lifecycleState) {
         const specCommand = commandForSpec(this.model, asArray(specification.when)[0]);
         if (!specCommand) return undefined;
         const expectedEvents = asArray(specification.then)
@@ -506,19 +530,20 @@ ${fieldAssertions || `        assertTrue(event is ${eventName})`}`;
             stateTarget: includeState ? commandStateTarget : undefined,
             usesNow: Boolean(port?.failureEvent),
             usesUuid,
+            throws: Boolean(lifecycleState?.reject),
             body: `    @Test
     fun ${testMethodName(specification.title)}() {
-${stateSetup}${stateSetup && reservationSetup ? '\n' : ''}${reservationSetup}
+${stateSetup}${stateSetup && reservationSetup ? '\n' : ''}${reservationSetup}${lifecycleState ? `\n        ${lifecycleState.seeded ? 'assertEquals(' : 'state.currentState = '}${lifecycleState.value === null ? 'null' : `${lifecycleState.enumType}.${stateEnumEntry(lifecycleState.value)}`}${lifecycleState.seeded ? ', state.currentState)' : ''}\n` : ''}
 
         val command = ${commandName}(
 ${commandArguments(specCommand, selection)}
         )
 
-        val events = (object : ${decisionName} {}).decide(
+        ${lifecycleState?.reject ? `assertThrows<${this.model.rootPackage}.shared.domain.CommandRejectedException> {\n            ` : 'val events = '}(object : ${decisionName} {}).decide(
             command${stateArg}${reservationArgs}${portArgs}
         )
 
-${eventAssertions}
+${lifecycleState?.reject ? '        }' : eventAssertions}
     }`
         };
     },

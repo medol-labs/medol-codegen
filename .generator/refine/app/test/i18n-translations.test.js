@@ -7,6 +7,14 @@ const test = require('node:test');
 const { loadGeneratorModel } = require('../../../common/core/config-loader');
 const { buildFrontendModel } = require('../model-builder');
 
+test('multi-source state rejection messages translate each allowed state', () => {
+    const result = buildFrontendModel({rootPackage: 'sample.app', domain: 'Demo', contexts: [], slices: [], concepts: [], locales: ['zh-CN'], defaultLocale: 'zh-CN',
+        translations: {'zh-CN': {'Calibrate': '校准', 'Device': '设备', 'Registered': '已登记', 'Expired': '已超期'}},
+        transitions: [{context: 'Equipment', owner: {type: 'concept', name: 'Device'}, command: {name: 'Calibrate'}, from: 'Registered', fromStates: ['Registered', 'Expired']}]
+    });
+    assert.equal(result.i18n.messages['zh-CN']['errors.equipment.calibrate.requiresState'], '校准要求设备处于已登记、已超期状态。');
+});
+
 test('loads locale-specific model translations without replacing existing codegen translations', () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'refine-i18n-'));
     try {

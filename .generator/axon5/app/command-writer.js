@@ -92,6 +92,7 @@ const {
     infrastructurePortForCommand
 } = require('./infrastructure-port-writer');
 const {tenantScoped} = require('./tenant-support');
+const {renderCommandAssertions} = require('./command-assertions');
 
 function lowerCamel(value) {
     const name = pascal(value);
@@ -504,11 +505,12 @@ ${reservationSelections ? `\n${reservationSelections}` : ''}
                 ...(port?.failureEvent ? ['now'] : [])
             ].join(', ');
             const transition = transitionForCommand(this.model, command);
-            const portPrecondition = usePort && includeState && transition?.from
+            const portPrecondition = usePort && includeState && transitionUsesConceptState(this.model, transition)
                 ? `${renderStateGuard(this.model, transition)}\n`
                 : '';
+            const assertionPrecondition = usePort ? renderCommandAssertions(this.model, slice, command) : '';
             const portStatements = usePort
-                ? `${portPrecondition}        val input = ${capability.inputName}(${constructorArgsFromCommand(inputFields)})
+                ? `${portPrecondition}${assertionPrecondition ? assertionPrecondition + '\n' : ''}        val input = ${capability.inputName}(${constructorArgsFromCommand(inputFields)})
         val portResult = ${lowerCamel(capability.portName)}.${capability.methodName}(input)
 ${port?.failureEvent ? '        val now = java.time.LocalDateTime.now()\n' : ''}
 `
@@ -565,6 +567,16 @@ ${scoped ? '        }' : ''}
             .map(({transition}) => `import ${this.model.rootPackage}.${contextPackage(transition.context ?? slice.context)}.domain.states.${conceptStateEnumName(transition.owner.name)}`), (value) => value)
             .join('\n');
         const reservationStateImports = reservations.map((reservation) => `import ${reservation.packageName}.${reservation.stateName}`).join('\n');
+        const seenHandlerImports = new Set();
+        const handlerImports = [
+            commandImports, portImports, eligibilityRepositoryImports, eligibilityTypeImports,
+            stateImports, stateEnumImports, reservationStateImports
+        ].map(section => section.split('\n').filter(line => {
+            if (!line.trim()) return true;
+            if (seenHandlerImports.has(line)) return false;
+            seenHandlerImports.add(line);
+            return true;
+        }).join('\n')).join('\n');
         const injectEntityImport = slice.commands.some((command) =>
             !commandStartsLifecycle(command)
             || Boolean(relatedStateForCommand(this.model, slice, command, events))
@@ -578,13 +590,7 @@ import org.axonframework.messaging.commandhandling.annotation.CommandHandler
 import org.axonframework.messaging.eventhandling.gateway.EventAppender
 ${injectEntityImport}\
 import org.springframework.stereotype.Component
-${commandImports}
-${portImports}
-${eligibilityRepositoryImports}
-${eligibilityTypeImports}
-${stateImports}
-${stateEnumImports}
-${reservationStateImports}
+${handlerImports}
 
 @Component
 class ${pascal(slice.name)}CommandHandler(

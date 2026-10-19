@@ -39,6 +39,23 @@ class SameSchemaTenantAccess(
             throw AccessDeniedException("Invalid tenant identity.")
         } else value
 
+    override fun choices(userId: String, after: String?, size: Int): TenantChoicePage {
+        require(size in 1..200) { "Tenant choice page size must be between 1 and 200." }
+        val parameters = contract.accessParameters.toMutableMap()
+        parameters["user"] = identifier(userId, contract.uuidUserId)
+        val condition = after?.let {
+            require(it.isNotBlank() && it.length <= 255)
+            parameters["after"] = identifier(it, contract.uuidTenantId)
+            " AND " + contract.directoryIdColumn + " > :after"
+        }.orEmpty()
+        val query = contract.choiceQuery.ifBlank { contract.backgroundQuery }
+        val rows = jdbc.query(controlQuery(query) + condition + " ORDER BY " + contract.directoryIdColumn + " FETCH FIRST " + (size + 1) + " ROWS ONLY", parameters) { row, _ ->
+            val id = row.getString(1)
+            TenantChoice(id, if (contract.choiceQuery.isBlank()) id else row.getString(2) ?: id)
+        }
+        return TenantChoicePage(rows.take(size), if (rows.size > size) rows[size - 1].id else null)
+    }
+
     override fun forEachTenant(userId: String, block: () -> Unit) {
         var after: String? = null
         do {

@@ -1,6 +1,9 @@
 import { getAppConfig } from "./app-config";
 import { authBackendModule } from "./resources";
 import { supabaseClient } from "./supabase-client";
+<% if (typeof tenancyEnabled !== 'undefined' && tenancyEnabled) { -%>
+import { selectedTenant, clearSelectedTenant } from "@/lib/tenant-session";
+<% } -%>
 
 export type CurrentUser = {
   id: string;
@@ -58,6 +61,9 @@ export const authBackendBaseUrl = (): string =>
   );
 
 export const storeLocalAuth = (token: string, user?: CurrentUser) => {
+<% if (typeof tenancyEnabled !== 'undefined' && tenancyEnabled) { -%>
+  clearSelectedTenant();
+<% } -%>
   validatedAccessToken = null;
   localStorage.setItem(TOKEN_KEY, token);
   if (user) {
@@ -107,6 +113,9 @@ export const exchangePortalJwtForSystemSession = async (params: {
 };
 
 export const clearLocalAuth = () => {
+<% if (typeof tenancyEnabled !== 'undefined' && tenancyEnabled) { -%>
+  clearSelectedTenant();
+<% } -%>
   validatedAccessToken = null;
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
@@ -142,7 +151,12 @@ export const getAccessToken = async (): Promise<string | undefined> => {
 
 export const authHeaders = async (): Promise<Record<string, string>> => {
   const token = await getAccessToken();
+<% if (typeof tenancyEnabled !== 'undefined' && tenancyEnabled) { -%>
+  const tenant = selectedTenant();
+  return token ? { Authorization: `Bearer ${token}`, ...(tenant ? { "X-Tenant-Id": tenant.id } : {}) } : {};
+<% } else { -%>
   return token ? { Authorization: `Bearer ${token}` } : {};
+<% } -%>
 };
 
 export const authFetch = async (

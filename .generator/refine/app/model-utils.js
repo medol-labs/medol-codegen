@@ -189,6 +189,12 @@ function buildI18nModel(source, chapters, resources) {
         ['systemNotification.new', 'New notification'],
         ['systemNotification.unreadCount', '{{count}} unread'],
         ['systemNotification.noneUnread', 'No unread notifications'],
+        ['tenancy.select', 'Select tenant'],
+        ['tenancy.controlPlane', 'Platform management'],
+        ['tenancy.empty', 'No available tenants'],
+        ['tenancy.retry', 'Retry'],
+        ['tenancy.more', 'Load more'],
+        ['tenancy.loading', 'Loading'],
         ['errors.downloadUriEmpty', 'Download URI is empty.'],
         ['errors.downloadUriUnavailable', 'Download URI is not available.'],
         ['errors.downloadHttpFailed', 'Download failed with HTTP {{status}}.'],
@@ -480,6 +486,12 @@ function builtinTranslations(locale) {
         return {};
     }
     return {
+        'tenancy.select': '选择租户',
+        'tenancy.controlPlane': '平台管理',
+        'tenancy.empty': '暂无可用租户',
+        'tenancy.retry': '重试',
+        'tenancy.more': '加载更多',
+        'tenancy.loading': '加载中',
         'Add': '新增',
         'Cancel': '取消',
         'Create': '创建',

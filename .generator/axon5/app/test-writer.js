@@ -108,7 +108,7 @@ function literalFromExample(field, example) {
             return `${Number.parseFloat(value) || 0.0}`;
         case 'decimal':
         case 'bigdecimal':
-            return `BigDecimal("${value}")`;
+            return `java.math.BigDecimal("${value}")`;
         case 'date':
             return `java.time.LocalDate.parse("${value}")`;
         case 'datetime':
@@ -214,7 +214,8 @@ function assertionsForEvent(event, command) {
 }
 
 function specHasUniqueReservation(specification) {
-    return [...(specification.validates ?? []), ...(specification.expressions ?? [])]
+    const expressions = specification.validates?.length ? specification.validates : specification.expressions ?? [];
+    return expressions
         .some((expression) => String(expression ?? '').trim().toLowerCase().startsWith('unique '));
 }
 
@@ -442,13 +443,15 @@ ${commandArguments(command, selection)}
         const usesUuid = JSON.stringify(fields).includes('"UUID"');
 
         if (expectedEvents.length === 0) {
-            if (!commandStartsLifecycle(specCommand) || !specHasUniqueReservation(specification) || reservations.length === 0) return undefined;
-            const reservationSetup = reservations.map((reservation) => `        val ${reservation.stateParam} = ${reservation.stateName}()
+            const uniqueViolation = specHasUniqueReservation(specification);
+            const assertionViolation = (specification.validates ?? []).some((expression) => String(expression).trim().startsWith('assert '));
+            if (!commandStartsLifecycle(specCommand) || (!uniqueViolation && !assertionViolation) || (uniqueViolation && reservations.length === 0)) return undefined;
+            const reservationSetup = reservations.map((reservation) => uniqueViolation ? `        val ${reservation.stateParam} = ${reservation.stateName}()
         ${reservation.stateParam}.evolve(
             ${reservation.eventName}(
 ${reservationEventArguments(reservation, specCommand)}
             )
-        )`).join('\n');
+        )` : `        val ${reservation.stateParam} = ${reservation.stateName}()`).join('\n');
             const reservationArgs = reservations.map((reservation) => `,\n                ${reservation.stateParam} = ${reservation.stateParam}`).join('');
             const portResult = port ? renderPortResult(port, port.successEvent, specCommand) : undefined;
             const portArgs = port ? `,\n                portResult = ${portResult}${port.failureEvent ? ',\n                now = LocalDateTime.parse("2026-01-01T00:00:00")' : ''}` : '';

@@ -1,5 +1,8 @@
 import { UserAvatar } from "@/components/refine-ui/layout/user-avatar";
 import { ThemeToggle } from "@/components/refine-ui/theme/theme-toggle";
+<% if (typeof tenancyEnabled !== 'undefined' && tenancyEnabled) { -%>
+import { TenantSwitcher } from "./tenant-switcher";
+<% } -%>
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -60,6 +63,9 @@ function DesktopHeader() {
       )}
     >
       <HeaderExtensionActions />
+<% if (typeof tenancyEnabled !== 'undefined' && tenancyEnabled) { -%>
+      <TenantSwitcher />
+<% } -%>
       <NotificationIndicator />
       <ModuleSwitcher />
       <LanguageSwitcher />
@@ -145,6 +151,9 @@ function MobileHeader() {
 
       <div className={cn("flex", "shrink-0", "items-center", "gap-1")}>
         <HeaderExtensionActions compact />
+<% if (typeof tenancyEnabled !== 'undefined' && tenancyEnabled) { -%>
+        <TenantSwitcher compact />
+<% } -%>
         <NotificationIndicator compact />
         <ModuleSwitcher compact />
         <LanguageSwitcher compact />

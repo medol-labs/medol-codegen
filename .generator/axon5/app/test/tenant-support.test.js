@@ -201,3 +201,37 @@ test('single-module skeleton declares the client used by its shared Kubernetes c
     assert(template.includes(`<fabric8-kubernetes-client.version>${version}</fabric8-kubernetes-client.version>`));
     assert.match(template, /<groupId>io\.fabric8<\/groupId>\s*<artifactId>kubernetes-client<\/artifactId>\s*<version>\$\{fabric8-kubernetes-client.version\}<\/version>/);
 });
+
+test('tenant choices use mapped labels, member identity and bounded keyset pagination', () => {
+    const gen = generator({tenancy: tenancy()});
+    gen.model.tenancy.directory.mappings.label = 'accountName';
+    gen.model.slices[0].readmodels[0].fields.push({name: 'accountName', type: 'String'});
+    const query = tenantAccessQuery(gen.model);
+    assert.match(query.choiceSql, /SELECT DISTINCT d\."account_key", d\."account_name"/);
+    assert.match(query.choiceSql, /m\."person_key" = :user/);
+    assert.match(query.choiceSql, /d\."status" = :d0 AND m\."status" = :m0/);
+    writeTenantRuntimeContract(gen);
+    const runtime = gen.files.get('shared/shared/application/tenancy/SameSchemaTenantAccess.kt');
+    assert.match(runtime, /require\(size in 1\.\.200\)/);
+    assert.match(runtime, / > :after/);
+    assert.match(runtime, /\(size \+ 1\)/);
+    const web = gen.files.get('shared/shared/application/tenancy/TenantWebConfiguration.kt');
+    assert.match(web, /access\.choices\(users\.currentUser\(\)\.id\.toString\(\)/);
+    assert.match(web, /PreAuthorize\("isAuthenticated\(\)"\)/);
+    assert.ok(web.indexOf('handler.beanType == TenantChoiceResource::class.java') < web.indexOf('request.getHeader("X-Tenant-Id")'));
+});
+
+test('flat tenant-enabled applications compile embedded UmaDB without introducing a reactor', () => {
+    const template = fs.readFileSync(path.join(__dirname, '../templates/pom.xml.tpl'), 'utf8');
+    const render = embeddedInfra => require('ejs').render(template, {
+        rootPackage: 'sample.app', appName: 'sample', appPort: 8080,
+        hasSharedKernel: false, hasInfra: false, embeddedInfra
+    });
+    const enabled = render(true);
+    assert.match(enabled, /protobuf-maven-plugin/);
+    assert.match(enabled, /src\/main\/java/);
+    assert.match(enabled, /generated-sources\/protobuf\/java/);
+    assert.match(enabled, /<phase>process-test-sources<\/phase>/);
+    assert.doesNotMatch(enabled, /<modules>|<artifactId>axon-event-storage-umadb<\/artifactId>/);
+    assert.doesNotMatch(render(false), /grpc-netty-shaded|protobuf-maven-plugin/);
+});

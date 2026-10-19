@@ -4,6 +4,7 @@
  */
 
 const path = require('path');
+const fs = require('fs');
 const {tenantDatabaseName} = require('../../common/core/tenant-storage');
 const {configureValueTypes} = require('../../common/util/generator');
 const {pascal, kebab, safeDatabaseName, safeDatabaseIdentifier, safeIdentifier, filterModelByDeployment} = require('./model-helpers');
@@ -167,13 +168,26 @@ const applicationWriterMethods = {
         const applicationClass = `${pascal(this.model.domain)}Application`;
         const runtime = this._runtimeConfig(appName);
         const hasInfra = this._usesInfraModule();
+        const hasEventStorage = hasInfra || Boolean(this.model.tenancy);
         this.fs.copyTpl(this.templatePath('pom.xml.tpl'), this._destPath('pom.xml'), {
             rootPackage: this.model.rootPackage,
             appName,
             appPort: runtime.appPort,
             hasInfra,
+            embeddedInfra: Boolean(this.model.tenancy) && !hasInfra,
             hasSharedKernel: this._usesSharedKernelModule()
         });
+        if (this.model.tenancy && !hasInfra) {
+            this.fs.copyTpl(this.templatePath('infra/src/main/java/umadb'),
+                this._destPath(`src/main/java/${this.model.rootPackage.replaceAll('.', '/')}/infra/umadb`),
+                {rootPackage: this.model.rootPackage});
+            this.fs.copy(this.templatePath('infra/src/main/proto'), this._destPath('src/main/proto'));
+        } else if (!hasInfra) {
+            for (const file of fs.readdirSync(this.templatePath('infra/src/main/java/umadb'))) {
+                this.fs.delete(this._destPath(`src/main/java/${this.model.rootPackage.replaceAll('.', '/')}/infra/umadb/${file}`));
+            }
+            this.fs.delete(this._destPath('src/main/proto/v1/umadb.proto'));
+        }
         this.fs.copyTpl(this.templatePath('Application.kt.tpl'), this._rootKotlinPath('Application.kt'), {
             rootPackage: this.model.rootPackage,
             applicationClass
@@ -200,13 +214,13 @@ const applicationWriterMethods = {
             tenancyFixture: tenantTestFixture(this.model)
         });
         if (!this._usesSharedKernelModule()) {
-            this._writeSharedKernelArtifacts({hasInfra});
+            this._writeSharedKernelArtifacts({hasInfra: hasEventStorage});
         }
         this.fs.copyTpl(this.templatePath('application.yml'), this._destPath('src/main/resources/application.yml'), {
             ...runtime,
             moduleEnvFile: this.modulePrefix ? `${this.modulePrefix}/.env` : '.env',
             rootPackage: this.model.rootPackage,
-            hasInfra,
+            hasInfra: hasEventStorage,
             tenancyEnabled: Boolean(this.model.tenancy),
             migrationTable: safeDatabaseIdentifier(`${appName}_flyway_history`)
         });

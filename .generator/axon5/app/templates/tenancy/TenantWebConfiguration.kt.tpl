@@ -38,6 +38,7 @@ class TenantRequestInterceptor(
                 if (authentication == null || !authentication.isAuthenticated || authentication is AnonymousAuthenticationToken) {
                     throw AccessDeniedException("Authentication is required for tenant access.")
                 }
+                if (handler.beanType == TenantChoiceResource::class.java) return true
                 if (contract.controlPlanePackages.any { owner.startsWith(it) }) return true
                 val forwarded = request.getHeader(TenantRelay.HEADER)
                 val requestedIdentity = if (forwarded != null) {
@@ -51,4 +52,15 @@ class TenantRequestInterceptor(
                 request.setAttribute(TenantScope.REQUEST_ATTRIBUTE, identity)
                 return true
             }
+}
+
+@org.springframework.web.bind.annotation.RestController
+@org.springframework.web.bind.annotation.RequestMapping("/api/tenancy")
+class TenantChoiceResource(private val access: TenantAccess, private val users: CurrentUserProvider) {
+    @org.springframework.security.access.prepost.PreAuthorize("isAuthenticated()")
+    @org.springframework.web.bind.annotation.GetMapping("/tenants")
+    fun choices(
+        @org.springframework.web.bind.annotation.RequestParam(required = false) after: String?,
+        @org.springframework.web.bind.annotation.RequestParam(defaultValue = "50") size: Int
+    ): TenantChoicePage = access.choices(users.currentUser().id.toString(), after, size.coerceIn(1, 200))
 }

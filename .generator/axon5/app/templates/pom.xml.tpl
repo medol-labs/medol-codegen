@@ -24,6 +24,10 @@
         <jib.container.platform.architecture>amd64</jib.container.platform.architecture>
         <docker.image.prefix>medol</docker.image.prefix>
         <kotlin.compiler.daemon>true</kotlin.compiler.daemon>
+<% if (typeof embeddedInfra !== 'undefined' && embeddedInfra) { -%>
+        <grpc.version>1.79.0</grpc.version>
+        <protobuf.version>4.34.0</protobuf.version>
+<% } -%>
     </properties>
     <dependencyManagement>
         <dependencies>
@@ -44,6 +48,25 @@
         </dependencies>
     </dependencyManagement>
     <dependencies>
+<% if (typeof embeddedInfra !== 'undefined' && embeddedInfra) { -%>
+<% for (const artifact of ['grpc-netty-shaded', 'grpc-protobuf', 'grpc-stub']) { -%>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId><%= artifact %></artifactId>
+            <version>${grpc.version}</version>
+        </dependency>
+<% } -%>
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java</artifactId>
+            <version>${protobuf.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>javax.annotation</groupId>
+            <artifactId>javax.annotation-api</artifactId>
+            <version>1.3.2</version>
+        </dependency>
+<% } -%>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
@@ -171,9 +194,35 @@
         </dependency>
     </dependencies>
     <build>
-        <sourceDirectory>${project.basedir}/src/main/kotlin</sourceDirectory>
+<% if (typeof embeddedInfra !== 'undefined' && embeddedInfra) { -%>
+        <extensions>
+            <extension>
+                <groupId>kr.motd.maven</groupId>
+                <artifactId>os-maven-plugin</artifactId>
+                <version>1.7.1</version>
+            </extension>
+        </extensions>
+<% } -%>
+        <sourceDirectory>${project.basedir}/src/main/<%= typeof embeddedInfra !== 'undefined' && embeddedInfra ? 'java' : 'kotlin' %></sourceDirectory>
         <testSourceDirectory>${project.basedir}/src/test/kotlin</testSourceDirectory>
         <plugins>
+<% if (typeof embeddedInfra !== 'undefined' && embeddedInfra) { -%>
+            <plugin>
+                <groupId>org.xolstice.maven.plugins</groupId>
+                <artifactId>protobuf-maven-plugin</artifactId>
+                <version>0.6.1</version>
+                <configuration>
+                    <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
+                    <pluginId>grpc-java</pluginId>
+                    <pluginArtifact>io.grpc:protoc-gen-grpc-java:${grpc.version}:exe:${os.detected.classifier}</pluginArtifact>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals><goal>compile</goal><goal>compile-custom</goal></goals>
+                    </execution>
+                </executions>
+            </plugin>
+<% } -%>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
@@ -211,7 +260,7 @@
                 <groupId>org.jetbrains.kotlin</groupId>
                 <artifactId>kotlin-maven-plugin</artifactId>
                 <version>${kotlin.version}</version>
-                <extensions>true</extensions>
+                <extensions><%= typeof embeddedInfra !== 'undefined' && embeddedInfra ? 'false' : 'true' %></extensions>
                 <configuration>
                     <jvmTarget>${java.version}</jvmTarget>
                     <compilerPlugins>
@@ -220,6 +269,28 @@
                         <plugin>no-arg</plugin>
                     </compilerPlugins>
                 </configuration>
+<% if (typeof embeddedInfra !== 'undefined' && embeddedInfra) { -%>
+                <executions>
+                    <execution>
+                        <id>compile</id>
+                        <phase>process-sources</phase>
+                        <goals><goal>compile</goal></goals>
+                        <configuration>
+                            <sourceDirs>
+                                <sourceDir>${project.basedir}/src/main/kotlin</sourceDir>
+                                <sourceDir>${project.basedir}/src/main/java</sourceDir>
+                                <sourceDir>${project.build.directory}/generated-sources/protobuf/java</sourceDir>
+                                <sourceDir>${project.build.directory}/generated-sources/protobuf/grpc-java</sourceDir>
+                            </sourceDirs>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>test-compile</id>
+                        <phase>process-test-sources</phase>
+                        <goals><goal>test-compile</goal></goals>
+                    </execution>
+                </executions>
+<% } -%>
                 <dependencies>
                     <dependency>
                         <groupId>org.jetbrains.kotlin</groupId>
@@ -233,6 +304,16 @@
                     </dependency>
                 </dependencies>
             </plugin>
+<% if (typeof embeddedInfra !== 'undefined' && embeddedInfra) { -%>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <executions>
+                    <execution><id>default-compile</id><phase>none</phase></execution>
+                    <execution><id>java-compile</id><phase>compile</phase><goals><goal>compile</goal></goals></execution>
+                </executions>
+            </plugin>
+<% } -%>
         </plugins>
     </build>
 </project>

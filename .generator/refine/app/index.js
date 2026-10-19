@@ -446,6 +446,7 @@ const RefineGenerator = class extends Generator {
     }
 
     _writeFrameworkComponents() {
+        this._writeTenantRuntime();
         this.fs.copy(
             this.templatePath('root/src/components/refine-ui/fields/copyable-text.tsx'),
             this.destinationPath('./src/components/refine-ui/fields/copyable-text.tsx')
@@ -484,6 +485,20 @@ const RefineGenerator = class extends Generator {
         );
     }
 
+    _writeTenantRuntime() {
+        const tenancyEnabled = Boolean(codegenModel.tenancy?.enabled);
+        for (const file of ['providers/api-auth.ts', 'components/refine-ui/layout/header.tsx']) {
+            this.fs.copyTpl(this.templatePath('root/src/' + file), this.destinationPath('src/' + file), {tenancyEnabled});
+        }
+        for (const [template, destination] of [
+            ['tenant-session.ts.tpl', 'src/lib/tenant-session.ts'],
+            ['tenant-switcher.tsx.tpl', 'src/components/refine-ui/layout/tenant-switcher.tsx']
+        ]) {
+            if (tenancyEnabled) this.fs.copyTpl(this.templatePath('tenancy/' + template), this.destinationPath(destination), {tenantScopeKey: JSON.stringify(codegenModel.domain ?? 'application')});
+            else this.fs.delete(this.destinationPath(destination));
+        }
+    }
+
     _writeSkeleton(frontendApp) {
         const model = buildFrontendModel(codegenModel, undefined, { frontendApp });
         const appName = model.frontendApplication?.name ?? codegenModel?.domain ?? 'frontend-foundation';
@@ -495,7 +510,8 @@ const RefineGenerator = class extends Generator {
             imageName,
             imageTarName: `${imageName}-images.tar`,
             backendModules: model.backendModules,
-            authBackendModule: model.authBackendModule
+            authBackendModule: model.authBackendModule,
+            tenancyEnabled: Boolean(codegenModel.tenancy?.enabled)
         };
 
         this.fs.copyTpl(
@@ -503,6 +519,7 @@ const RefineGenerator = class extends Generator {
             this.destinationPath('.'),
             skeletonModel
         );
+        this._writeTenantRuntime();
         const appExtensionsPath = this.destinationPath('./src/domain/app-extensions.tsx');
         if (!fs.existsSync(appExtensionsPath)) {
             this.fs.copy(

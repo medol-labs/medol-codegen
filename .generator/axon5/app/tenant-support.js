@@ -75,8 +75,10 @@ function tenantAccessQuery(model) {
         throw new Error('Same-schema tenancy currently requires UUID or String tenant and user identifiers.');
     }
     const sql = `SELECT 1 FROM ${directory.table} d JOIN ${members.table} m ON ${members.column(contract.memberships.mappings.tenant)} = ${directory.column(contract.directory.mappings.id)} WHERE ${directory.column(contract.directory.mappings.id)} = :tenant AND ${members.column(contract.memberships.mappings.user)} = :user AND ${[...directory.conditions, ...members.conditions].join(' AND ')} FETCH FIRST 1 ROW ONLY`;
-    const backgroundSql = `SELECT DISTINCT ${directory.column(contract.directory.mappings.id)} FROM ${directory.table} d JOIN ${members.table} m ON ${members.column(contract.memberships.mappings.tenant)} = ${directory.column(contract.directory.mappings.id)} WHERE ${members.column(contract.memberships.mappings.user)} = :user AND ${[...directory.conditions, ...members.conditions].join(' AND ')}`;
-    return {sql, parameters, backgroundSql, directoryIdColumn: directory.column(contract.directory.mappings.id), uuidTenantId: tenantType === 'UUID', uuidUserId: userType === 'UUID'};
+    const memberSource = `FROM ${directory.table} d JOIN ${members.table} m ON ${members.column(contract.memberships.mappings.tenant)} = ${directory.column(contract.directory.mappings.id)} WHERE ${members.column(contract.memberships.mappings.user)} = :user AND ${[...directory.conditions, ...members.conditions].join(' AND ')}`;
+    const backgroundSql = `SELECT DISTINCT ${directory.column(contract.directory.mappings.id)} ${memberSource}`;
+    const choiceSql = `SELECT DISTINCT ${directory.column(contract.directory.mappings.id)}, ${directory.column(contract.directory.mappings.label ?? contract.directory.mappings.id)} ${memberSource}`;
+    return {sql, parameters, backgroundSql, choiceSql, directoryIdColumn: directory.column(contract.directory.mappings.id), uuidTenantId: tenantType === 'UUID', uuidUserId: userType === 'UUID'};
 }
 
 function tenantContract(model) {
@@ -144,7 +146,8 @@ data class TenantCapabilityContract(
     val tenantSchemaHash: String = "",
     val deploymentId: String = "application",
     val migrationLocation: String = "db/tenant-migration/application",
-    val migrationHistoryTable: String = "application_tenant_flyway_history"
+    val migrationHistoryTable: String = "application_tenant_flyway_history",
+    val choiceQuery: String = ""
 )
 
 /**
@@ -202,6 +205,7 @@ class TenantCapabilityConfiguration {
         controlPlanePackages = setOf(${controlContexts.map((context) => quote(`${generator.model.rootPackage}.${contextPackage(context)}.`)).join(', ')}),
         accessQuery = ${quote(query.sql)},
         backgroundQuery = ${quote(query.backgroundSql)},
+        choiceQuery = ${quote(query.choiceSql)},
         directoryIdColumn = ${quote(query.directoryIdColumn)},
         accessParameters = mapOf(${Object.entries(query.parameters).map(([key, value]) => `${quote(key)} to ${typeof value === 'string' ? quote(value) : String(value)}`).join(', ')}),
         uuidTenantId = ${query.uuidTenantId},

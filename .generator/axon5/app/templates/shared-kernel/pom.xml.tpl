@@ -28,6 +28,13 @@
     <dependencyManagement>
         <dependencies>
             <dependency>
+                <groupId>io.fabric8</groupId>
+                <artifactId>kubernetes-client-bom</artifactId>
+                <version>${fabric8-kubernetes-client.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
                 <groupId>org.axonframework</groupId>
                 <artifactId>axon-framework-bom</artifactId>
                 <version>${axon.version}</version>

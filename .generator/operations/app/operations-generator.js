@@ -9,6 +9,8 @@ const { dockerComposeFiles } = require('./renderers/docker-compose-renderer');
 const { k3sFiles, kubernetesFiles } = require('./renderers/kubernetes-renderer');
 const { resolveOperationsModel } = require('./environment-resolver');
 const { renderNetworkTopology } = require('./renderers/network-topology-renderer');
+const {readFileSync} = require('node:fs');
+const path = require('node:path');
 
 const targets = ['all', 'model', 'apisix', 'docker-compose', 'kubernetes', 'k3s', 'harbor', 'zot'];
 
@@ -27,6 +29,7 @@ function generateOperationsFiles(model, options = {}) {
         [`${environmentRoot}/README.md`]: renderDeployReadme(baseModel, environment),
         [`${environmentRoot}/network-topology.md`]: renderNetworkTopology(baseModel, environment),
         [`${environmentRoot}/images.mjs`]: renderOperationsImageScript(baseModel, environment),
+        [`${environmentRoot}/image-config.mjs`]: readFileSync(path.join(__dirname, 'image-config-runtime.mjs'), 'utf8'),
         ...documentSupportFiles(baseModel, environment)
     };
 
@@ -200,6 +203,7 @@ import {copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, 
 import {basename, dirname, join, relative, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
+import {resolveImageConfig} from './image-config.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const args = parseArgs(process.argv.slice(2));
@@ -207,9 +211,10 @@ const command = args._[0] ?? 'help';
 const monorepoRoot = resolve(scriptDir, args.root ?? process.env.MONOREPO_ROOT ?? '../..');
 const platform = String(args.platform ?? process.env.DOCKER_DEFAULT_PLATFORM ?? '').trim();
 const dependencyPlatform = platform || hostDockerPlatform();
-const imagePrefix = String(args.prefix ?? process.env.DOCKER_IMAGE_PREFIX ?? readLocalRegistryPrefix() ?? '${defaultPrefix}').replace(/\\/+$/g, '');
+const imageConfig = resolveImageConfig(scriptDir, {prefix: args.prefix, version: args.version, mode: args['image-source']});
+const imagePrefix = imageConfig.buildPrefix;
 const dependencyImagePrefix = String(args['dependency-prefix'] ?? process.env.DEPENDENCY_IMAGE_PREFIX ?? defaultDependencyImagePrefix(imagePrefix)).replace(/\\/+$/g, '');
-const imageVersion = String(args.version ?? process.env.IMAGE_VERSION ?? '${model.imageTag ?? '0.0.1-SNAPSHOT'}');
+const imageVersion = imageConfig.version;
 const outputRoot = resolve(scriptDir, args.output ?? process.env.IMAGE_BUNDLE_OUTPUT ?? '.work/image-bundle');
 const packageArchive = resolve(scriptDir, args.archive ?? process.env.IMAGE_BUNDLE_ARCHIVE ?? \`\${outputRoot}.tar.gz\`);
 const dryRun = Boolean(args['dry-run']);
@@ -233,13 +238,6 @@ const appArchives = {
     ]))
 };
 const dependencyArchive = join(outputRoot, 'images', 'dependency-images.tar');
-
-function readLocalRegistryPrefix() {
-    const modelPath = join(scriptDir, 'operations-model.local.json');
-    if (!existsSync(modelPath)) return undefined;
-    const localModel = JSON.parse(readFileSync(modelPath, 'utf8'));
-    return localModel.registry?.imagePrefix;
-}
 
 switch (command) {
     case 'list':
@@ -585,6 +583,8 @@ function printPlan() {
     console.log('[operations-images] dependency platform:', dependencyPlatform);
     console.log('[operations-images] fast build:', fastBuild ? 'enabled' : 'disabled');
     console.log('[operations-images] image prefix:', imagePrefix);
+    console.log('[operations-images] deployment image prefix:', imageConfig.imagePrefix);
+    console.log('[operations-images] image source:', imageConfig.mode);
     console.log('[operations-images] dependency image prefix:', dependencyImagePrefix);
     console.log('[operations-images] image version:', imageVersion);
     console.log('[operations-images] output:', outputRoot);
@@ -792,6 +792,7 @@ Commands:
 
 Options:
   --prefix <name>                 Image prefix or registry namespace. Defaults to DOCKER_IMAGE_PREFIX or ${defaultPrefix}.
+  --image-source <import|registry> Image acquisition policy shared with deployment tools.
   --dependency-prefix <name>      Registry root for dependency mirrors. Defaults to DEPENDENCY_IMAGE_PREFIX, or the registry host from --prefix.
   --dependency-image <image[,..]> Add extra dependency images to pull/export/push.
   --version <tag>                 Image tag. Defaults to IMAGE_VERSION or ${model.imageTag ?? '0.0.1-SNAPSHOT'}.

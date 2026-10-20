@@ -200,6 +200,10 @@ test('single-module skeleton declares the client used by its shared Kubernetes c
     const version = sharedTemplate.match(/<fabric8-kubernetes-client.version>([^<]+)</)[1];
     assert(template.includes(`<fabric8-kubernetes-client.version>${version}</fabric8-kubernetes-client.version>`));
     assert.match(template, /<groupId>io\.fabric8<\/groupId>\s*<artifactId>kubernetes-client<\/artifactId>\s*<version>\$\{fabric8-kubernetes-client.version\}<\/version>/);
+    for (const pom of [template, sharedTemplate]) {
+        assert.match(pom, /<artifactId>kubernetes-client-bom<\/artifactId>\s*<version>\$\{fabric8-kubernetes-client.version\}<\/version>\s*<type>pom<\/type>\s*<scope>import<\/scope>/);
+        assert(pom.indexOf('<artifactId>kubernetes-client-bom</artifactId>') < pom.indexOf('<artifactId>spring-cloud-dependencies</artifactId>'));
+    }
 });
 
 test('tenant choices use mapped labels, member identity and bounded keyset pagination', () => {

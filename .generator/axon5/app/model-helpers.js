@@ -75,7 +75,7 @@ function reservationForUniqueExpression(slice, model, command, commandFields, id
         optional: false,
         tagName: field.tagName
     }));
-    const originalFields = sourceFields.map((field) => ({
+    const originalFields = sourceFields.filter((field) => !idFields.some((id) => id.name === field.name)).map((field) => ({
         ...field,
         tagName: field.name
     }));

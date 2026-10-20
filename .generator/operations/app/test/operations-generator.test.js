@@ -476,7 +476,8 @@ test('derives image names and K3s registry configuration from optional registry 
     const localModel = JSON.parse(modelFiles['operations/dev/operations-model.local.json']);
     assert.equal(localModel.registry.host, 'registry.internal:5000');
     assert.deepEqual(Object.keys(localModel), ['registry']);
-    assert.match(modelFiles['operations/dev/images.mjs'], /DOCKER_IMAGE_PREFIX \?\? readLocalRegistryPrefix\(\) \?\? 'team'/);
+    assert.match(modelFiles['operations/dev/images.mjs'], /resolveImageConfig\(scriptDir/);
+    assert.match(modelFiles['operations/dev/image-config.mjs'], /operations-model\.local\.json/);
     assert.doesNotMatch(modelFiles['operations/dev/images.mjs'], /registry\.internal:5000/);
     const deployFiles = generateOperationsFiles(model, { target: 'all', environment: 'dev' });
     assert.doesNotMatch(deployFiles['operations/dev/docker-compose/docker-compose.yml'], /registry\.internal:5000/);

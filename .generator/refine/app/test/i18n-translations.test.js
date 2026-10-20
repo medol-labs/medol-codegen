@@ -7,6 +7,17 @@ const test = require('node:test');
 const { loadGeneratorModel } = require('../../../common/core/config-loader');
 const { buildFrontendModel } = require('../model-builder');
 
+test('unique rejection messages use modeled descriptions and preserve translations', () => {
+    const result = buildFrontendModel({rootPackage: 'sample.app', domain: 'Demo', contexts: [], concepts: [], transitions: [],
+        locales: ['zh-CN'], translations: {'zh-CN': {'Membership Already Exists': '成员关系已存在'}},
+        slices: [{context: 'Teams', title: 'Invite Member', commands: [{title: 'Invite Member', fields: []}],
+            specifications: [{expressions: ['unique (Membership.teamId, Membership.memberId)'],
+                then: {outcome: 'REJECT', description: 'Membership Already Exists'}}]}]
+    });
+    assert.equal(result.i18n.messages.en['errors.teams.inviteMember.uniqueViolation'], 'Membership Already Exists');
+    assert.equal(result.i18n.messages['zh-CN']['errors.teams.inviteMember.uniqueViolation'], '成员关系已存在');
+});
+
 test('multi-source state rejection messages translate each allowed state', () => {
     const result = buildFrontendModel({rootPackage: 'sample.app', domain: 'Demo', contexts: [], slices: [], concepts: [], locales: ['zh-CN'], defaultLocale: 'zh-CN',
         translations: {'zh-CN': {'Calibrate': '校准', 'Device': '设备', 'Registered': '已登记', 'Expired': '已超期'}},

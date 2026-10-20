@@ -132,6 +132,7 @@ function normalizeRegistryConfig(value) {
     return {
         imagePrefix,
         ...(host ? { host } : {}),
+        ...(value.pushHost ? {pushHost: trimSlash(value.pushHost)} : {}),
         ...(namespace ? { namespace } : {}),
         scheme: value.scheme ?? (value.insecure === false ? 'https' : 'http'),
         insecure: value.insecure !== false

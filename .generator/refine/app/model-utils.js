@@ -287,6 +287,19 @@ function buildI18nModel(source, chapters, resources) {
 }
 
 function addGeneratedErrorI18nEntries(entries, source) {
+    for (const slice of source.slices ?? []) {
+        const uniqueRejection = (slice.specifications ?? []).find((spec) =>
+            [...(spec.validates ?? []), ...(spec.expressions ?? [])].some((value) => /^unique\s/i.test(String(value)))
+            && spec.then?.outcome === 'REJECT' && spec.then.description
+        );
+        if (!uniqueRejection) continue;
+        for (const command of slice.commands ?? []) {
+            entries.push([
+                `errors.${i18nContextKey(slice.context ?? slice.chapter)}.${camel(command.title ?? command.name)}.uniqueViolation`,
+                uniqueRejection.then.description
+            ]);
+        }
+    }
     (source.transitions ?? []).forEach((transition) => {
         if (!(transition?.fromStates?.length || transition?.from) || transition.owner?.type !== 'concept') return;
         const commandName = transition.command?.name ?? transition.command?.title ?? 'Command';

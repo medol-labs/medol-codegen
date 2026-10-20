@@ -672,7 +672,7 @@ function commandWorkflowFields(command, readModel, allEvents, workflow) {
                 workflow.commandSliceFor(command),
                 workflow
             );
-            if (select && !field.idAttribute && (hasExplicitReadModelSource(field) || isReferenceSelectField(field))) {
+            if (select && (hasExplicitReadModelSource(field) || (!field.idAttribute && isReferenceSelectField(field)))) {
                 selects.set(field.name, select);
             }
 

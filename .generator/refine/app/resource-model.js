@@ -286,7 +286,12 @@ function toCommand(command, resourceRoute, resourceComponent, readModel, allEven
         ...(command.fields ?? []),
         ...selectionFields
     ]);
-    const normalizedFields = normalizeFields(rawFields).filter((field) => !field.generated);
+    const normalizedFields = normalizeFields(rawFields)
+        .filter((field) => !field.generated)
+        .map((field) => ({
+            ...field,
+            selectWhenUnbound: !!(field.technicalAttribute && field.source?.kind === 'direct' && workflow.selectForField(field))
+        }));
     const snapshotFields = commandSnapshotFields(normalizedFields, workflow);
     const snapshotFieldNames = new Set(snapshotFields.map((field) => field.name));
     const snapshotsByKeyField = snapshotFields.reduce((result, field) => {
@@ -490,7 +495,7 @@ function isFileUploadProducerCommand(command, rawFields) {
 }
 
 function isCommandFormField(field) {
-    if (field.excludeFromForm || field.hidden || field.readOnly || field.technicalAttribute || field.portOutput) {
+    if (field.excludeFromForm || field.hidden || field.readOnly || (field.technicalAttribute && !field.selectWhenUnbound) || field.portOutput) {
         return false;
     }
     return true;

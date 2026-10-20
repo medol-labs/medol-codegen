@@ -11,6 +11,7 @@ const {configureValueTypes} = require('../../common/util/generator');
 const {applicationWriterMethods} = require('./application-writer');
 const {domainWriterMethods} = require('./domain-writer');
 const {sliceWriterMethods} = require('./slice-writer');
+const {cleanupRelocatedContexts} = require('./context-cleanup');
 
 function listOption(value) {
     if (Array.isArray(value)) {
@@ -171,6 +172,9 @@ class Axon5Generator extends Generator {
 
     writing() {
         const type = String(this.answers.generatorType ?? '').toLowerCase();
+        if (this._isMonoMode() && (type === 'slices' || type === 'all')) {
+            cleanupRelocatedContexts(this);
+        }
         if (type === 'skeleton' || type === 'all') {
             if (this._isMonoMode()) {
                 this._writeMonoSkeleton();

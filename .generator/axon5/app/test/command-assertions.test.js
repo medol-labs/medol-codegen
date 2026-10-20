@@ -22,3 +22,22 @@ test('command assertions are executable for primitive numbers, scalar numbers an
         assert.throws(() => renderCommandAssertions({}, {specifications: [{expressions: ['assert Other.value > 0']}]}, command), /external operand/);
     } finally { configureValueTypes([]); }
 });
+
+test('decimal literals are not interpreted as external command references', () => {
+    const command = {name: 'Check', fields: [{name: 'score', type: 'Decimal'}]};
+    for (const [expression, comparison] of [
+        ['assert Check.score < 0.95', 'BigDecimal(command.score.toString()).compareTo(java.math.BigDecimal("0.95")) < 0'],
+        ['assert 0.95 > Check.score', 'BigDecimal("0.95").compareTo(java.math.BigDecimal(command.score.toString())) > 0'],
+        ['assert Check.score >= -0.25', 'BigDecimal(command.score.toString()).compareTo(java.math.BigDecimal("-0.25")) >= 0']
+    ]) {
+        const code = renderCommandAssertions({rootPackage: 'sample'}, {specifications: [{expressions: [expression]}]}, command);
+        assert.ok(code.includes(comparison), code);
+    }
+    const slice = {
+        commands: [command, {name: 'Other'}],
+        specifications: [{expressions: ['assert Other.score < 0.95']}]
+    };
+    assert.equal(renderCommandAssertions({}, slice, command), '');
+    slice.specifications[0].expressions = ['assert Check.score < Other.score'];
+    assert.throws(() => renderCommandAssertions({}, slice, command), /external operand/);
+});

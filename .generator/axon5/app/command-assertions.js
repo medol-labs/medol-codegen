@@ -43,9 +43,11 @@ function renderCommandAssertions(model, slice, command) {
     return expressions.map(expression => {
         const [leftToken, operator, rightToken] = parseAssertion(expression);
         // Specifications may describe another command in the same slice.
-        const owners = [leftToken, rightToken].filter(token => /^\w+\./.test(token)).map(token => token.split('.')[0]);
+        const owners = [leftToken, rightToken]
+            .map(token => /^([A-Za-z_]\w*)\./.exec(token)?.[1])
+            .filter(Boolean);
         if (owners.length && owners.every(owner => owner !== command.name && slice.commands?.some(item => item.name === owner))) return '';
-        if ([leftToken, rightToken].some(token => /^\w+\./.test(token) && token.split('.')[0] !== command.name)) {
+        if (owners.some(owner => owner !== command.name)) {
             throw new Error(`Cannot generate ${command.name} assertion with an external operand: ${expression}`);
         }
         const left = operand(leftToken, command);

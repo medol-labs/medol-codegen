@@ -489,6 +489,11 @@ export const <%= command.pageComponent %> = () => {
           ) : null}
 <% }) -%>
 <% command.fields.forEach((field) => { -%>
+<% if (field.selectWhenUnbound) { -%>
+          {defaultValues.<%= field.name %> !== undefined && defaultValues.<%= field.name %> !== null && defaultValues.<%= field.name %> !== "" ? (
+            <input type="hidden" {...form.register("<%= field.name %>" as never)} />
+          ) : (
+<% } -%>
 <% if (field.object && field.list) { -%>
           <div className="space-y-4 rounded-md border p-4">
             <div className="flex items-center justify-between gap-2">
@@ -848,6 +853,9 @@ export const <%= command.pageComponent %> = () => {
               </FormItem>
             )}
           />
+<% } -%>
+<% if (field.selectWhenUnbound) { -%>
+          )}
 <% } -%>
 <% }) -%>
           <div className="flex gap-2">

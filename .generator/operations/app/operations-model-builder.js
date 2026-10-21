@@ -22,7 +22,10 @@ function buildOperationsModel(source = {}, config = {}) {
     const systemName = operationsKebab(domainName) || 'medol-application';
     const registry = normalizeRegistryConfig(operationsConfig.registry);
     const imagePrefix = trimSlash(operationsConfig.imagePrefix ?? registry?.imagePrefix ?? DEFAULT_IMAGE_PREFIX);
-    const imageTag = operationsConfig.imageTag ?? operationsConfig.tag ?? DEFAULT_IMAGE_TAG;
+    const metadata = source.metadata;
+    const release = metadata?.source?.release;
+    const imageTag = operationsConfig.imageTag ?? operationsConfig.tag
+        ?? (release?.channel === 'stable' && release.label ? `${release.label}.0` : DEFAULT_IMAGE_TAG);
     const backendApplications = buildBackendApplications(source, operationsConfig, imagePrefix);
     const frontends = buildFrontendApplications(source, systemName, operationsConfig, imagePrefix, backendApplications);
     const infrastructure = buildInfrastructure(operationsConfig);
@@ -37,6 +40,7 @@ function buildOperationsModel(source = {}, config = {}) {
 
     const model = {
         version: 'medol.operations/v1',
+        ...(metadata ? {metadata} : {}),
         name: systemName,
         title: cleanTitle(source.domain ?? source.title ?? domainName),
         imagePrefix,

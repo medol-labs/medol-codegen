@@ -201,7 +201,10 @@ const RefineGenerator = class extends Generator {
         const frontendApps = frontendApplicationsForSelection(codegenModel, this.answers.frontendApp);
         this._assertCanWriteFrontendApplications(frontendApps);
         frontendApps.forEach((frontendApp) => {
-            this._withFrontendDestinationRoot(frontendApp, () => this._writeFrontendApplication(frontendApp));
+            this._withFrontendDestinationRoot(frontendApp, () => {
+                this._writeFrontendApplication(frontendApp);
+                require('../../common/core/generation-provenance').writeGenerationSupport(this, 'refine', {...this.answers, frontendApp});
+            });
         });
     }
 

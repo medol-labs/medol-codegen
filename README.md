@@ -5,6 +5,10 @@ pipeline. It generates Axon/Axon 5 Kotlin/Spring Boot backends, Refine
 frontends, operations assets, and simulation artifacts from MEDOL's
 `CodegenModel`.
 
+See [Generation and Delivery Traceability](RELEASE-TRACEABILITY.md) for model/source
+hash checks, stable package and four-part image versions, the shared release runtime
+API, manifest/ledger contracts, and focused support-only sync commands.
+
 The project ships a standalone Docker image built from the official Node slim base image. The image bakes `.generator` into `/opt/codegen/.generator` and exposes a small local `gen` runner that executes the bundled generator directly.
 
 ## Image Layout

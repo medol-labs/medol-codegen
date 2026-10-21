@@ -13,6 +13,7 @@ function loadCodegenModel(cwd, options = {}) {
     }
 
     const raw = JSON.parse(fs.readFileSync(path, 'utf8'));
+    require('./generation-provenance').validateModelSource(raw, path);
     const requiredArrays = ['contexts', 'slices'];
     for (const property of requiredArrays) {
         if (!Array.isArray(raw[property])) {

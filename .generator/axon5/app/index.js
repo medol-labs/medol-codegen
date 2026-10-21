@@ -193,6 +193,7 @@ class Axon5Generator extends Generator {
                 this._writeConceptEntityStates(selectedSlices);
             }
         }
+        require('../../common/core/generation-provenance').writeGenerationSupport(this, 'axon5', this.answers);
     }
 }
 

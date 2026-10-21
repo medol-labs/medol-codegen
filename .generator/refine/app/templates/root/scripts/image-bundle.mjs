@@ -3,6 +3,8 @@
 import {existsSync, readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
+import {writeArchiveManifest, verifyArchiveManifest, verifyLoadedImages} from './image-archive-runtime.mjs';
+import {prepareRelease, defaultImageVersion} from './release-runtime.mjs';
 
 const defaultImageName = '<%= imageName %>';
 const defaultTar = '<%= imageTarName %>';
@@ -11,29 +13,31 @@ const command = args._[0] ?? 'help';
 const root = resolve(process.cwd(), args.root ?? '.');
 loadDotEnv(resolve(root, '.env'));
 const imagePrefix = String(args.prefix ?? process.env.DOCKER_IMAGE_PREFIX ?? 'medol').replace(/\/+$/, '');
-const imageVersion = String(args.version ?? process.env.IMAGE_VERSION ?? '0.0.1-SNAPSHOT');
+const imageVersion = String(args.version ?? process.env.IMAGE_VERSION ?? defaultImageVersion({root, target: 'refine', operation: command}));
 const imageName = String(args.image ?? process.env.IMAGE_NAME ?? defaultImageName);
 const fullImageName = `${imagePrefix}/${imageName}:${imageVersion}`;
 const tarFile = resolve(root, args.output ?? args.file ?? process.env.IMAGE_TAR ?? defaultTar);
 const dryRun = Boolean(args['dry-run']);
 const platform = String(args.platform ?? process.env.DOCKER_DEFAULT_PLATFORM ?? '').trim();
+const release = ['build', 'export', 'push', 'all'].includes(command)
+    ? prepareRelease({root, version: imageVersion, target: 'refine', operation: command === 'all' ? 'build' : command, buildOptions: {platform, buildArgs: valuesOf(args['build-arg'])}, dryRun}) : undefined;
 
 switch (command) {
     case 'build':
         buildImage();
         break;
     case 'export':
-        exportImage();
+        await exportImage();
         break;
     case 'import':
-        importImage();
+        await importImage();
         break;
     case 'push':
         pushImage();
         break;
     case 'all':
         buildImage();
-        exportImage();
+        await exportImage();
         break;
     case 'list':
         printPlan();
@@ -45,8 +49,10 @@ switch (command) {
 
 function buildImage() {
     ensureDockerfile();
+    release.embed(['public/medol-build.json']);
     run('docker', [
         'build',
+        ...release.dockerArgs,
         ...platformArgs(),
         ...cacheArgs(),
         ...buildArgs(),
@@ -54,21 +60,27 @@ function buildImage() {
         fullImageName,
         '.'
     ], {env: {...process.env, DOCKER_BUILDKIT: process.env.DOCKER_BUILDKIT ?? '1'}});
+    release.writeManifest('.medol/build-manifest.json', [fullImageName]);
 }
 
-function exportImage() {
+async function exportImage() {
+    release.verifyImages([fullImageName]);
     run('docker', ['save', fullImageName, '-o', tarFile]);
+    const manifest = release.writeManifest('.medol/build-manifest.json', [fullImageName]);
+    await writeArchiveManifest({archiveFile: tarFile, manifest, labels: release.labels, root, dryRun});
 }
 
-function importImage() {
-    if (!dryRun && !existsSync(tarFile)) {
-        fail(`Image archive was not found: ${tarFile}`);
-    }
+async function importImage() {
+    const manifest = await verifyArchiveManifest({archiveFile: tarFile, imageVersion: args.version === undefined ? undefined : String(args.version), dryRun});
     run('docker', ['load', '-i', tarFile]);
+    verifyLoadedImages({manifest, root});
 }
 
 function pushImage() {
+    release.claim();
+    release.verifyImages([fullImageName]);
     run('docker', ['push', fullImageName]);
+    release.writeManifest('.medol/release-manifest.json', [fullImageName], {requireRepoDigests: true});
 }
 
 function printPlan() {
@@ -77,7 +89,7 @@ function printPlan() {
     console.log(`[images] platform: ${platform || 'native'}`);
     const envArgs = buildArgs();
     if (envArgs.length > 0) {
-        console.log(`[images] build args: ${envArgs.join(' ')}`);
+        console.log('[images] build args: [values omitted]');
     }
 }
 
@@ -109,7 +121,7 @@ function imageExists(name) {
 }
 
 function run(commandName, commandArgs, options = {}) {
-    console.log(`[images] ${commandName} ${commandArgs.join(' ')}`);
+    console.log(`[images] ${commandName} ${commandArgs.map((value, index) => commandArgs[index - 1] === '--build-arg' ? '[omitted]' : value).join(' ')}`);
     if (dryRun) return;
     const result = spawnSync(commandName, commandArgs, {
         cwd: root,

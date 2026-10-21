@@ -98,6 +98,9 @@ prepare_workspace() {
   local workspace="$1"
   mkdir -p "$workspace"
   cp "$model_path" "$workspace/codegen-model.json"
+  if [[ -f "$(dirname "$model_path")/source.medol" ]]; then
+    cp "$(dirname "$model_path")/source.medol" "$workspace/source.medol"
+  fi
   if [[ -n "$translations_path" ]]; then
     if [[ ! -f "$translations_path" ]]; then
       echo "Translations file was not found: $translations_path" >&2

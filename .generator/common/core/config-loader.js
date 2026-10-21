@@ -16,6 +16,7 @@ function loadGeneratorModel(cwd, options = {}) {
 
     if (fs.existsSync(codegenModelPath)) {
         const rawCodegenModel = readJson(codegenModelPath);
+        require('./generation-provenance').validateModelSource(rawCodegenModel, codegenModelPath);
         const codegenModel = withTranslationBundle(fromCodegenModel(rawCodegenModel), translationBundle);
         return {
             inputKind: 'codegen-model',

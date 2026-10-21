@@ -50,6 +50,7 @@ function fromCodegenModel(model = {}) {
     const transitions = normalizeTransitions(model.transitions ?? [], slices, concepts, aggregates);
 
     return {
+        ...(model.metadata ? {metadata: require('./generation-provenance').modelMetadata(model)} : {}),
         rootPackage: model.rootPackage ?? 'tech.medo',
         ...(model.domain ? { domain: model.domain } : {}),
         ...(model.domains ? { domains: model.domains } : {}),

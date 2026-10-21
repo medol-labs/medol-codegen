@@ -30,6 +30,8 @@ function generateOperationsFiles(model, options = {}) {
         [`${environmentRoot}/network-topology.md`]: renderNetworkTopology(baseModel, environment),
         [`${environmentRoot}/images.mjs`]: renderOperationsImageScript(baseModel, environment),
         [`${environmentRoot}/image-config.mjs`]: readFileSync(path.join(__dirname, 'image-config-runtime.mjs'), 'utf8'),
+        [`${environmentRoot}/release-runtime.mjs`]: readFileSync(path.join(__dirname, '../../common/release-runtime.mjs'), 'utf8'),
+        [`${environmentRoot}/image-archive-runtime.mjs`]: readFileSync(path.join(__dirname, '../../common/image-archive-runtime.mjs'), 'utf8'),
         ...documentSupportFiles(baseModel, environment)
     };
 
@@ -204,6 +206,8 @@ import {basename, dirname, join, relative, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
 import {resolveImageConfig} from './image-config.mjs';
+import {prepareRelease} from './release-runtime.mjs';
+import {verifyArchiveManifest, verifyLoadedImages} from './image-archive-runtime.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const args = parseArgs(process.argv.slice(2));
@@ -211,13 +215,16 @@ const command = args._[0] ?? 'help';
 const monorepoRoot = resolve(scriptDir, args.root ?? process.env.MONOREPO_ROOT ?? '../..');
 const platform = String(args.platform ?? process.env.DOCKER_DEFAULT_PLATFORM ?? '').trim();
 const dependencyPlatform = platform || hostDockerPlatform();
-const imageConfig = resolveImageConfig(scriptDir, {prefix: args.prefix, version: args.version, mode: args['image-source']});
+const imageConfig = resolveImageConfig(scriptDir, {prefix: args.prefix, version: args.version, mode: args['image-source'], operation: command});
 const imagePrefix = imageConfig.buildPrefix;
 const dependencyImagePrefix = String(args['dependency-prefix'] ?? process.env.DEPENDENCY_IMAGE_PREFIX ?? defaultDependencyImagePrefix(imagePrefix)).replace(/\\/+$/g, '');
 const imageVersion = imageConfig.version;
 const outputRoot = resolve(scriptDir, args.output ?? process.env.IMAGE_BUNDLE_OUTPUT ?? '.work/image-bundle');
 const packageArchive = resolve(scriptDir, args.archive ?? process.env.IMAGE_BUNDLE_ARCHIVE ?? \`\${outputRoot}.tar.gz\`);
 const dryRun = Boolean(args['dry-run']);
+const release = ['build', 'export', 'push', 'push-registry', 'package', 'all'].includes(command)
+    ? prepareRelease({root: monorepoRoot, version: imageVersion, target: 'operations',
+        operation: command === 'push-registry' ? 'push' : ['all', 'package'].includes(command) ? 'build' : command, dryRun}) : undefined;
 const clean = args.clean !== false && args.clean !== 'false';
 const skipBackend = Boolean(args['skip-backend']);
 const skipConsole = Boolean(args['skip-console']);
@@ -247,11 +254,12 @@ switch (command) {
         buildImages();
         break;
     case 'export':
+        writeAggregateManifest('export', true);
         prepareOutput();
         exportImages();
         break;
     case 'import':
-        importImages();
+        await importImages();
         break;
     case 'push':
     case 'push-registry':
@@ -297,6 +305,7 @@ function packageImages() {
 }
 
 function buildImages() {
+    release.claim();
     for (const project of selectedProjects()) {
         runNode(project.root, [
             'scripts/image-bundle.mjs',
@@ -310,9 +319,11 @@ function buildImages() {
             ...projectBuildOptimizationArgs(project)
         ]);
     }
+    writeAggregateManifest('build');
 }
 
 function exportImages() {
+    writeAggregateManifest('export', true);
     for (const project of selectedProjects()) {
         runNode(project.root, [
             'scripts/image-bundle.mjs',
@@ -327,16 +338,36 @@ function exportImages() {
             appArchives[project.key]
         ]);
     }
+    writeAggregateManifest('export');
 }
 
-function importImages() {
+async function importImages() {
+    const plans = [];
     for (const project of selectedProjects()) {
-        runNode(project.root, ['scripts/image-bundle.mjs', 'import', '--file', appArchives[project.key]]);
+        const archiveFile = appArchives[project.key];
+        const manifest = await verifyArchiveManifest({archiveFile, dryRun});
+        if (manifest) {
+            const requested = project.key === 'backend' ? project.modules : [project.application.name];
+            const archived = manifest.images.map((image) => image.name.split('/').pop().replace(/:[^:]+$/, ''));
+            if (archived.length !== requested.length || requested.some((name) => !archived.includes(name))) {
+                fail(\`Archive does not match the selected applications: \${project.key}\`);
+            }
+        }
+        plans.push({archiveFile, manifest});
+    }
+    if (!dryRun && !skipDependencies && !existsSync(dependencyArchive)) {
+        fail(\`Dependency image archive was not found: \${dependencyArchive}\`);
+    }
+    for (const {archiveFile, manifest} of plans) {
+        run('docker', ['load', '-i', archiveFile], monorepoRoot);
+        if (!dryRun) verifyLoadedImages({manifest, root: monorepoRoot});
     }
     if (!skipDependencies) importDependencyImages();
 }
 
 function pushImages() {
+    release.claim();
+    writeAggregateManifest('push', true);
     for (const project of selectedProjects()) {
         runNode(project.root, [
             'scripts/image-bundle.mjs',
@@ -349,6 +380,7 @@ function pushImages() {
             ...projectImageArgs(project)
         ]);
     }
+    writeAggregateManifest('push');
 }
 
 function pullDependencyImages() {
@@ -413,6 +445,7 @@ function copyKnownFiles(sourceRoot, targetRoot, files) {
 
 function writeManifest() {
     const manifest = {
+        ...release.manifest,
         generatedAt: new Date().toISOString(),
         environment: '${environment}',
         platform: platform || 'native',
@@ -435,6 +468,40 @@ function writeManifest() {
     if (dryRun) return;
     mkdirSync(outputRoot, {recursive: true});
     writeFileSync(manifestPath, \`\${JSON.stringify(manifest, null, 2)}\\n\`);
+}
+
+function writeAggregateManifest(action, preflight = false) {
+    const components = selectedProjects().map((project) => {
+        const names = project.key === 'backend' ? project.modules : [project.application.name];
+        const requestedImages = names.map((name) => \`\${imagePrefix}/\${name}:\${imageVersion}\`);
+        const file = action === 'export' && !preflight ? \`\${appArchives[project.key]}.manifest.json\`
+            : join(project.root, '.medol', action === 'push' && !preflight ? 'release-manifest.json' : 'build-manifest.json');
+        if (dryRun) return {project: project.key, manifest: relative(monorepoRoot, file)};
+        let component;
+        if (preflight) {
+            const session = prepareRelease({root: project.root, version: imageVersion,
+                target: project.key === 'backend' ? 'axon5' : 'refine', operation: action});
+            component = {...session.manifest, images: session.verifyImages(requestedImages)};
+        } else {
+            if (!existsSync(file)) fail(\`Component manifest missing: \${file}\`);
+            component = JSON.parse(readFileSync(file, 'utf8'));
+        }
+        if (component.imageVersion !== imageVersion || component.generation?.model?.sha256 !== release.manifest.generation?.model?.sha256) {
+            fail(\`Component version/model hash mismatch: \${project.key}\`);
+        }
+        if (!preflight && requestedImages.some((name) => !(component.images ?? []).some((image) => image.name === name))) {
+            fail(\`Component manifest does not contain the requested images: \${project.key}\`);
+        }
+        return {project: project.key, manifest: relative(monorepoRoot, file), ...component,
+            images: requestedImages.map((name) => component.images.find((image) => image.name === name))};
+    });
+    release.manifest.components = components;
+    const images = components.flatMap((component) => (component.images ?? []).map((image) => image.name));
+    if (preflight) release.verifyImages(images);
+    else {
+        release.writeManifest(join(outputRoot, 'release-manifest.json'), images, {requireRepoDigests: action === 'push'});
+        if (action === 'build') release.writeManifest('.medol/build-manifest.json', images);
+    }
 }
 
 function createPackageArchive() {

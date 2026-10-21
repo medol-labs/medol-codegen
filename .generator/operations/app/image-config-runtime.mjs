@@ -8,6 +8,16 @@ export function resolveImageConfig(directory, options = {}) {
         return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
     };
     const model = read('operations-model.json');
+    const recordFile = resolve(directory, '../../.medol/generation/operations.json');
+    const generation = existsSync(recordFile) ? JSON.parse(readFileSync(recordFile, 'utf8')) : undefined;
+    const metadata = generation?.model?.metadata ?? model.metadata;
+    const built = ['export', 'push', 'push-registry'].includes(options.operation)
+        ? read('../../.medol/build-manifest.json') : {};
+    const recordedVersion = generation && built.generation?.target === 'operations'
+        && built.generation?.model?.sha256 === generation.model?.sha256 ? built.imageVersion : undefined;
+    const release = metadata?.source?.release;
+    const baselineVersion = release?.channel === 'stable' && /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(release.label ?? '')
+        ? `${release.label}.0` : undefined;
     const local = read('operations-model.local.json');
     const registry = local.registry ?? model.registry;
     const clean = (value) => typeof value === 'string' ? value.trim().replace(/\/+$/, '') : '';
@@ -20,7 +30,7 @@ export function resolveImageConfig(directory, options = {}) {
     }
     const pushPrefix = !configuredPrefix && registry?.pushHost
         ? [clean(registry.pushHost), imagePrefix.includes('/') ? imagePrefix.slice(imagePrefix.indexOf('/') + 1) : ''].filter(Boolean).join('/') : imagePrefix;
-    const version = clean(options.version) || clean(env.IMAGE_VERSION) || clean(model.imageTag);
+    const version = clean(options.version) || clean(env.IMAGE_VERSION) || clean(recordedVersion) || baselineVersion || clean(model.imageTag);
     if (!version || /[\s/@:]/.test(version)) throw new Error('Configure a valid image version.');
     const mode = options.mode ?? env.MEDOL_IMAGE_SOURCE ?? local.imageSource ?? (registryPrefix || hasRegistry(imagePrefix) ? 'registry' : 'import');
     if (!['import', 'registry'].includes(mode)) throw new Error('Image source must be import or registry.');

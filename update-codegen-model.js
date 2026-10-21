@@ -2,6 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const {createHash} = require("node:crypto");
 
 const DEFAULT_BASE_URL = "http://host.docker.internal:5172";
 
@@ -212,14 +213,21 @@ async function main() {
     return;
   }
 
+  // Finish both downloads and validate the exact UTF-8 bytes before changing either file.
+  const source = options.source ? await readMedolSource(options, response.headers) : undefined;
+  const expectedHash = json.metadata?.source?.sha256;
+  if (source !== undefined && expectedHash !== undefined
+      && createHash('sha256').update(source, 'utf8').digest('hex') !== expectedHash) {
+    throw new Error('MEDOL source SHA-256 does not match exported model metadata; no outputs were written.');
+  }
+  if (options.source && output === sourceOutput) throw new Error('Model and source output paths must differ.');
   fs.mkdirSync(path.dirname(output), { recursive: true });
   fs.writeFileSync(output, content);
   console.error(`Wrote ${output}`);
 
   if (options.source) {
-    const source = await readMedolSource(options, response.headers);
     fs.mkdirSync(path.dirname(sourceOutput), { recursive: true });
-    fs.writeFileSync(sourceOutput, source.endsWith("\n") ? source : `${source}\n`);
+    fs.writeFileSync(sourceOutput, source);
     console.error(`Wrote ${sourceOutput}`);
   }
 }

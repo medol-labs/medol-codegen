@@ -77,5 +77,6 @@ module.exports = class extends Generator {
         Object.entries(files).forEach(([file, content]) => {
             this.fs.write(this.destinationPath(file), content);
         });
+        require('../../common/core/generation-provenance').writeGenerationSupport(this, 'operations', this.answers);
     }
 };

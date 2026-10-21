@@ -4,7 +4,7 @@
   "main": "index.js",
   "scripts": {
     "test:tenant-runtime": "node axon5/app/test/run-tenant-runtime-smoke.mjs",
-    "test": "node --test axon5/app/test/*.test.js operations/app/test/*.test.js simulation/app/test/*.test.js refine/app/test/*.test.js"
+    "test": "node --test common/test/*.test.js axon5/app/test/*.test.js operations/app/test/*.test.js simulation/app/test/*.test.js refine/app/test/*.test.js"
   },
   "author": "",
   "license": "Apache-2.0",

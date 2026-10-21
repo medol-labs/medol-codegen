@@ -3,6 +3,8 @@
 import {existsSync, readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
+import {writeArchiveManifest, verifyArchiveManifest, verifyLoadedImages} from './image-archive-runtime.mjs';
+import {prepareRelease, defaultImageVersion} from './release-runtime.mjs';
 
 const defaultModules = <%- JSON.stringify(imageModules, null, 4) %>;
 const defaultTar = '<%= imageTarName %>';
@@ -12,30 +14,32 @@ const root = resolve(process.cwd(), args.root ?? '.');
 loadDotEnv(resolve(root, '.env'));
 const modules = selectedModules(defaultModules, args.module);
 const imagePrefix = String(args.prefix ?? process.env.DOCKER_IMAGE_PREFIX ?? 'medol').replace(/\/+$/, '');
-const imageVersion = String(args.version ?? process.env.IMAGE_VERSION ?? '0.0.1-SNAPSHOT');
+const imageVersion = String(args.version ?? process.env.IMAGE_VERSION ?? defaultImageVersion({root, target: 'axon5', operation: command}));
 const tarFile = resolve(root, args.output ?? args.file ?? process.env.IMAGE_TAR ?? defaultTar);
 const dryRun = Boolean(args['dry-run']);
 const jibGoal = 'com.google.cloud.tools:jib-maven-plugin:3.4.5:dockerBuild';
 const platform = parsePlatform(args.platform ?? process.env.DOCKER_DEFAULT_PLATFORM ?? 'linux/amd64');
 const skipInstall = flagEnabled(args['skip-install'], process.env.FAST_IMAGE_BUILD);
 const offline = flagEnabled(args.offline, process.env.MAVEN_OFFLINE);
+const release = ['build', 'export', 'push', 'all'].includes(command)
+    ? prepareRelease({root, version: imageVersion, target: 'axon5', operation: command === 'all' ? 'build' : command, buildOptions: {platform}, dryRun}) : undefined;
 
 switch (command) {
     case 'build':
         buildImages();
         break;
     case 'export':
-        exportImages();
+        await exportImages();
         break;
     case 'import':
-        importImages();
+        await importImages();
         break;
     case 'push':
         pushImages();
         break;
     case 'all':
         buildImages();
-        exportImages();
+        await exportImages();
         break;
     case 'list':
         printPlan();
@@ -48,6 +52,10 @@ switch (command) {
 function buildImages() {
     ensureModules();
     ensureMavenWrapper();
+    if (skipInstall && release.manifest.packageVersion) {
+        fail('Stable deliveries require a fresh reactor install; disable --skip-install/FAST_IMAGE_BUILD.');
+    }
+    release.embed(modules.map((name) => `${name}/src/main/resources/META-INF/medol-build.json`));
     if (!skipInstall) {
         run('./mvnw', [...mavenGlobalArgs(), '-pl', modules.join(','), '-am', '-DskipTests', 'clean', 'install']);
     } else {
@@ -61,28 +69,35 @@ function buildImages() {
             `-Djib.to.image=${imageName(moduleName)}`,
             `-Djib.container.platform.os=${platform.os}`,
             `-Djib.container.platform.architecture=${platform.architecture}`,
+            ...release.jibArgs,
             jibGoal
         ]);
     }
+    release.writeManifest('.medol/build-manifest.json', imageNames());
 }
 
-function exportImages() {
+async function exportImages() {
     ensureModules();
+    release.verifyImages(imageNames());
     run('docker', ['save', ...imageNames(), '-o', tarFile]);
+    const manifest = release.writeManifest('.medol/build-manifest.json', imageNames());
+    await writeArchiveManifest({archiveFile: tarFile, manifest, labels: release.labels, root, dryRun});
 }
 
-function importImages() {
-    if (!dryRun && !existsSync(tarFile)) {
-        fail(`Image archive was not found: ${tarFile}`);
-    }
+async function importImages() {
+    const manifest = await verifyArchiveManifest({archiveFile: tarFile, imageVersion: args.version === undefined ? undefined : String(args.version), dryRun});
     run('docker', ['load', '-i', tarFile]);
+    verifyLoadedImages({manifest, root});
 }
 
 function pushImages() {
     ensureModules();
+    release.claim();
+    release.verifyImages(imageNames());
     for (const imageName of imageNames()) {
         run('docker', ['push', imageName]);
     }
+    release.writeManifest('.medol/release-manifest.json', imageNames(), {requireRepoDigests: true});
 }
 
 function printPlan() {

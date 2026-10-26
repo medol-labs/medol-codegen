@@ -309,8 +309,9 @@ gen /opt/codegen/.generator/app/ --generator refine --generator-type all
 The `operations` generator reads the same `codegen-model.json` and derives an intermediate `OperationsModel` before rendering platform files. The model keeps application topology, infrastructure, gateway routes, images, ports, health checks, environment defaults, and per-environment overrides separate from renderer-specific details.
 
 Run generators from the generated system root. By default the generator reads
-`.medol/codegen-model.json`, `.medol/medol.yml`, and then optional local
-overrides from `.medol/medol.local.yml` in the current directory. Legacy
+`.medol/codegen-model.json`, `.medol/medol.yml`, and optional local workspace
+overrides from `.medol/medol.local.yml` in the current directory. Operations
+deployment settings are loaded separately from `operations/config/`. Legacy
 `codegen-model.json` at the current directory root is still accepted for
 compatibility.
 
@@ -352,17 +353,18 @@ gen /opt/codegen/.generator/app/ --generator refine --generator-type all \
   --frontend-app FederationLearningParticipantConsole
 ```
 
-Keep machine-specific settings such as a local development registry in
-`.medol/medol.local.yml`; this file is ignored by the generated workspace
-`.gitignore`:
+Keep deployment configuration under `operations/config/`: `common.yml` is
+shared, `<environment>.yml` is committed environment configuration, and
+`<environment>.private.yml` is an ignored machine-specific override. The selected
+`--environment` determines which pair is loaded. For a local development
+registry, use `operations/config/dev.private.yml`:
 
 ```yaml
-operations:
-  registry:
-    host: registry.internal:5000
-    scheme: http
-    namespace: team
-    insecure: true
+registry:
+  host: registry.internal:5000
+  scheme: http
+  namespace: team
+  insecure: true
 ```
 
 With this layout, run from the system root:
@@ -397,29 +399,46 @@ Supported operations targets are:
 
 Each operations target also writes `docs/document-support/` with an engineering-facts collector. Run the collector after backend and frontend generation to read technology versions from their `pom.xml` and `package.json` files; operations generation alone does not create the final project documents.
 
-Generated operations files are written under `operations/<environment>`:
+Generated operations files are grouped by component, then environment:
 
 ```text
 federation-learning/
   .medol/codegen-model.json
   .medol/medol.yml
   operations/
-    dev/
+    model/dev/
       operations-model.json
       README.md
       network-topology.md
+    images/dev/
+      images.mjs
+      image-config.mjs
+    apisix/dev/
+      config.yaml
+      apisix.yaml
+    docker-compose/dev/
+      docker-compose.yml
       .env-example
-      docker-compose/docker-compose.yml
-      infrastructure/apisix/config.yaml
-      infrastructure/apisix/apisix.yaml
-      infrastructure/postgres/init/01-create-databases.sql
-      kubernetes/base/
-      kubernetes/environments/dev/
-      k3s/base/
-      k3s/environments/dev/
-      harbor/
-      zot/
+      infrastructure/postgres/init/
+    kubernetes/
+      base/
+      environments/dev/
+    k3s/
+      base/
+      environments/dev/
+      cluster/
+      scripts/
+    harbor/dev/
+    zot/dev/
 ```
+
+`dev` is the selected environment, not a fixed operations root. Select another
+environment with `--environment local`, `--environment test`, or
+`--environment prod`; the component
+directories remain the same and only their environment-specific children change.
+Kubernetes and K3s keep common manifests in `base/` and environment-specific
+configuration in `environments/<environment>/`. Regeneration does not remove
+files left by an older directory layout; review and migrate those separately.
 
 `network-topology.md` contains a Mermaid diagram of configured entry points,
 gateway routes, service ports, and active application dependencies for the
@@ -462,7 +481,7 @@ not make generated single-stack Compose/Kubernetes manifests multi-site or
 configure APISIX with reachable cross-site upstream addresses; those require
 deployment-specific configuration.
 
-Each operations environment also includes `images.mjs`, a monorepo-level image
+Each `operations/images/<environment>` directory includes `images.mjs`, a monorepo-level image
 orchestrator for backend, frontend, and infrastructure images. With multiple
 frontend applications, operations creates one frontend application, image,
 archive, gateway route, Compose service, and Kubernetes deployment per modeled
@@ -470,14 +489,14 @@ frontend. The first frontend is mounted at `/`; later frontends default to
 `/<frontend-service-name>`.
 
 ```bash
-node operations/dev/images.mjs list
-node operations/dev/images.mjs all --platform linux/amd64
-node operations/dev/images.mjs build --exclude-service <service>
-node operations/dev/images.mjs build --service <backend-module>
-node operations/dev/images.mjs build --service federation-learning-participant-console
-node operations/dev/images.mjs push --prefix registry.example.com/team
-node operations/dev/images.mjs push-dependencies --prefix registry.example.com/team
-node operations/dev/images.mjs import
+node operations/images/dev/images.mjs list
+node operations/images/dev/images.mjs all --platform linux/amd64
+node operations/images/dev/images.mjs build --exclude-service <service>
+node operations/images/dev/images.mjs build --service <backend-module>
+node operations/images/dev/images.mjs build --service <frontend-service>
+node operations/images/dev/images.mjs push --prefix registry.example.com/team
+node operations/images/dev/images.mjs push-dependencies --prefix registry.example.com/team
+node operations/images/dev/images.mjs import
 ```
 
 Use `--service` to process only selected application services, or
@@ -486,9 +505,13 @@ development.
 
 APISIX is generated in standalone mode with declarative YAML and Admin API disabled. Docker Compose is the primary runnable target and includes generated backend services, generated frontend consoles, runtime dependencies such as PostgreSQL and UMA DB, optional/profiled Axon Server, optional Redis, volumes, networks, environment placeholders, health checks, and service startup dependencies.
 
-Operations overrides can be supplied in `.medol/medol.yml` under the
-`operations` key. Legacy `operations.config.json` at the current directory root
-is still accepted for compatibility:
+Operations configuration belongs in `operations/config/common.yml`, with
+environment overrides in `operations/config/<environment>.yml`. A local file
+of the same environment ending in `.private.yml` overrides both. `local` is a
+separate deployable environment (`--environment local`), not a private-file
+suffix. Legacy
+`.medol/medol.yml` `operations` keys and root `operations.config.json` are
+accepted only when no dedicated configuration exists for the selected environment:
 
 ```json
 {
@@ -781,7 +804,10 @@ Generated files are separated by target:
 ```text
 example/generated/axon5
 example/generated/refine
-example/generated/operations/dev
+example/generated/operations/model/dev
+example/generated/operations/images/dev
+example/generated/operations/docker-compose/dev
+example/generated/operations/k3s/environments/dev
 example/generated/simulation-service
 ```
 

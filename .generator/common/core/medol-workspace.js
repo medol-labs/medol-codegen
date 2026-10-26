@@ -159,5 +159,6 @@ module.exports = {
     generatorConfig,
     generatorOutputRoot,
     loadMedolWorkspace,
+    parseSimpleYaml,
     writeWorkspaceFiles
 };

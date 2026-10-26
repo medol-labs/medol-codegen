@@ -12,10 +12,10 @@ the system can be regenerated without losing domain-specific code.
   domain model.
 - `.medol/codegen-model.json` is the generated CodegenModel consumed by
   `medol-codegen`.
-- `.medol/medol.yml` configures generator output directories, frontend apps,
-  operations targets, and project-level defaults.
-- `.medol/medol.local.yml` may override local machine settings such as
-  `operations.registry`; it is intentionally ignored by git.
+- `.medol/medol.yml` configures generator output directories and other workspace settings.
+- `operations/config/common.yml` holds shared deployment settings;
+  `operations/config/<environment>.yml` overrides them for one environment.
+- `operations/config/<environment>.private.yml` holds ignored machine-specific settings.
 - `{{backendOutput}}/` contains generated command, event, query, aggregate,
   projection, and API code derived from the business model.
 - `{{frontendOutput}}/` contains generated application shells and resource-oriented
@@ -78,15 +78,14 @@ present in this repository.
 
 ## Local Registry
 
-Keep machine-specific registry settings in `.medol/medol.local.yml` and
-regenerate operations files when needed:
+Keep machine-specific registry settings in the ignored
+`operations/config/dev.private.yml` and regenerate the `dev` operations files:
 
 ```yaml
-operations:
-  registry:
-    host: registry.example.com
-    namespace: team
-    insecure: true
+registry:
+  host: registry.example.com
+  namespace: team
+  insecure: true
 ```
 
 Generated registry overlays and `{{registryPath}}` are machine-local artifacts

@@ -6,10 +6,14 @@ const path = require('node:path');
 
 async function fixture(local = {}) {
     const api = await import('../image-config-runtime.mjs');
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'image-source-'));
-    fs.writeFileSync(path.join(dir, 'operations-model.json'), JSON.stringify({imagePrefix: 'team', imageTag: 'v1'}));
-    fs.writeFileSync(path.join(dir, 'operations-model.local.json'), JSON.stringify(local));
-    return {api, config: (options = {}) => api.resolveImageConfig(dir, {env: {}, ...options}), close: () => fs.rmSync(dir, {recursive: true, force: true})};
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'image-source-'));
+    const dir = path.join(root, 'operations/images/dev');
+    const modelDir = path.join(root, 'operations/model/dev');
+    fs.mkdirSync(dir, {recursive: true});
+    fs.mkdirSync(modelDir, {recursive: true});
+    fs.writeFileSync(path.join(modelDir, 'operations-model.json'), JSON.stringify({imagePrefix: 'team', imageTag: 'v1'}));
+    fs.writeFileSync(path.join(modelDir, 'operations-model.local.json'), JSON.stringify(local));
+    return {api, config: (options = {}) => api.resolveImageConfig(dir, {env: {}, ...options}), close: () => fs.rmSync(root, {recursive: true, force: true})};
 }
 
 test('environment registry configuration is shared by build and deployment and supports another environment', async () => {

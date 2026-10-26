@@ -20,52 +20,54 @@ function generateOperationsFiles(model, options = {}) {
     }
     const target = options.target ?? 'all';
     const environment = options.environment ?? 'dev';
-    const environmentRoot = environmentDirectory(environment);
+    const environmentName = environmentDirectory(environment).split('/')[1];
+    const modelRoot = `operations/model/${environmentName}`;
+    const imagesRoot = `operations/images/${environmentName}`;
     const baseModel = portableOperationsModel(model);
     const files = {
-        [`${environmentRoot}/.gitignore`]: 'operations-model.local.json\n',
-        [`${environmentRoot}/operations-model.json`]: `${JSON.stringify(baseModel, null, 2)}\n`,
-        [`${environmentRoot}/operations-model.local.json`]: `${JSON.stringify({ registry: model.registry ?? null }, null, 2)}\n`,
-        [`${environmentRoot}/README.md`]: renderDeployReadme(baseModel, environment),
-        [`${environmentRoot}/network-topology.md`]: renderNetworkTopology(baseModel, environment),
-        [`${environmentRoot}/images.mjs`]: renderOperationsImageScript(baseModel, environment),
-        [`${environmentRoot}/image-config.mjs`]: readFileSync(path.join(__dirname, 'image-config-runtime.mjs'), 'utf8'),
-        [`${environmentRoot}/release-runtime.mjs`]: readFileSync(path.join(__dirname, '../../common/release-runtime.mjs'), 'utf8'),
-        [`${environmentRoot}/image-archive-runtime.mjs`]: readFileSync(path.join(__dirname, '../../common/image-archive-runtime.mjs'), 'utf8'),
+        [`${modelRoot}/.gitignore`]: 'operations-model.private.json\noperations-model.local.json\n',
+        [`${modelRoot}/operations-model.json`]: `${JSON.stringify(baseModel, null, 2)}\n`,
+        [`${modelRoot}/operations-model.private.json`]: `${JSON.stringify({ registry: model.registry ?? null }, null, 2)}\n`,
+        [`${modelRoot}/README.md`]: renderDeployReadme(baseModel, environment),
+        [`${modelRoot}/network-topology.md`]: renderNetworkTopology(baseModel, environment),
+        [`${imagesRoot}/images.mjs`]: renderOperationsImageScript(baseModel, environment),
+        [`${imagesRoot}/image-config.mjs`]: readFileSync(path.join(__dirname, 'image-config-runtime.mjs'), 'utf8'),
+        [`${imagesRoot}/release-runtime.mjs`]: readFileSync(path.join(__dirname, '../../common/release-runtime.mjs'), 'utf8'),
+        [`${imagesRoot}/image-archive-runtime.mjs`]: readFileSync(path.join(__dirname, '../../common/image-archive-runtime.mjs'), 'utf8'),
         ...documentSupportFiles(baseModel, environment)
     };
 
     if (target === 'model') return files;
-    if (target === 'all' || target === 'apisix' || target === 'docker-compose' || target === 'kubernetes' || target === 'k3s') {
+    if (target === 'all' || target === 'apisix' || target === 'docker-compose') {
         Object.assign(files, apisixFiles(baseModel, {
-            root: `${environmentRoot}/infrastructure/apisix`
+            root: `operations/apisix/${environmentName}`
         }));
     }
     if (target === 'all' || target === 'docker-compose') {
         Object.assign(files, dockerComposeFiles(baseModel, environment, {
-            root: environmentRoot
+            root: `operations/docker-compose/${environmentName}`
         }));
     }
     if (target === 'all' || target === 'kubernetes') {
         Object.assign(files, kubernetesFiles(model, {
             environmentName: environment,
-            root: `${environmentRoot}/kubernetes`
+            root: 'operations/kubernetes'
         }));
     }
     if (target === 'all' || target === 'k3s') {
         Object.assign(files, k3sFiles(model, {
             environmentName: environment,
-            root: `${environmentRoot}/k3s`
+            root: 'operations/k3s'
         }));
     }
     if (target === 'all' || target === 'harbor') {
         Object.assign(files, harborFiles(baseModel, environment, {
-            root: `${environmentRoot}/harbor`
+            root: `operations/harbor/${environmentName}`
         }));
     }
     if (target === 'all' || target === 'zot') {
         Object.assign(files, zotFiles(baseModel, environment, {
-            root: `${environmentRoot}/zot`
+            root: `operations/zot/${environmentName}`
         }));
     }
 
@@ -130,20 +132,20 @@ function renderDeployReadme(model, environment) {
         '  -> Docker Compose / Kubernetes / K3s / APISIX renderers',
         '```',
         '',
-        'Commit `operations-model.json` as the portable deployment model. `operations-model.local.json` contains machine-specific registry settings from `.medol/medol.local.yml` and must remain ignored by Git. The image script reads that local override for its default registry prefix.',
+        'Commit `operations-model.json` as the portable deployment model. Configure deployment settings in `operations/config/common.yml` and environment-specific settings in `operations/config/<environment>.yml`. Put machine-specific registry settings in the ignored `operations/config/<environment>.private.yml`. The generated `operations-model.private.json` is also ignored; the image script reads it for its default registry prefix.',
         '',
         '## Image Bundle Command',
         '',
         'Use `images.mjs` to orchestrate generated backend, frontend, and infrastructure images from this monorepo:',
         '',
         '```bash',
-        'node operations/<environment>/images.mjs list',
-        'node operations/<environment>/images.mjs all',
-        'node operations/<environment>/images.mjs build --exclude-service <service>',
-        'node operations/<environment>/images.mjs build --service <backend-module>',
-        'node operations/<environment>/images.mjs push --prefix registry.example.com/team',
-        'node operations/<environment>/images.mjs push-dependencies --prefix registry.example.com/team',
-        'node operations/<environment>/images.mjs import',
+        'node operations/images/<environment>/images.mjs list',
+        'node operations/images/<environment>/images.mjs all',
+        'node operations/images/<environment>/images.mjs build --exclude-service <service>',
+        'node operations/images/<environment>/images.mjs build --service <backend-module>',
+        'node operations/images/<environment>/images.mjs push --prefix registry.example.com/team',
+        'node operations/images/<environment>/images.mjs push-dependencies --prefix registry.example.com/team',
+        'node operations/images/<environment>/images.mjs import',
         '```',
         '',
         'Application image builds use the native Docker platform by default. Pass `--platform linux/amd64` or `--platform linux/arm64` only when you intentionally need a fixed target architecture; cross-architecture frontend builds can be much slower.',
@@ -212,7 +214,7 @@ import {verifyArchiveManifest, verifyLoadedImages} from './image-archive-runtime
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const args = parseArgs(process.argv.slice(2));
 const command = args._[0] ?? 'help';
-const monorepoRoot = resolve(scriptDir, args.root ?? process.env.MONOREPO_ROOT ?? '../..');
+const monorepoRoot = resolve(scriptDir, args.root ?? process.env.MONOREPO_ROOT ?? '../../..');
 const platform = String(args.platform ?? process.env.DOCKER_DEFAULT_PLATFORM ?? '').trim();
 const dependencyPlatform = platform || hostDockerPlatform();
 const imageConfig = resolveImageConfig(scriptDir, {prefix: args.prefix, version: args.version, mode: args['image-source'], operation: command});
@@ -834,17 +836,17 @@ function parseArgs(argv) {
 
 function printUsage() {
     console.log(\`Usage:
-  node operations/${environment}/images.mjs list [options]
-  node operations/${environment}/images.mjs build [options]
-  node operations/${environment}/images.mjs export [options]
-  node operations/${environment}/images.mjs import [options]
-  node operations/${environment}/images.mjs push --prefix <registry/namespace> [options]
-  node operations/${environment}/images.mjs pull-dependencies [options]
-  node operations/${environment}/images.mjs export-dependencies [options]
-  node operations/${environment}/images.mjs import-dependencies [options]
-  node operations/${environment}/images.mjs push-dependencies --prefix <registry/namespace> [options]
-  node operations/${environment}/images.mjs package [options]
-  node operations/${environment}/images.mjs all [options]
+  node operations/images/${environment}/images.mjs list [options]
+  node operations/images/${environment}/images.mjs build [options]
+  node operations/images/${environment}/images.mjs export [options]
+  node operations/images/${environment}/images.mjs import [options]
+  node operations/images/${environment}/images.mjs push --prefix <registry/namespace> [options]
+  node operations/images/${environment}/images.mjs pull-dependencies [options]
+  node operations/images/${environment}/images.mjs export-dependencies [options]
+  node operations/images/${environment}/images.mjs import-dependencies [options]
+  node operations/images/${environment}/images.mjs push-dependencies --prefix <registry/namespace> [options]
+  node operations/images/${environment}/images.mjs package [options]
+  node operations/images/${environment}/images.mjs all [options]
 
 Commands:
   build                Build backend and frontend images.
@@ -866,7 +868,7 @@ Options:
   --platform <os/arch>            Docker platform. Defaults to DOCKER_DEFAULT_PLATFORM or native for application builds.
   --output <dir>                  Bundle directory. Defaults to .work/image-bundle beside this script.
   --archive <file>                Package archive. Defaults to <output>.tar.gz.
-  --root <dir>                    Monorepo root. Defaults to ../.. from this operations environment.
+  --root <dir>                    Monorepo root. Defaults to ../../.. from this image environment.
   --backend-root <dir>            Override backend project root.
   --console-root <dir>            Override the first frontend project root for legacy workspaces.
   --<frontend-service>-root <dir> Override one frontend project root, for example --participant-console-root ./participant-console.
@@ -898,7 +900,7 @@ function environmentDirectory(environment) {
 }
 
 function harborFiles(model, environment, options = {}) {
-    const root = options.root ?? `${environmentDirectory(environment)}/harbor`;
+    const root = options.root ?? `operations/harbor/${environmentDirectory(environment).split('/')[1]}`;
     const hostname = `${model.name}-harbor.local`;
     return {
         [`${root}/README.md`]: renderHarborReadme(model, environment),
@@ -1080,7 +1082,7 @@ function fail(message) {
 }
 
 function zotFiles(model, environment, options = {}) {
-    const root = options.root ?? `${environmentDirectory(environment)}/zot`;
+    const root = options.root ?? `operations/zot/${environmentDirectory(environment).split('/')[1]}`;
     const hostname = `${model.name}-zot.local`;
     return {
         [`${root}/README.md`]: renderZotReadme(model, environment, hostname),

@@ -122,7 +122,7 @@ test('builds operations topology for multiple frontend applications', () => {
             }]
         }]
     });
-    const script = generateOperationsFiles(model, { target: 'model', environment: 'dev' })['operations/dev/images.mjs'];
+    const script = generateOperationsFiles(model, { target: 'model', environment: 'dev' })['operations/images/dev/images.mjs'];
 
     assert.deepEqual(model.applications.map((application) => application.name), [
         'learning-console',
@@ -150,7 +150,7 @@ test('collects backend and frontend technology stacks from generated build manif
         const model = buildOperationsModel(sampleModel);
         const generated = generateOperationsFiles(model, { target: 'model', environment: 'dev' });
         for (const file of [
-            'operations/dev/operations-model.json',
+            'operations/model/dev/operations-model.json',
             'docs/document-support/collect-engineering-facts.mjs',
             'docs/document-support/config/engineering-facts-sources.json'
         ]) {
@@ -226,10 +226,14 @@ test('renders Docker Compose topology with gateway, applications, infrastructure
 test('generates operations target file sets', () => {
     const model = buildOperationsModel(sampleModel);
     const files = generateOperationsFiles(model, { target: 'all', environment: 'dev' });
-    assert(files['operations/dev/operations-model.json']);
-    assert(files['operations/dev/network-topology.md']);
-    assert(files['operations/dev/infrastructure/apisix/apisix.yaml']);
-    assert(files['operations/dev/images.mjs']);
+    assert(files['operations/model/dev/operations-model.json']);
+    assert(files['operations/model/dev/network-topology.md']);
+    assert(files['operations/images/dev/images.mjs']);
+    assert(files['operations/harbor/dev/README.md']);
+    assert(files['operations/zot/dev/README.md']);
+    assert(!Object.keys(files).some((file) => file.startsWith('operations/dev/')));
+    assert(files['operations/apisix/dev/apisix.yaml']);
+    assert(files['operations/images/dev/images.mjs']);
     assert(files['docs/document-support/collect-engineering-facts.mjs']);
     assert(files['docs/document-support/i18n.mjs']);
     assert(files['docs/document-support/i18n/base.json']);
@@ -239,42 +243,59 @@ test('generates operations target file sets', () => {
     assert.match(files['docs/document-support/config/engineering-facts-sources.json'], /network-topology\.md/);
     assert.match(files['docs/document-support/collect-engineering-facts.mjs'], /docs\/generated\/facts\/engineering-facts\.json/);
     assert.match(files['docs/document-support/i18n.mjs'], /fallbackLanguage/);
-    assert.match(files['operations/dev/images.mjs'], /node operations\/dev\/images\.mjs package/);
-    assert.match(files['operations/dev/images.mjs'], /--exclude-service <name\[,name\]>/);
-    assert.match(files['operations/dev/images.mjs'], /projectImageArgs\(project\)/);
-    assert.doesNotMatch(files['operations/dev/images.mjs'], /runtime-engine-images|RUNTIME_ENGINE_ROOT|skip-runtime-engine/);
-    assert(files['operations/dev/docker-compose/docker-compose.yml']);
-    assert(files['operations/dev/.env-example']);
-    assert(files['operations/dev/kubernetes/base/applications.yaml']);
-    assert(files['operations/dev/kubernetes/environments/dev/kustomization.yaml']);
-    assert(files['operations/dev/kubernetes/environments/dev/configmap.yaml']);
-    assert(files['operations/dev/kubernetes/environments/dev/secrets.example.yaml']);
-    assert(files['operations/dev/kubernetes/environments/dev/patches/federation-service-envfrom.yaml']);
-    assert(!files['operations/dev/kubernetes/environments/prod/kustomization.yaml']);
-    assert(files['operations/dev/k3s/base/apisix.yaml']);
-    assert(files['operations/dev/k3s/cluster/k3d-dev.yaml']);
-    assert(files['operations/dev/k3s/scripts/k3d-dev.sh']);
-    assert.match(files['operations/dev/k3s/scripts/k3d-dev.sh'], /CLUSTER_NAME="\$\{CLUSTER_NAME:-learning-platform-dev\}"/);
-    assert.match(files['operations/dev/k3s/scripts/k3d-dev.sh'], /export KUBECONFIG="\$\{KUBECONFIG:-\$\{KUBECONFIG_FILE\}\}"/);
-    assert.match(files['operations/dev/k3s/scripts/k3d-dev.sh'], /PRE_APPLY_FILE="\$\{PRE_APPLY_FILE:-\}"/);
-    assert.match(files['operations/dev/k3s/scripts/k3d-dev.sh'], /KUBECTL_APPLY_VALIDATE="\$\{KUBECTL_APPLY_VALIDATE:-false\}"/);
-    assert.match(files['operations/dev/k3s/scripts/k3d-dev.sh'], /kubectl_apply\(\)/);
-    assert.match(files['operations/dev/k3s/scripts/k3d-dev.sh'], /kind: Kustomization\nnamespace: "\$\{NAMESPACE\}"\nresources:/);
-    assert.match(files['operations/dev/k3s/scripts/k3d-dev.sh'], /kubectl -n "\$\{NAMESPACE\}" apply --validate="\$\{KUBECTL_APPLY_VALIDATE\}" -f "\$\{PRE_APPLY_FILE\}"/);
-    assert.match(files['operations/dev/k3s/scripts/k3d-dev.sh'], /kubectl -n "\$\{NAMESPACE\}" rollout restart/);
-    assert(files['operations/dev/harbor/README.md']);
-    assert(files['operations/dev/harbor/.env-example']);
-    assert(files['operations/dev/harbor/harbor.yml-example']);
-    assert(files['operations/dev/harbor/install-harbor.mjs']);
-    assert(files['operations/dev/zot/README.md']);
-    assert(files['operations/dev/zot/.env-example']);
-    assert(files['operations/dev/zot/docker-compose.yml']);
-    assert(files['operations/dev/zot/config.json']);
+    assert.match(files['operations/images/dev/images.mjs'], /node operations\/images\/dev\/images\.mjs package/);
+    assert.match(files['operations/images/dev/images.mjs'], /--exclude-service <name\[,name\]>/);
+    assert.match(files['operations/images/dev/images.mjs'], /projectImageArgs\(project\)/);
+    assert.doesNotMatch(files['operations/images/dev/images.mjs'], /runtime-engine-images|RUNTIME_ENGINE_ROOT|skip-runtime-engine/);
+    assert(files['operations/docker-compose/dev/docker-compose.yml']);
+    assert(!files['operations/dev/docker-compose/docker-compose.yml']);
+    assert(files['operations/docker-compose/dev/.env-example']);
+    assert(files['operations/apisix/dev/config.yaml']);
+    assert.match(files['operations/docker-compose/dev/docker-compose.yml'], /\.\.\/\.\.\/apisix\/dev\/config.yaml/);
+    assert(files['operations/docker-compose/dev/.env-example']);
+    assert(files['operations/kubernetes/base/applications.yaml']);
+    assert(files['operations/kubernetes/environments/dev/kustomization.yaml']);
+    assert(files['operations/kubernetes/environments/dev/configmap.yaml']);
+    assert(files['operations/kubernetes/environments/dev/secrets.example.yaml']);
+    assert(files['operations/kubernetes/environments/dev/patches/federation-service-envfrom.yaml']);
+    assert(!files['operations/kubernetes/environments/prod/kustomization.yaml']);
+    assert(files['operations/k3s/base/apisix.yaml']);
+    assert(!Object.keys(files).some((file) => file.startsWith('operations/shared/')));
+    assert(!Object.keys(files).some((file) => file.startsWith('operations/dev/k3s/')));
+    assert(files['operations/k3s/cluster/k3d-dev.yaml']);
+    assert(files['operations/k3s/scripts/k3d-dev.sh']);
+    assert.match(files['operations/k3s/scripts/k3d-dev.sh'], /CLUSTER_NAME="\$\{CLUSTER_NAME:-learning-platform-dev\}"/);
+    assert.match(files['operations/k3s/scripts/k3d-dev.sh'], /export KUBECONFIG="\$\{KUBECONFIG:-\$\{KUBECONFIG_FILE\}\}"/);
+    assert.match(files['operations/k3s/scripts/k3d-dev.sh'], /PRE_APPLY_FILE="\$\{PRE_APPLY_FILE:-\}"/);
+    assert.match(files['operations/k3s/scripts/k3d-dev.sh'], /KUBECTL_APPLY_VALIDATE="\$\{KUBECTL_APPLY_VALIDATE:-false\}"/);
+    assert.match(files['operations/k3s/scripts/k3d-dev.sh'], /kubectl_apply\(\)/);
+    assert.match(files['operations/k3s/scripts/k3d-dev.sh'], /kind: Kustomization\nnamespace: "\$\{NAMESPACE\}"\nresources:/);
+    assert.match(files['operations/k3s/scripts/k3d-dev.sh'], /kubectl -n "\$\{NAMESPACE\}" apply --validate="\$\{KUBECTL_APPLY_VALIDATE\}" -f "\$\{PRE_APPLY_FILE\}"/);
+    assert.match(files['operations/k3s/scripts/k3d-dev.sh'], /kubectl -n "\$\{NAMESPACE\}" rollout restart/);
+    assert(files['operations/harbor/dev/README.md']);
+    assert(files['operations/harbor/dev/.env-example']);
+    assert(files['operations/harbor/dev/harbor.yml-example']);
+    assert(files['operations/harbor/dev/install-harbor.mjs']);
+    assert(files['operations/zot/dev/README.md']);
+    assert(files['operations/zot/dev/.env-example']);
+    assert(files['operations/zot/dev/docker-compose.yml']);
+    assert(files['operations/zot/dev/config.json']);
+});
+
+test('shares Kubernetes bases while keeping replica overrides in environment patches', () => {
+    const model = buildOperationsModel(sampleModel);
+    const dev = generateOperationsFiles(model, {target: 'k3s', environment: 'dev'});
+    const prod = generateOperationsFiles(model, {target: 'k3s', environment: 'prod'});
+    const base = 'operations/k3s/base/applications.yaml';
+    assert.equal(dev[base], prod[base]);
+    assert.match(prod['operations/k3s/environments/prod/kustomization.yaml'], /\.\.\/\.\.\/base/);
+    assert.match(prod['operations/k3s/environments/prod/patches/deployment-federation-service-environment.yaml'], /replicas: 2/);
+    assert(prod['operations/docker-compose/prod/docker-compose.yml'] === undefined);
 });
 
 test('renders network topology from configured gateway routes and active service dependencies', () => {
     const model = buildOperationsModel(sampleModel);
-    const topology = generateOperationsFiles(model, { target: 'model', environment: 'dev' })['operations/dev/network-topology.md'];
+    const topology = generateOperationsFiles(model, { target: 'model', environment: 'dev' })['operations/model/dev/network-topology.md'];
 
     assert.match(topology, /```mermaid\nflowchart LR/);
     assert.match(topology, /Client \/ Browser/);
@@ -291,7 +312,7 @@ test('omits gateway routes when disabled and follows environment exposure', () =
     const model = buildOperationsModel(sampleModel, {
         operations: { gateway: { enabled: false } }
     });
-    const topology = generateOperationsFiles(model, { target: 'model', environment: 'dev' })['operations/dev/network-topology.md'];
+    const topology = generateOperationsFiles(model, { target: 'model', environment: 'dev' })['operations/model/dev/network-topology.md'];
 
     assert.doesNotMatch(topology, /apisix :/);
     assert.match(topology, /Client \/ Browser/);
@@ -313,7 +334,7 @@ test('places services and local data dependencies in configured deployment sites
             }
         }
     });
-    const topology = generateOperationsFiles(model, { target: 'model', environment: 'dev' })['operations/dev/network-topology.md'];
+    const topology = generateOperationsFiles(model, { target: 'model', environment: 'dev' })['operations/model/dev/network-topology.md'];
 
     assert.match(topology, /subgraph Site1\["Central environment"\]/);
     assert.match(topology, /subgraph Site2\["Remote environment"\]/);
@@ -376,48 +397,48 @@ test('renders Kubernetes and K3s manifests from the same operations model', () =
     const kubernetes = kubernetesFiles(model);
     const k3s = k3sFiles(model);
 
-    assert.match(kubernetes['dev/kubernetes/base/applications.yaml'], /kind: "Deployment"/);
-    assert.match(kubernetes['dev/kubernetes/base/applications.yaml'], /secretKeyRef/);
-    assert.doesNotMatch(kubernetes['dev/kubernetes/base/applications.yaml'], /\$\{/);
-    assert.doesNotMatch(kubernetes['dev/kubernetes/base/infrastructure.yaml'], /name: "axon-server"/);
-    assert.match(kubernetes['dev/kubernetes/base/infrastructure.yaml'], /name: "postgres-init"/);
-    assert.match(kubernetes['dev/kubernetes/base/infrastructure.yaml'], /name: "postgres-data"/);
-    assert.doesNotMatch(kubernetes['dev/kubernetes/base/infrastructure.yaml'], /postgres_data|umadb_data/);
-    assert.match(kubernetes['dev/kubernetes/base/apisix.yaml'], /type: "LoadBalancer"/);
-    assert.match(k3s['dev/k3s/base/apisix.yaml'], /type: "NodePort"/);
-    assert.match(k3s['dev/k3s/cluster/k3d-dev.yaml'], /apiVersion: "k3d.io\/v1alpha5"/);
-    assert.match(k3s['dev/k3s/cluster/k3d-dev.yaml'], /name: "learning-platform-dev"/);
-    assert.match(k3s['dev/k3s/cluster/k3d-dev.yaml'], /image: "rancher\/k3s:v1.33.5-k3s1"/);
-    assert(!k3s['dev/k3s/cluster/registries.yaml']);
-    assert.match(k3s['dev/k3s/cluster/k3d-dev.yaml'], /port: "30080:30080"/);
-    assert.doesNotMatch(k3s['dev/k3s/cluster/k3d-dev.yaml'], /\/workspace\/datasets/);
-    assert.doesNotMatch(k3s['dev/k3s/cluster/k3d-dev.yaml'], /\/workspace\/tmp\/runtime-engine/);
-    assert.match(k3s['dev/k3s/environments/dev/kustomization.yaml'], /configmap.yaml/);
-    assert.match(k3s['dev/k3s/environments/dev/kustomization.yaml'], /patches\/federation-service-envfrom.yaml/);
-    assert.doesNotMatch(k3s['dev/k3s/environments/dev/kustomization.yaml'], /secrets\.example\.yaml/);
-    assert.match(k3s['dev/k3s/environments/dev/configmap.yaml'], /name: "federation-service-dev-config"/);
-    assert.match(k3s['dev/k3s/environments/dev/configmap.yaml'], /SERVER_PORT: "8080"/);
-    assert.match(k3s['dev/k3s/environments/dev/configmap.yaml'], /MEDOL_SYNC_ENABLED: "true"/);
-    assert.match(k3s['dev/k3s/environments/dev/configmap.yaml'], /MEDOL_SYNC_MODE: "outbox-delta"/);
-    assert.match(k3s['dev/k3s/environments/dev/configmap.yaml'], /MEDOL_SYNC_SOURCE_BASE_URL: ""/);
-    assert.match(k3s['dev/k3s/environments/dev/configmap.yaml'], /VITE_API_URL: "https:\/\/iwdfzvfqbtokqetmbmbp\.supabase\.co"/);
-    assert.match(k3s['dev/k3s/environments/dev/configmap.yaml'], /VITE_FEDERATION_SERVICE_API_URL: "\/api\/federations"/);
-    assert.match(k3s['dev/k3s/environments/dev/configmap.yaml'], /VITE_SUPABASE_API_KEY: ""/);
-    assert.doesNotMatch(k3s['dev/k3s/base/applications.yaml'], /VITE_SUPABASE_API_KEY/);
-    assert.match(k3s['dev/k3s/environments/dev/secrets.example.yaml'], /name: "postgres-secret"/);
-    assert.doesNotMatch(k3s['dev/k3s/environments/dev/secrets.example.yaml'], /VITE_SUPABASE_API_KEY/);
-    assert.match(k3s['dev/k3s/environments/dev/secrets.example.yaml'], /MEDOL_SECURITY_INTERNAL_TOKEN/);
-    assert.match(k3s['dev/k3s/environments/dev/patches/federation-service-envfrom.yaml'], /envFrom:/);
-    assert.match(k3s['dev/k3s/README.md'], /k3d cluster create --config cluster\/k3d-dev.yaml/);
-    assert.match(k3s['dev/k3s/README.md'], /project-specific Kubernetes extensions in a separate overlay/);
-    assert.doesNotMatch(k3s['dev/k3s/README.md'], /runtime-agent-scheduler-rbac/);
-    assert.doesNotMatch(k3s['dev/k3s/README.md'], /medol\.dev\/runtime-infrastructure-id/);
-    assert.match(k3s['dev/k3s/README.md'], /cp environments\/<environment>\/secrets\.example\.yaml environments\/<environment>\/secrets\.<environment>\.yaml/);
-    assert.match(k3s['dev/k3s/README.md'], /apply -f environments\/<environment>\/secrets\.<environment>\.yaml/);
-    assert.match(k3s['dev/k3s/README.md'], /must not be committed/);
-    assert.match(k3s['dev/k3s/README.md'], /NodePort service on `30080`/);
-    assert.match(kubernetes['dev/kubernetes/base/apisix-config.yaml'], /apisix.yaml: \|/);
-    assert(!kubernetes['dev/kubernetes/cluster/k3d-dev.yaml']);
+    assert.match(kubernetes['operations/kubernetes/base/applications.yaml'], /kind: "Deployment"/);
+    assert.match(kubernetes['operations/kubernetes/base/applications.yaml'], /secretKeyRef/);
+    assert.doesNotMatch(kubernetes['operations/kubernetes/base/applications.yaml'], /\$\{/);
+    assert.doesNotMatch(kubernetes['operations/kubernetes/base/infrastructure.yaml'], /name: "axon-server"/);
+    assert.match(kubernetes['operations/kubernetes/base/infrastructure.yaml'], /name: "postgres-init"/);
+    assert.match(kubernetes['operations/kubernetes/base/infrastructure.yaml'], /name: "postgres-data"/);
+    assert.doesNotMatch(kubernetes['operations/kubernetes/base/infrastructure.yaml'], /postgres_data|umadb_data/);
+    assert.match(kubernetes['operations/kubernetes/base/apisix.yaml'], /type: "LoadBalancer"/);
+    assert.match(k3s['operations/k3s/base/apisix.yaml'], /type: "NodePort"/);
+    assert.match(k3s['operations/k3s/cluster/k3d-dev.yaml'], /apiVersion: "k3d.io\/v1alpha5"/);
+    assert.match(k3s['operations/k3s/cluster/k3d-dev.yaml'], /name: "learning-platform-dev"/);
+    assert.match(k3s['operations/k3s/cluster/k3d-dev.yaml'], /image: "rancher\/k3s:v1.33.5-k3s1"/);
+    assert(!k3s['operations/k3s/cluster/registries.yaml']);
+    assert.match(k3s['operations/k3s/cluster/k3d-dev.yaml'], /port: "30080:30080"/);
+    assert.doesNotMatch(k3s['operations/k3s/cluster/k3d-dev.yaml'], /\/workspace\/datasets/);
+    assert.doesNotMatch(k3s['operations/k3s/cluster/k3d-dev.yaml'], /\/workspace\/tmp\/runtime-engine/);
+    assert.match(k3s['operations/k3s/environments/dev/kustomization.yaml'], /configmap.yaml/);
+    assert.match(k3s['operations/k3s/environments/dev/kustomization.yaml'], /patches\/federation-service-envfrom.yaml/);
+    assert.doesNotMatch(k3s['operations/k3s/environments/dev/kustomization.yaml'], /secrets\.example\.yaml/);
+    assert.match(k3s['operations/k3s/environments/dev/configmap.yaml'], /name: "federation-service-dev-config"/);
+    assert.match(k3s['operations/k3s/environments/dev/configmap.yaml'], /SERVER_PORT: "8080"/);
+    assert.match(k3s['operations/k3s/environments/dev/configmap.yaml'], /MEDOL_SYNC_ENABLED: "true"/);
+    assert.match(k3s['operations/k3s/environments/dev/configmap.yaml'], /MEDOL_SYNC_MODE: "outbox-delta"/);
+    assert.match(k3s['operations/k3s/environments/dev/configmap.yaml'], /MEDOL_SYNC_SOURCE_BASE_URL: ""/);
+    assert.match(k3s['operations/k3s/environments/dev/configmap.yaml'], /VITE_API_URL: "https:\/\/iwdfzvfqbtokqetmbmbp\.supabase\.co"/);
+    assert.match(k3s['operations/k3s/environments/dev/configmap.yaml'], /VITE_FEDERATION_SERVICE_API_URL: "\/api\/federations"/);
+    assert.match(k3s['operations/k3s/environments/dev/configmap.yaml'], /VITE_SUPABASE_API_KEY: ""/);
+    assert.doesNotMatch(k3s['operations/k3s/base/applications.yaml'], /VITE_SUPABASE_API_KEY/);
+    assert.match(k3s['operations/k3s/environments/dev/secrets.example.yaml'], /name: "postgres-secret"/);
+    assert.doesNotMatch(k3s['operations/k3s/environments/dev/secrets.example.yaml'], /VITE_SUPABASE_API_KEY/);
+    assert.match(k3s['operations/k3s/environments/dev/secrets.example.yaml'], /MEDOL_SECURITY_INTERNAL_TOKEN/);
+    assert.match(k3s['operations/k3s/environments/dev/patches/federation-service-envfrom.yaml'], /envFrom:/);
+    assert.match(k3s['operations/k3s/README.md'], /k3d cluster create --config cluster\/k3d-dev.yaml/);
+    assert.match(k3s['operations/k3s/README.md'], /project-specific Kubernetes extensions in a separate overlay/);
+    assert.doesNotMatch(k3s['operations/k3s/README.md'], /runtime-agent-scheduler-rbac/);
+    assert.doesNotMatch(k3s['operations/k3s/README.md'], /medol\.dev\/runtime-infrastructure-id/);
+    assert.match(k3s['operations/k3s/README.md'], /cp environments\/<environment>\/secrets\.example\.yaml environments\/<environment>\/secrets\.<environment>\.yaml/);
+    assert.match(k3s['operations/k3s/README.md'], /apply -f environments\/<environment>\/secrets\.<environment>\.yaml/);
+    assert.match(k3s['operations/k3s/README.md'], /must not be committed/);
+    assert.match(k3s['operations/k3s/README.md'], /NodePort service on `30080`/);
+    assert.match(kubernetes['operations/kubernetes/base/apisix-config.yaml'], /apisix.yaml: \|/);
+    assert(!kubernetes['operations/kubernetes/cluster/k3d-dev.yaml']);
 });
 
 test('derives image names and K3s registry configuration from optional registry settings', () => {
@@ -435,55 +456,55 @@ test('derives image names and K3s registry configuration from optional registry 
     assert.equal(model.imagePrefix, 'registry.internal:5000/team');
     assert.equal(model.registry.imagePrefix, 'registry.internal:5000/team');
     assert.match(
-        k3s['dev/k3s/base/applications.yaml'],
+        k3s['operations/k3s/base/applications.yaml'],
         /image: "team\/federation-service:0\.0\.1-SNAPSHOT"/
     );
     assert.match(
-        k3s['dev/k3s/environments/dev-registry/kustomization.yaml'],
+        k3s['operations/k3s/environments/dev-registry/kustomization.yaml'],
         /newName: "registry\.internal:5000\/team\/federation-service"/
     );
     assert.match(
-        k3s['dev/k3s/environments/dev-registry/kustomization.yaml'],
+        k3s['operations/k3s/environments/dev-registry/kustomization.yaml'],
         /path: "image-pull-policy\.yaml"/
     );
     assert.match(
-        k3s['dev/k3s/environments/dev-registry/image-pull-policy.yaml'],
+        k3s['operations/k3s/environments/dev-registry/image-pull-policy.yaml'],
         /path: "\/spec\/template\/spec\/containers\/0\/imagePullPolicy"/
     );
     assert.match(
-        k3s['dev/k3s/environments/dev-registry/image-pull-policy.yaml'],
+        k3s['operations/k3s/environments/dev-registry/image-pull-policy.yaml'],
         /value: "Always"/
     );
     assert.match(
-        k3s['dev/k3s/cluster/registries.yaml'],
+        k3s['operations/k3s/cluster/registries.yaml'],
         /"registry\.internal:5000":/
     );
     assert.match(
-        k3s['dev/k3s/cluster/registries.yaml'],
+        k3s['operations/k3s/cluster/registries.yaml'],
         /"docker\.io":/
     );
     assert.match(
-        k3s['dev/k3s/cluster/registries.yaml'],
+        k3s['operations/k3s/cluster/registries.yaml'],
         /"http:\/\/registry\.internal:5000"/
     );
     const modelFiles = generateOperationsFiles(model, { target: 'model', environment: 'dev' });
-    assert.match(modelFiles['operations/dev/.gitignore'], /operations-model\.local\.json/);
-    const generatedModel = JSON.parse(modelFiles['operations/dev/operations-model.json']);
+    assert.match(modelFiles['operations/model/dev/.gitignore'], /operations-model\.local\.json/);
+    const generatedModel = JSON.parse(modelFiles['operations/model/dev/operations-model.json']);
     assert.equal(generatedModel.imagePrefix, 'team');
     assert.equal(generatedModel.registry, undefined);
     assert.equal(generatedModel.applications[0].imageName, 'team/learning-platform-console');
-    assert.doesNotMatch(modelFiles['operations/dev/operations-model.json'], /registry\.internal:5000/);
-    const localModel = JSON.parse(modelFiles['operations/dev/operations-model.local.json']);
+    assert.doesNotMatch(modelFiles['operations/model/dev/operations-model.json'], /registry\.internal:5000/);
+    const localModel = JSON.parse(modelFiles['operations/model/dev/operations-model.private.json']);
     assert.equal(localModel.registry.host, 'registry.internal:5000');
     assert.deepEqual(Object.keys(localModel), ['registry']);
-    assert.match(modelFiles['operations/dev/images.mjs'], /resolveImageConfig\(scriptDir/);
-    assert.match(modelFiles['operations/dev/image-config.mjs'], /operations-model\.local\.json/);
-    assert.doesNotMatch(modelFiles['operations/dev/images.mjs'], /registry\.internal:5000/);
+    assert.match(modelFiles['operations/images/dev/images.mjs'], /resolveImageConfig\(scriptDir/);
+    assert.match(modelFiles['operations/images/dev/image-config.mjs'], /operations-model\.local\.json/);
+    assert.doesNotMatch(modelFiles['operations/images/dev/images.mjs'], /registry\.internal:5000/);
     const deployFiles = generateOperationsFiles(model, { target: 'all', environment: 'dev' });
-    assert.doesNotMatch(deployFiles['operations/dev/docker-compose/docker-compose.yml'], /registry\.internal:5000/);
-    assert.doesNotMatch(deployFiles['operations/dev/.env-example'], /registry\.internal:5000/);
+    assert.doesNotMatch(deployFiles['operations/docker-compose/dev/docker-compose.yml'], /registry\.internal:5000/);
+    assert.doesNotMatch(deployFiles['operations/docker-compose/dev/.env-example'], /registry\.internal:5000/);
     assert.match(deployFiles['docs/document-support/collect-engineering-facts.mjs'], /app\.artifactName \?\? app\.name/);
-    assert.match(deployFiles['operations/dev/k3s/environments/dev-registry/kustomization.yaml'], /registry\.internal:5000/);
+    assert.match(deployFiles['operations/k3s/environments/dev-registry/kustomization.yaml'], /registry\.internal:5000/);
 });
 
 test('loads operations registry configuration from .medol/medol.yml', () => {
@@ -533,6 +554,37 @@ test('loads local operations registry overrides from .medol/medol.local.yml', ()
     assert.equal(model.registry.insecure, true);
 });
 
+test('dedicated operations config isolates registry by environment', () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'operations-workspace-'));
+    fs.mkdirSync(path.join(workspace, '.medol'));
+    fs.mkdirSync(path.join(workspace, 'operations/config'), {recursive: true});
+    fs.writeFileSync(path.join(workspace, '.medol/medol.local.yml'), 'operations:\n  registry:\n    host: old-registry:5000\n');
+    fs.writeFileSync(path.join(workspace, 'operations/config/common.yml'), 'applications:\n  FederationService:\n    servicePort: 8081\n');
+    fs.writeFileSync(path.join(workspace, 'operations/config/dev.private.yml'), 'registry:\n  host: dev-registry:5000\n  namespace: team\n');
+    fs.writeFileSync(path.join(workspace, 'operations/config/prod.yml'), 'registry:\n  host: prod-registry:5000\n  namespace: team\n');
+    const loaded = loadMedolWorkspace(workspace);
+    assert.equal(loadOperationsConfig(workspace, loaded, 'dev').operations.registry.host, 'dev-registry:5000');
+    assert.equal(loadOperationsConfig(workspace, loaded, 'prod').operations.registry.host, 'prod-registry:5000');
+    assert.equal(loadOperationsConfig(workspace, loaded, 'test').operations.registry, undefined);
+    assert.equal(loadOperationsConfig(workspace, loaded, 'local').operations.registry, undefined);
+    assert.equal(loadOperationsConfig(workspace, loaded, 'test').operations.applications.FederationService.servicePort, 8081);
+});
+
+test('local environment renders each operations target in its own directory', () => {
+    const model = buildOperationsModel(sampleModel);
+    const files = generateOperationsFiles(model, {target: 'all', environment: 'local'});
+    assert(files['operations/model/local/operations-model.json']);
+    assert(files['operations/images/local/images.mjs']);
+    assert(files['operations/apisix/local/apisix.yaml']);
+    assert(files['operations/docker-compose/local/docker-compose.yml']);
+    assert(files['operations/kubernetes/environments/local/kustomization.yaml']);
+    assert(files['operations/k3s/environments/local/kustomization.yaml']);
+    assert(files['operations/harbor/local/README.md']);
+    assert(files['operations/zot/local/README.md']);
+    const local = model.environments.find((environment) => environment.name === 'local');
+    assert.equal(local.applicationOverrides['federation-service'].exposePorts, true);
+});
+
 test('pushes dependency mirrors under the registry root instead of the application namespace', () => {
     const model = buildOperationsModel(sampleModel, {
         operations: {
@@ -543,7 +595,7 @@ test('pushes dependency mirrors under the registry root instead of the applicati
             }
         }
     });
-    const script = generateOperationsFiles(model, { target: 'model', environment: 'dev' })['operations/dev/images.mjs'];
+    const script = generateOperationsFiles(model, { target: 'model', environment: 'dev' })['operations/images/dev/images.mjs'];
 
     assert.match(script, /const dependencyImagePrefix = String/);
     assert.match(script, /rancher\/mirrored-pause:3\.6/);
@@ -579,15 +631,15 @@ test('does not infer custom scheduling from application names', () => {
     });
     const k3s = k3sFiles(generatedModel, { environmentName: 'staging' });
 
-    assert(!k3s['staging/k3s/cluster/k3d-dev.yaml']);
-    assert.doesNotMatch(k3s['staging/k3s/base/applications.yaml'], /serviceAccountName:/);
-    assert.doesNotMatch(k3s['staging/k3s/base/applications.yaml'], /mountPath: "\/workspace\/datasets"/);
-    assert.doesNotMatch(k3s['staging/k3s/environments/staging/configmap.yaml'], /PLATFORM_RUNTIME_K3S_NAMESPACE/);
-    assert.doesNotMatch(k3s['staging/k3s/environments/staging/configmap.yaml'], /RUNTIME_AGENT_LOCAL_RUNTIME_ENGINE_MODE/);
-    assert.doesNotMatch(k3s['staging/k3s/README.md'], /Platform-Managed Runtime Agent Startup/);
-    assert.match(k3s['staging/k3s/environments/staging/configmap.yaml'], /name: "learning-support-staging-config"[\s\S]*MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED: "true"/);
-    assert.doesNotMatch(k3s['staging/k3s/environments/staging/configmap.yaml'], /MEDOL_SECURITY_ALLOWED_ORIGINS/);
-    assert.match(k3s['staging/k3s/environments/staging/secrets.example.yaml'], /name: "learning-support-staging-secret"[\s\S]*MEDOL_SECURITY_ADMIN_BOOTSTRAP_SETUP_TOKEN/);
+    assert(!k3s['operations/k3s/cluster/k3d-dev.yaml']);
+    assert.doesNotMatch(k3s['operations/k3s/base/applications.yaml'], /serviceAccountName:/);
+    assert.doesNotMatch(k3s['operations/k3s/base/applications.yaml'], /mountPath: "\/workspace\/datasets"/);
+    assert.doesNotMatch(k3s['operations/k3s/environments/staging/configmap.yaml'], /PLATFORM_RUNTIME_K3S_NAMESPACE/);
+    assert.doesNotMatch(k3s['operations/k3s/environments/staging/configmap.yaml'], /RUNTIME_AGENT_LOCAL_RUNTIME_ENGINE_MODE/);
+    assert.doesNotMatch(k3s['operations/k3s/README.md'], /Platform-Managed Runtime Agent Startup/);
+    assert.match(k3s['operations/k3s/environments/staging/configmap.yaml'], /name: "learning-support-staging-config"[\s\S]*MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED: "true"/);
+    assert.doesNotMatch(k3s['operations/k3s/environments/staging/configmap.yaml'], /MEDOL_SECURITY_ALLOWED_ORIGINS/);
+    assert.match(k3s['operations/k3s/environments/staging/secrets.example.yaml'], /name: "learning-support-staging-secret"[\s\S]*MEDOL_SECURITY_ADMIN_BOOTSTRAP_SETUP_TOKEN/);
 });
 
 test('renders browser CORS origins for the dev K3s gateway', () => {
@@ -607,14 +659,14 @@ test('renders browser CORS origins for the dev K3s gateway', () => {
     const k3s = k3sFiles(generatedModel, { environmentName: 'dev' });
 
     assert.match(
-        k3s['dev/k3s/environments/dev/configmap.yaml'],
+        k3s['operations/k3s/environments/dev/configmap.yaml'],
         /MEDOL_SECURITY_ALLOWED_ORIGINS: "http:\/\/localhost:\*,http:\/\/127\.0\.0\.1:\*,http:\/\/\*:30080"/
     );
     assert.match(
-        k3s['dev/k3s/environments/dev/configmap.yaml'],
+        k3s['operations/k3s/environments/dev/configmap.yaml'],
         /name: "federation-learning-platform-dev-config"[\s\S]*MEDOL_SECURITY_ALLOWED_ORIGINS: "http:\/\/localhost:\*,http:\/\/127\.0\.0\.1:\*,http:\/\/\*:30080"/
     );
-    assert.match(k3s['dev/k3s/README.md'], /Administrator bootstrap is enabled by default/);
+    assert.match(k3s['operations/k3s/README.md'], /Administrator bootstrap is enabled by default/);
 });
 
 function golden(name) {

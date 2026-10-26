@@ -1,5 +1,4 @@
-operations:
-  registry:
-    host: registry.example.com
-    namespace: team
-    insecure: true
+registry:
+  host: registry.example.com
+  namespace: team
+  insecure: true

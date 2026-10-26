@@ -1,5 +1,5 @@
 import {existsSync, readFileSync} from 'node:fs';
-import {resolve} from 'node:path';
+import {basename, resolve} from 'node:path';
 
 export function resolveImageConfig(directory, options = {}) {
     const env = options.env ?? process.env;
@@ -7,18 +7,21 @@ export function resolveImageConfig(directory, options = {}) {
         const file = resolve(directory, name);
         return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
     };
-    const model = read('operations-model.json');
-    const recordFile = resolve(directory, '../../.medol/generation/operations.json');
+    const model = read(`../../model/${basename(directory)}/operations-model.json`);
+    const recordFile = resolve(directory, '../../../.medol/generation/operations.json');
     const generation = existsSync(recordFile) ? JSON.parse(readFileSync(recordFile, 'utf8')) : undefined;
     const metadata = generation?.model?.metadata ?? model.metadata;
     const built = ['export', 'push', 'push-registry'].includes(options.operation)
-        ? read('../../.medol/build-manifest.json') : {};
+        ? read('../../../.medol/build-manifest.json') : {};
     const recordedVersion = generation && built.generation?.target === 'operations'
         && built.generation?.model?.sha256 === generation.model?.sha256 ? built.imageVersion : undefined;
     const release = metadata?.source?.release;
     const baselineVersion = release?.channel === 'stable' && /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(release.label ?? '')
         ? `${release.label}.0` : undefined;
-    const local = read('operations-model.local.json');
+    const privateFile = resolve(directory, `../../model/${basename(directory)}/operations-model.private.json`);
+    const local = read(existsSync(privateFile)
+        ? `../../model/${basename(directory)}/operations-model.private.json`
+        : `../../model/${basename(directory)}/operations-model.local.json`);
     const registry = local.registry ?? model.registry;
     const clean = (value) => typeof value === 'string' ? value.trim().replace(/\/+$/, '') : '';
     const configuredPrefix = clean(options.prefix) || clean(env.DOCKER_IMAGE_PREFIX);

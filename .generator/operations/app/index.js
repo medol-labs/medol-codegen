@@ -28,7 +28,6 @@ module.exports = class extends Generator {
         }
         const loaded = loadGeneratorModel(this.env.cwd, this.opts);
         this.codegenModel = loaded.codegenModel;
-        this.operationsConfig = loadOperationsConfig(this.env.cwd, this.workspace);
     }
 
     async prompting() {
@@ -47,7 +46,7 @@ module.exports = class extends Generator {
                 type: 'list',
                 name: 'environment',
                 message: 'Which operations environment?',
-                choices: ['dev', 'test', 'staging', 'prod'],
+                choices: ['local', 'dev', 'test', 'staging', 'prod'],
                 default: 'dev'
             });
         }
@@ -68,7 +67,8 @@ module.exports = class extends Generator {
         const target = targets.includes(this.answers.target)
             ? this.answers.target
             : 'all';
-        const operationsModel = buildOperationsModel(this.codegenModel, this.operationsConfig);
+        const operationsConfig = loadOperationsConfig(this.env.cwd, this.workspace, this.answers.environment);
+        const operationsModel = buildOperationsModel(this.codegenModel, operationsConfig);
         const files = generateOperationsFiles(operationsModel, {
             target,
             environment: this.answers.environment

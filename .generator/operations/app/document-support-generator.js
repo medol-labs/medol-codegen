@@ -24,14 +24,14 @@ function engineeringFactsSources(model, environment) {
     }
     return {
         environment,
-        operationsModel: `operations/${environment}/operations-model.json`,
-        dockerCompose: `operations/${environment}/docker-compose/docker-compose.yml`,
+        operationsModel: `operations/model/${environment}/operations-model.json`,
+        dockerCompose: `operations/docker-compose/${environment}/docker-compose.yml`,
         operationsReadmes: [
-            `operations/${environment}/README.md`,
-            `operations/${environment}/network-topology.md`,
-            `operations/${environment}/docker-compose/README.md`,
-            `operations/${environment}/k3s/README.md`,
-            `operations/${environment}/kubernetes/README.md`
+            `operations/model/${environment}/README.md`,
+            `operations/model/${environment}/network-topology.md`,
+            `operations/docker-compose/${environment}/README.md`,
+            'operations/k3s/README.md',
+            'operations/kubernetes/README.md'
         ],
         applicationFiles,
         technologyProjects: (model.applications ?? []).map(({ name, kind }) => ({ name, kind }))
@@ -430,11 +430,11 @@ function deploymentModes(config) {
 function operationsCommands(config) {
   const environment = config.environment ?? 'dev';
   return [
-    \`cp operations/\${environment}/.env-example operations/\${environment}/.env\`,
-    \`docker compose --env-file operations/\${environment}/.env -f operations/\${environment}/docker-compose/docker-compose.yml up -d\`,
-    \`node operations/\${environment}/images.mjs list\`,
-    \`node operations/\${environment}/images.mjs all\`,
-    \`kubectl apply -k operations/\${environment}/kubernetes/environments/\${environment}\`,
+    \`cp operations/docker-compose/\${environment}/.env-example operations/docker-compose/\${environment}/.env\`,
+    \`docker compose --env-file operations/docker-compose/\${environment}/.env -f operations/docker-compose/\${environment}/docker-compose.yml up -d\`,
+    \`node operations/images/\${environment}/images.mjs list\`,
+    \`node operations/images/\${environment}/images.mjs all\`,
+    \`kubectl apply -k operations/kubernetes/environments/\${environment}\`,
   ];
 }
 

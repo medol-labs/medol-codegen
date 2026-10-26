@@ -7,8 +7,8 @@ services:
     ports:
       - "${GATEWAY_PORT:-9080}:9080"
     volumes:
-      - "../infrastructure/apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro"
-      - "../infrastructure/apisix/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro"
+      - "../../apisix/dev/config.yaml:/usr/local/apisix/conf/config.yaml:ro"
+      - "../../apisix/dev/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro"
     depends_on:
       console:
         condition: "service_healthy"
@@ -137,7 +137,7 @@ services:
       retries: 10
     volumes:
       - "postgres_data:/var/lib/postgresql/data"
-      - "../infrastructure/postgres/init:/docker-entrypoint-initdb.d:ro"
+      - "./infrastructure/postgres/init:/docker-entrypoint-initdb.d:ro"
     networks:
       - "medol-network"
     ports:

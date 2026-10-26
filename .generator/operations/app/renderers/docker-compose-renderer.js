@@ -35,14 +35,14 @@ function renderDockerCompose(model, environmentName = 'dev') {
 }
 
 function dockerComposeFiles(model, environmentName = 'dev', options = {}) {
-    const root = trimRoot(options.root ?? environmentName);
+    const root = trimRoot(options.root ?? `operations/docker-compose/${environmentName}`);
     const resolved = resolveOperationsModel(model, environmentName);
     const storage = resolved.applications.find((application) => application.tenantStorage)?.tenantStorage;
     return {
-        [`${root}/docker-compose/docker-compose.yml`]: renderDockerCompose(model, environmentName),
+        [`${root}/docker-compose.yml`]: renderDockerCompose(model, environmentName),
         [`${root}/.env-example`]: renderEnvironmentExample(model, environmentName),
         [`${root}/infrastructure/postgres/init/01-create-databases.sql`]: renderPostgresInitSql(model),
-        [`${root}/docker-compose/README.md`]: renderComposeReadme(environmentName, storage),
+        [`${root}/README.md`]: renderComposeReadme(environmentName, storage),
         ...(storage ? {[`${root}/configuration/tenant-storage.yml`]: tenantStorageYaml(storage)} : {}),
         ...Object.fromEntries(resolved.infrastructure.filter((component) => component.additional && component.type === 'postgres').map((component) => [
             `${root}/infrastructure/${component.name}/init/01-create-databases.sql`, renderPostgresInitSql(model, component)
@@ -64,8 +64,8 @@ function gatewayService(resolved) {
             `\${GATEWAY_PORT:-${gateway.hostPort}}:${gateway.servicePort}`
         ],
         volumes: [
-            '../infrastructure/apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro',
-            '../infrastructure/apisix/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro'
+            `../../apisix/${resolved.environment.name}/config.yaml:/usr/local/apisix/conf/config.yaml:ro`,
+            `../../apisix/${resolved.environment.name}/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro`
         ],
         depends_on: dependsOn,
         networks: ['medol-network']
@@ -79,7 +79,7 @@ function applicationService(application, infrastructure) {
         restart: 'unless-stopped',
         expose: [String(application.servicePort)],
         environment: variablesObject(application.environmentVariables),
-        ...(application.tenantStorage ? {volumes: ['../configuration/tenant-storage.yml:/etc/medol/tenant-storage.yml:ro']} : {}),
+        ...(application.tenantStorage ? {volumes: ['./configuration/tenant-storage.yml:/etc/medol/tenant-storage.yml:ro']} : {}),
         networks: ['medol-network'],
         ...(application.dependencies.length > 0
             ? { depends_on: dependsOn(application.dependencies, infrastructure) }
@@ -113,7 +113,7 @@ function infrastructureService(component) {
             },
             volumes: [
                 `${component.volumeName}:/var/lib/postgresql/data`,
-                `../infrastructure/${component.additional ? component.name : 'postgres'}/init:/docker-entrypoint-initdb.d:ro`
+                `./infrastructure/${component.additional ? component.name : 'postgres'}/init:/docker-entrypoint-initdb.d:ro`
             ],
             networks: ['medol-network']
         };
@@ -320,9 +320,11 @@ function renderComposeReadme(environmentName, storage) {
         `Run the ${environmentName} topology from this directory:`,
         '',
         '```bash',
-        'cp ../.env-example .env',
+        'cp .env-example .env',
         'docker compose --env-file .env up -d',
         '```',
+        '',
+        `Run Compose from \`operations/docker-compose/${environmentName}/\` so its relative mounts resolve correctly. The APISIX configuration is read from \`operations/apisix/${environmentName}/\`.`,
         '',
         'APISIX is the primary external entrypoint. Internal services communicate through the `medol-network` Docker network.',
         '',

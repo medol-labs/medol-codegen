@@ -499,7 +499,7 @@ function buildGateway(applications, backendApplications, operationsConfig) {
 
 function buildEnvironments(applications, infrastructure, operationsConfig, imageTag) {
     const configured = operationsConfig.environments ?? {};
-    return ['dev', 'test', 'staging', 'prod'].map((name) => {
+    return ['dev', 'local', 'test', 'staging', 'prod'].map((name) => {
         const defaults = defaultEnvironment(name, applications, infrastructure, imageTag);
         const override = configured[name] ?? {};
         return {
@@ -516,7 +516,7 @@ function buildEnvironments(applications, infrastructure, operationsConfig, image
 }
 
 function defaultEnvironment(name, applications, infrastructure, imageTag) {
-    const exposeServices = name === 'dev';
+    const exposeServices = name === 'local' || name === 'dev';
     const replicas = name === 'prod' || name === 'staging' ? 2 : 1;
     return {
         name,

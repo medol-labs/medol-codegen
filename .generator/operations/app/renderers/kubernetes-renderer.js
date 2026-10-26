@@ -19,7 +19,7 @@ const {tenantStorageYaml, tenantStorageChecksum, tenantDeploymentNotes} = requir
 function kubernetesFiles(model, options = {}) {
     const environmentName = options.environmentName ?? 'dev';
     return kubernetesLikeFiles(model, {
-        root: trimRoot(options.root ?? `${environmentName}/kubernetes`),
+        root: trimRoot(options.root ?? 'operations/kubernetes'),
         environmentName,
         gatewayServiceType: 'LoadBalancer',
         name: 'Kubernetes'
@@ -29,7 +29,7 @@ function kubernetesFiles(model, options = {}) {
 function k3sFiles(model, options = {}) {
     const environmentName = options.environmentName ?? 'dev';
     return kubernetesLikeFiles(model, {
-        root: trimRoot(options.root ?? `${environmentName}/k3s`),
+        root: trimRoot(options.root ?? 'operations/k3s'),
         environmentName,
         gatewayServiceType: 'NodePort',
         name: 'K3s'
@@ -38,7 +38,12 @@ function k3sFiles(model, options = {}) {
 
 function kubernetesLikeFiles(model, options) {
     const resolved = resolveOperationsModel(model, options.environmentName);
-    const baseResolved = withoutRegistryImages(resolved);
+    const baseResolved = withoutRegistryImages(resolveOperationsModel(model, model.environments[0]?.name ?? options.environmentName));
+    const environmentResolved = withoutRegistryImages(resolved);
+    const sharedRoot = options.root;
+    if (renderApisixConfigMap(baseResolved) !== renderApisixConfigMap(environmentResolved)) {
+        throw new Error(`Environment ${options.environmentName} changes APISIX configuration; a shared base cannot represent it.`);
+    }
     const resources = [
         'namespace.yaml',
         'infrastructure.yaml',
@@ -47,20 +52,21 @@ function kubernetesLikeFiles(model, options) {
         'apisix.yaml'
     ];
     const files = {};
-    files[`${options.root}/base/kustomization.yaml`] = renderYaml({
+    files[`${sharedRoot}/base/kustomization.yaml`] = renderYaml({
         resources
     });
-    files[`${options.root}/base/namespace.yaml`] = renderYaml({
+    files[`${sharedRoot}/base/namespace.yaml`] = renderYaml({
         apiVersion: 'v1',
         kind: 'Namespace',
         metadata: {
             name: baseResolved.name
         }
     });
-    files[`${options.root}/base/infrastructure.yaml`] = renderDocuments(infrastructureResources(baseResolved));
-    files[`${options.root}/base/applications.yaml`] = renderDocuments(applicationResources(baseResolved));
-    files[`${options.root}/base/apisix-config.yaml`] = renderApisixConfigMap(baseResolved);
-    files[`${options.root}/base/apisix.yaml`] = renderDocuments(apisixResources(baseResolved, options.gatewayServiceType));
+    files[`${sharedRoot}/base/infrastructure.yaml`] = renderDocuments(infrastructureResources(baseResolved));
+    files[`${sharedRoot}/base/applications.yaml`] = renderDocuments(applicationResources(baseResolved));
+    files[`${sharedRoot}/base/apisix-config.yaml`] = renderApisixConfigMap(baseResolved);
+    files[`${sharedRoot}/base/apisix.yaml`] = renderDocuments(apisixResources(baseResolved, options.gatewayServiceType));
+    const resourcePatches = sharedBasePatches(baseResolved, environmentResolved, options.gatewayServiceType);
     files[`${options.root}/environments/${options.environmentName}/kustomization.yaml`] = renderYaml({
         resources: [
             '../../base',
@@ -75,12 +81,18 @@ function kubernetesLikeFiles(model, options) {
             includeSelectors: true,
             includeTemplates: true
         }],
-        patches: environmentPatchFiles(baseResolved).map((file) => ({ path: file }))
+        patches: [
+            ...environmentPatchFiles(environmentResolved).map((file) => ({ path: file })),
+            ...resourcePatches.map((patch) => ({ path: patch.file, target: patch.target }))
+        ]
     });
-    files[`${options.root}/environments/${options.environmentName}/configmap.yaml`] = renderDocuments(environmentConfigMaps(baseResolved, options));
-    files[`${options.root}/environments/${options.environmentName}/secrets.example.yaml`] = renderDocuments(environmentSecretExamples(baseResolved, options.environmentName));
-    environmentPatches(baseResolved).forEach((patch) => {
+    files[`${options.root}/environments/${options.environmentName}/configmap.yaml`] = renderDocuments(environmentConfigMaps(environmentResolved, options));
+    files[`${options.root}/environments/${options.environmentName}/secrets.example.yaml`] = renderDocuments(environmentSecretExamples(environmentResolved, options.environmentName));
+    environmentPatches(environmentResolved).forEach((patch) => {
         files[`${options.root}/environments/${options.environmentName}/${patch.file}`] = renderYaml(patch.document);
+    });
+    resourcePatches.forEach((patch) => {
+        files[`${options.root}/environments/${options.environmentName}/${patch.file}`] = renderYaml(patch.operations);
     });
     if (options.name.toLowerCase() === 'k3s' && options.environmentName === 'dev') {
         files[`${options.root}/cluster/k3d-dev.yaml`] = renderK3dClusterConfig(baseResolved);
@@ -90,7 +102,8 @@ function kubernetesLikeFiles(model, options) {
         files[`${options.root}/cluster/registries.yaml`] = renderK3sRegistriesConfig(resolved.registry);
     }
     Object.assign(files, registryEnvironmentFiles(baseResolved, resolved, options));
-    files[`${options.root}/README.md`] = renderKubernetesReadme(options.name, resolved);
+    const readmeModel = resolveOperationsModel(model, model.environments[0]?.name ?? options.environmentName);
+    files[`${options.root}/README.md`] = renderKubernetesReadme(options.name, readmeModel);
     return files;
 }
 
@@ -101,6 +114,44 @@ function infrastructureResources(model) {
         if (component.type === 'axon-server') return axonServerResources(component);
         if (component.type === 'redis') return statefulInfrastructure(component, '/data');
         return [];
+    });
+}
+
+function sharedBasePatches(base, environment, gatewayServiceType) {
+    const resources = (model) => [
+        ...infrastructureResources(model),
+        ...applicationResources(model),
+        ...apisixResources(model, gatewayServiceType)
+    ];
+    const key = (resource) => `${resource.kind}/${resource.metadata.name}`;
+    const baseResources = new Map(resources(base).map((resource) => [key(resource), resource]));
+    const environmentResources = new Map(resources(environment).map((resource) => [key(resource), resource]));
+    const baseKeys = [...baseResources.keys()].sort();
+    const environmentKeys = [...environmentResources.keys()].sort();
+    if (JSON.stringify(baseKeys) !== JSON.stringify(environmentKeys)) {
+        throw new Error(`Environment ${environment.environment.name} changes the Kubernetes resource set; a shared base cannot represent it.`);
+    }
+    return baseKeys.flatMap((resourceKey) => {
+        const original = baseResources.get(resourceKey);
+        const updated = environmentResources.get(resourceKey);
+        const operations = [];
+        for (const field of ['metadata', 'spec', 'data', 'stringData']) {
+            if (JSON.stringify(original[field]) === JSON.stringify(updated[field])) continue;
+            if (field === 'metadata' && original.metadata.name !== updated.metadata.name) {
+                throw new Error(`Environment ${environment.environment.name} changes resource identity ${resourceKey}.`);
+            }
+            operations.push({
+                op: original[field] === undefined ? 'add' : updated[field] === undefined ? 'remove' : 'replace',
+                path: `/${field}`,
+                ...(updated[field] === undefined ? {} : {value: updated[field]})
+            });
+        }
+        if (!operations.length) return [];
+        return [{
+            file: `patches/${updated.kind.toLowerCase()}-${updated.metadata.name}-environment.yaml`,
+            target: {kind: updated.kind, name: updated.metadata.name},
+            operations
+        }];
     });
 }
 
@@ -813,15 +864,12 @@ function renderKubernetesReadme(name, model) {
         '',
         '## Generated Files',
         '',
-        '- `base/namespace.yaml` creates the namespace.',
-        '- `base/infrastructure.yaml` creates enabled infrastructure resources and their persistent volumes.',
-        '- `base/applications.yaml` creates the frontend and backend Deployments and Services.',
-        '- `base/apisix-config.yaml` contains standalone APISIX declarative route configuration.',
-        '- `base/apisix.yaml` creates the APISIX Deployment and Service.',
+        '- `base/` contains the common namespace, infrastructure, application, and APISIX resources.',
         '- `environments/<environment>/kustomization.yaml` selects the base and attaches environment labels.',
         '- `environments/<environment>/configmap.yaml` contains non-sensitive application variables for the environment.',
         '- `environments/<environment>/secrets.example.yaml` documents required and optional secrets without being applied by Kustomize.',
         '- `environments/<environment>/patches/*-envfrom.yaml` attaches environment ConfigMaps and optional per-application Secrets to Deployments.',
+        '- `environments/<environment>/patches/*-environment.yaml` contains resource differences from the common base.',
         '- `environments/<environment>-registry/` may be generated from local `operations.registry` settings. It rewrites application images to a registry without changing the committed base overlay.',
         ...(isK3s ? [
             '- `cluster/k3d-dev.yaml` creates a disposable local K3s development cluster with k3d.'
@@ -864,7 +912,7 @@ function renderKubernetesReadme(name, model) {
             '',
             `The committed \`environments/${environmentName}\` overlay keeps images in the \`${localImagePrefix(model)}/<service>:<tag>\` form.`,
             '',
-            'For machine-specific registry settings, keep `operations.registry` in `.medol/medol.local.yml` and regenerate operations files. Local registry overlays and `cluster/registries.yaml` are ignored by git.',
+            'For machine-specific registry settings, keep `registry` in `operations/config/<environment>.private.yml` and regenerate operations files. Local registry overlays and `cluster/registries.yaml` are ignored by git.',
             '',
             `If \`environments/${environmentName}-registry\` was locally generated, use it in the Apply step after namespace and Secret objects are prepared.`,
             '',
@@ -956,6 +1004,8 @@ function renderKubernetesReadme(name, model) {
         '# kubectl apply -k environments/<environment>-registry',
         `kubectl -n ${namespace} get pods,svc,pvc`,
         '```',
+        '',
+        'When an application supplies a custom Kustomize component, compose it with the selected environment (or its registry variant) in one Kustomization and apply that result once. Do not apply the environment and component as separate releases.',
         '',
         gatewayExposure,
         '',

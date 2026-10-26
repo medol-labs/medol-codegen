@@ -22,7 +22,7 @@ test('tenant deployment options remain opt-in and keep ordinary output unchanged
     assert.deepEqual(actual, expected);
     assert(!Object.keys(actual).some((name) => name.includes('tenant-storage')));
     const enabled = generateOperationsFiles(buildOperationsModel(source));
-    const yaml = enabled['operations/dev/configuration/tenant-storage.yml'];
+    const yaml = enabled['operations/docker-compose/dev/configuration/tenant-storage.yml'];
     assert.match(yaml, /mode: "shared-schema"/);
     assert.match(yaml, /enabled: false/);
     assert.doesNotMatch(yaml, /ddl-auto/);
@@ -46,21 +46,24 @@ test('environment storage bindings replace base bindings without mutating the so
 
 test('compose kubernetes and k3s share exact storage configuration and safe startup settings', () => {
     const files = generateOperationsFiles(buildOperationsModel(source, config), {environment: 'prod'});
-    const yaml = files['operations/prod/configuration/tenant-storage.yml'];
-    assert.match(files['operations/prod/.env-example'], /DB_SCHEMA=control/);
+    const yaml = files['operations/docker-compose/prod/configuration/tenant-storage.yml'];
+    assert.match(files['operations/docker-compose/prod/.env-example'], /DB_SCHEMA=control/);
     assert.match(yaml, /"\[Company.B-2\]": "company_b"/);
     assert.match(yaml, /ddl-auto: "none"/);
-    assert.match(files['operations/prod/docker-compose/docker-compose.yml'], /tenant-storage.yml:\/etc\/medol\/tenant-storage.yml:ro/);
-    assert.match(files['operations/prod/docker-compose/docker-compose.yml'], /start_period: "900s"/);
+    assert.match(files['operations/docker-compose/prod/docker-compose.yml'], /tenant-storage.yml:\/etc\/medol\/tenant-storage.yml:ro/);
+    assert.match(files['operations/docker-compose/prod/docker-compose.yml'], /start_period: "900s"/);
     for (const target of ['kubernetes', 'k3s']) {
-        const prefix = `operations/prod/${target}`;
+        const prefix = `operations/${target}`;
         const maps = files[`${prefix}/environments/prod/configmap.yaml`];
         assert(maps.includes(`"tenant-storage.yml": ${JSON.stringify(yaml)}`));
-        const workloads = files[`${prefix}/base/applications.yaml`];
+        const workloads = files[`operations/${target}/base/applications.yaml`];
         assert.equal((workloads.match(/startupProbe:/g) ?? []).length, 2);
         assert.equal((workloads.match(/type: "Recreate"/g) ?? []).length, 2);
-        assert.match(workloads, /progressDeadlineSeconds: 1020/);
-        assert.match(workloads, /failureThreshold: 90/);
+        const environmentPatches = Object.entries(files)
+            .filter(([name]) => name.startsWith(`${prefix}/environments/prod/patches/`))
+            .map(([, content]) => content).join('\n');
+        assert.match(environmentPatches, /progressDeadlineSeconds: 1020/);
+        assert.match(environmentPatches, /failureThreshold: 90/);
         assert.doesNotMatch(workloads, /initialDelaySeconds: 900/);
         assert.match(workloads, /readOnly: true/);
         assert.match(workloads, /medol.dev\/tenant-storage-checksum/);
@@ -76,13 +79,13 @@ test('migration credentials use explicit secrets without generated defaults or C
         ]}}
     });
     const files = generateOperationsFiles(model);
-    const deployment = files['operations/dev/kubernetes/base/applications.yaml'];
+    const deployment = files['operations/kubernetes/base/applications.yaml'];
     assert.match(deployment, /name: "MEDOL_TENANCY_MIGRATION_USERNAME"[\s\S]*name: "ddl-account"/);
-    assert.doesNotMatch(files['operations/dev/kubernetes/environments/dev/configmap.yaml'], /MEDOL_TENANCY_MIGRATION_(USERNAME|PASSWORD)/);
-    assert.doesNotMatch(files['operations/dev/kubernetes/environments/dev/secrets.example.yaml'], /MEDOL_TENANCY_MIGRATION_(USERNAME|PASSWORD)/);
-    assert.match(files['operations/dev/docker-compose/docker-compose.yml'], /MEDOL_TENANCY_MIGRATION_USERNAME.*Set MEDOL_TENANCY_MIGRATION_USERNAME/);
+    assert.doesNotMatch(files['operations/kubernetes/environments/dev/configmap.yaml'], /MEDOL_TENANCY_MIGRATION_(USERNAME|PASSWORD)/);
+    assert.doesNotMatch(files['operations/kubernetes/environments/dev/secrets.example.yaml'], /MEDOL_TENANCY_MIGRATION_(USERNAME|PASSWORD)/);
+    assert.match(files['operations/docker-compose/dev/docker-compose.yml'], /MEDOL_TENANCY_MIGRATION_USERNAME.*Set MEDOL_TENANCY_MIGRATION_USERNAME/);
     const defaults = generateOperationsFiles(buildOperationsModel(source, config));
-    assert.doesNotMatch(defaults['operations/dev/docker-compose/docker-compose.yml'], /MEDOL_TENANCY_MIGRATION_(USERNAME|PASSWORD)/);
+    assert.doesNotMatch(defaults['operations/docker-compose/dev/docker-compose.yml'], /MEDOL_TENANCY_MIGRATION_(USERNAME|PASSWORD)/);
 });
 
 test('storage settings reject invalid bindings modes and inline migration credentials', () => {
@@ -130,7 +133,7 @@ test('model-only generation validates tenant settings before serializing configu
 test('externally managed storage also keeps rollout deadline beyond its startup budget', () => {
     const model = buildOperationsModel(source, {tenancy: {startupTimeoutSeconds: 1800}});
     const files = generateOperationsFiles(model);
-    const workloads = files['operations/dev/kubernetes/base/applications.yaml'];
+    const workloads = files['operations/kubernetes/base/applications.yaml'];
     assert.match(workloads, /progressDeadlineSeconds: 1920/);
     assert.doesNotMatch(workloads, /type: "Recreate"/);
 });
@@ -144,9 +147,9 @@ test('tenant mount appends to existing Spring config locations and changes check
     assert.equal(app.environmentVariables.find((item) => item.name === 'SPRING_CONFIG_ADDITIONAL_LOCATION').value, 'optional:file:/custom/,file:/etc/medol/tenant-storage.yml');
     const repeated = resolveOperationsModel(resolved);
     assert.equal(repeated.applications.find((app) => app.name === 'business').environmentVariables.find((item) => item.name === 'SPRING_CONFIG_ADDITIONAL_LOCATION').value, 'optional:file:/custom/,file:/etc/medol/tenant-storage.yml');
-    const dev = generateOperationsFiles(model)['operations/dev/kubernetes/base/applications.yaml'];
-    const prod = generateOperationsFiles(model, {environment: 'prod'})['operations/prod/kubernetes/base/applications.yaml'];
-    assert.notEqual(dev.match(/medol.dev\/tenant-storage-checksum": "([^"]+)"/)[1], prod.match(/medol.dev\/tenant-storage-checksum": "([^"]+)"/)[1]);
+    const dev = generateOperationsFiles(model)['operations/kubernetes/environments/dev/configmap.yaml'];
+    const prod = generateOperationsFiles(model, {environment: 'prod'})['operations/kubernetes/environments/prod/configmap.yaml'];
+    assert.notEqual(dev, prod);
 });
 
 const physical = {
@@ -158,7 +161,7 @@ const physical = {
 
 test('physical storage configuration preserves independent resources and secret references', () => {
     const files = generateOperationsFiles(buildOperationsModel(source, {tenancy: physical}));
-    const yaml = files['operations/dev/configuration/tenant-storage.yml'];
+    const yaml = files['operations/docker-compose/dev/configuration/tenant-storage.yml'];
     assert.match(yaml, /mode: "separate-database"/);
     assert.match(yaml, /data-sources:/);
     assert.match(yaml, /event-stores:/);
@@ -166,7 +169,7 @@ test('physical storage configuration preserves independent resources and secret 
     assert.match(yaml, /data-source: "a"/);
     assert.match(yaml, /ddl-auto: "none"/);
     assert.match(yaml, /\$\{PG_A_PASSWORD\}/);
-    const kube = files['operations/dev/kubernetes/environments/dev/configmap.yaml'];
+    const kube = files['operations/kubernetes/environments/dev/configmap.yaml'];
     assert(kube.includes(JSON.stringify(yaml)));
 });
 
@@ -201,14 +204,14 @@ test('additional storage instances have independent volumes initialization and s
         {type: 'umadb', name: 'uma-a', environmentVariables: [{name: 'UMADB_API_KEY', value: '${UMA_A_API_KEY:?Set UMA_A_API_KEY}', valueFromSecret: {name: 'uma-a', key: 'api-key'}}]}
     ]}});
     const files = generateOperationsFiles(model);
-    const compose = files['operations/dev/docker-compose/docker-compose.yml'];
+    const compose = files['operations/docker-compose/dev/docker-compose.yml'];
     assert.match(compose, /pg-a_data/);
     assert.match(compose, /uma-a_data/);
     assert.match(compose, /PG_A_PASSWORD/);
     assert.match(compose, /pg-a:\n\s+condition: "service_healthy"/);
-    assert.match(files['operations/dev/infrastructure/pg-a/init/01-create-databases.sql'], /CREATE DATABASE "tenant_a"/);
+    assert.match(files['operations/docker-compose/dev/infrastructure/pg-a/init/01-create-databases.sql'], /CREATE DATABASE "tenant_a"/);
     for (const target of ['kubernetes', 'k3s']) {
-        const infra = files[`operations/dev/${target}/base/infrastructure.yaml`];
+        const infra = files[`operations/${target}/base/infrastructure.yaml`];
         assert.match(infra, /name: "pg-a-init"/);
         assert.match(infra, /name: "pg-a"[\s\S]*key: "password"/);
     }

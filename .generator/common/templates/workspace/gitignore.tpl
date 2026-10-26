@@ -74,6 +74,8 @@ volumes/
 **/volumes/
 .medol/*.local.yml
 .medol/*.local.yaml
+operations/config/*.private.yml
+!operations/config/*.private.example.yml
 operations/**/.work/
 deployment-compose-files/
 **/deployment-compose-files/

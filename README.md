@@ -356,8 +356,28 @@ gen /opt/codegen/.generator/app/ --generator refine --generator-type all \
 Keep deployment configuration under `operations/config/`: `common.yml` is
 shared, `<environment>.yml` is committed environment configuration, and
 `<environment>.private.yml` is an ignored machine-specific override. The selected
-`--environment` determines which pair is loaded. For a local development
-registry, use `operations/config/dev.private.yml`:
+`--environment` determines which pair is loaded.
+
+Environment overrides may contain YAML lists, including per-application
+`environmentVariables`. Put non-secret values in `<environment>.yml` and
+reference Kubernetes Secrets for credentials; do not put credentials in a
+committed ConfigMap override. For example:
+
+```yaml
+environments:
+  test:
+    applicationOverrides:
+      backend-service:
+        environmentVariables:
+          - name: MEDOL_SECURITY_ALLOWED_ORIGINS
+            value: https://console.example.test
+```
+
+Kubernetes environment overlays share a base namespace and resource names.
+Deploy separate environments to separate clusters unless the application has
+its own isolation overlay.
+
+For a local development registry, use `operations/config/dev.private.yml`:
 
 ```yaml
 registry:
@@ -366,6 +386,16 @@ registry:
   namespace: team
   insecure: true
 ```
+
+After changing a private registry address, prepare the local overlays and K3s
+node registry config without regenerating the operations project:
+
+```bash
+bash operations/scripts/prepare-registry.sh dev
+```
+
+This generated shell script uses Bash and awk only. It reads simple scalar
+registry values and does not call Node or Python.
 
 With this layout, run from the system root:
 

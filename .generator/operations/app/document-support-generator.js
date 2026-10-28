@@ -432,8 +432,8 @@ function operationsCommands(config) {
   return [
     \`cp operations/docker-compose/\${environment}/.env-example operations/docker-compose/\${environment}/.env\`,
     \`docker compose --env-file operations/docker-compose/\${environment}/.env -f operations/docker-compose/\${environment}/docker-compose.yml up -d\`,
-    \`node operations/images/\${environment}/images.mjs list\`,
-    \`node operations/images/\${environment}/images.mjs all\`,
+    \`node operations/images/images.mjs list --environment \${environment}\`,
+    \`node operations/images/images.mjs all --environment \${environment}\`,
     \`kubectl apply -k operations/kubernetes/environments/\${environment}\`,
   ];
 }

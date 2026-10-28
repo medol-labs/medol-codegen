@@ -122,7 +122,7 @@ test('builds operations topology for multiple frontend applications', () => {
             }]
         }]
     });
-    const script = generateOperationsFiles(model, { target: 'model', environment: 'dev' })['operations/images/dev/images.mjs'];
+    const script = generateOperationsFiles(model, { target: 'model', environment: 'dev' })['operations/images/images.mjs'];
 
     assert.deepEqual(model.applications.map((application) => application.name), [
         'learning-console',
@@ -228,12 +228,12 @@ test('generates operations target file sets', () => {
     const files = generateOperationsFiles(model, { target: 'all', environment: 'dev' });
     assert(files['operations/model/dev/operations-model.json']);
     assert(files['operations/model/dev/network-topology.md']);
-    assert(files['operations/images/dev/images.mjs']);
+    assert(files['operations/images/images.mjs']);
     assert(files['operations/harbor/dev/README.md']);
     assert(files['operations/zot/dev/README.md']);
     assert(!Object.keys(files).some((file) => file.startsWith('operations/dev/')));
     assert(files['operations/apisix/dev/apisix.yaml']);
-    assert(files['operations/images/dev/images.mjs']);
+    assert(files['operations/images/images.mjs']);
     assert(files['docs/document-support/collect-engineering-facts.mjs']);
     assert(files['docs/document-support/i18n.mjs']);
     assert(files['docs/document-support/i18n/base.json']);
@@ -243,10 +243,10 @@ test('generates operations target file sets', () => {
     assert.match(files['docs/document-support/config/engineering-facts-sources.json'], /network-topology\.md/);
     assert.match(files['docs/document-support/collect-engineering-facts.mjs'], /docs\/generated\/facts\/engineering-facts\.json/);
     assert.match(files['docs/document-support/i18n.mjs'], /fallbackLanguage/);
-    assert.match(files['operations/images/dev/images.mjs'], /node operations\/images\/dev\/images\.mjs package/);
-    assert.match(files['operations/images/dev/images.mjs'], /--exclude-service <name\[,name\]>/);
-    assert.match(files['operations/images/dev/images.mjs'], /projectImageArgs\(project\)/);
-    assert.doesNotMatch(files['operations/images/dev/images.mjs'], /runtime-engine-images|RUNTIME_ENGINE_ROOT|skip-runtime-engine/);
+    assert.match(files['operations/images/images.mjs'], /node operations\/images\/images\.mjs <command> --environment <name>/);
+    assert.match(files['operations/images/images.mjs'], /--exclude-service <name\[,name\]>/);
+    assert.match(files['operations/images/images.mjs'], /projectImageArgs\(project\)/);
+    assert.doesNotMatch(files['operations/images/images.mjs'], /runtime-engine-images|RUNTIME_ENGINE_ROOT|skip-runtime-engine/);
     assert(files['operations/docker-compose/dev/docker-compose.yml']);
     assert(!files['operations/dev/docker-compose/docker-compose.yml']);
     assert(files['operations/docker-compose/dev/.env-example']);
@@ -280,6 +280,15 @@ test('generates operations target file sets', () => {
     assert(files['operations/zot/dev/.env-example']);
     assert(files['operations/zot/dev/docker-compose.yml']);
     assert(files['operations/zot/dev/config.json']);
+});
+
+test('generates one environment-independent image helper', () => {
+    const model = buildOperationsModel(sampleModel);
+    const dev = generateOperationsFiles(model, {target: 'model', environment: 'dev'});
+    const local = generateOperationsFiles(model, {target: 'model', environment: 'local'});
+    assert.equal(dev['operations/images/images.mjs'], local['operations/images/images.mjs']);
+    assert(!Object.keys(dev).some((file) => /^operations\/images\/dev\//.test(file)));
+    assert.match(dev['operations/images/images.mjs'], /--environment <name>/);
 });
 
 test('shares Kubernetes bases while keeping replica overrides in environment patches', () => {
@@ -497,9 +506,9 @@ test('derives image names and K3s registry configuration from optional registry 
     const localModel = JSON.parse(modelFiles['operations/model/dev/operations-model.private.json']);
     assert.equal(localModel.registry.host, 'registry.internal:5000');
     assert.deepEqual(Object.keys(localModel), ['registry']);
-    assert.match(modelFiles['operations/images/dev/images.mjs'], /resolveImageConfig\(scriptDir/);
-    assert.match(modelFiles['operations/images/dev/image-config.mjs'], /operations-model\.local\.json/);
-    assert.doesNotMatch(modelFiles['operations/images/dev/images.mjs'], /registry\.internal:5000/);
+    assert.match(modelFiles['operations/images/images.mjs'], /resolveImageConfig\(scriptDir/);
+    assert.match(modelFiles['operations/images/image-config.mjs'], /operations-model\.local\.json/);
+    assert.doesNotMatch(modelFiles['operations/images/images.mjs'], /registry\.internal:5000/);
     const deployFiles = generateOperationsFiles(model, { target: 'all', environment: 'dev' });
     assert.doesNotMatch(deployFiles['operations/docker-compose/dev/docker-compose.yml'], /registry\.internal:5000/);
     assert.doesNotMatch(deployFiles['operations/docker-compose/dev/.env-example'], /registry\.internal:5000/);
@@ -570,11 +579,34 @@ test('dedicated operations config isolates registry by environment', () => {
     assert.equal(loadOperationsConfig(workspace, loaded, 'test').operations.applications.FederationService.servicePort, 8081);
 });
 
+test('dedicated YAML config supports per-environment application variables', () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'operations-workspace-'));
+    fs.mkdirSync(path.join(workspace, 'operations/config'), {recursive: true});
+    fs.writeFileSync(path.join(workspace, 'operations/config/test.yml'), [
+        'environments:',
+        '  test:',
+        '    applicationOverrides:',
+        '      federation-service:',
+        '        environmentVariables:',
+        '          - name: MEDOL_SECURITY_ALLOWED_ORIGINS',
+        '            value: https://console.example.test',
+        ''
+    ].join('\n'));
+
+    const config = loadOperationsConfig(workspace, {}, 'test');
+    const model = buildOperationsModel(sampleModel, config);
+    const resolved = require('../environment-resolver').resolveOperationsModel(model, 'test');
+    const service = resolved.applications.find((application) => application.name === 'federation-service');
+    assert.deepEqual(service.environmentVariables.find((variable) => variable.name === 'MEDOL_SECURITY_ALLOWED_ORIGINS'), {
+        name: 'MEDOL_SECURITY_ALLOWED_ORIGINS', value: 'https://console.example.test'
+    });
+});
+
 test('local environment renders each operations target in its own directory', () => {
     const model = buildOperationsModel(sampleModel);
     const files = generateOperationsFiles(model, {target: 'all', environment: 'local'});
     assert(files['operations/model/local/operations-model.json']);
-    assert(files['operations/images/local/images.mjs']);
+    assert(files['operations/images/images.mjs']);
     assert(files['operations/apisix/local/apisix.yaml']);
     assert(files['operations/docker-compose/local/docker-compose.yml']);
     assert(files['operations/kubernetes/environments/local/kustomization.yaml']);
@@ -583,6 +615,41 @@ test('local environment renders each operations target in its own directory', ()
     assert(files['operations/zot/local/README.md']);
     const local = model.environments.find((environment) => environment.name === 'local');
     assert.equal(local.applicationOverrides['federation-service'].exposePorts, true);
+});
+
+test('generates a shell-only registry preparation script for later private config changes', () => {
+    const model = buildOperationsModel(sampleModel);
+    const files = generateOperationsFiles(model, {target: 'k3s', environment: 'test'});
+    const script = files['operations/scripts/prepare-registry.sh'];
+    assert(script.startsWith('#!/usr/bin/env bash'));
+    assert.match(script, /test\.private\.yml|\$ENVIRONMENT\.private\.yml/);
+    assert.match(script, /environments\/\$ENVIRONMENT-registry/);
+    assert.match(script, /cluster\/registries\.yaml/);
+    assert.doesNotMatch(script, /^\s*(?:node|python3?)\s/m);
+    const checked = require('node:child_process').spawnSync('bash', ['-n'], {input: script, encoding: 'utf8'});
+    assert.equal(checked.status, 0, checked.stderr);
+
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'operations-registry-'));
+    fs.mkdirSync(path.join(root, 'operations/scripts'), {recursive: true});
+    fs.mkdirSync(path.join(root, 'operations/config'), {recursive: true});
+    fs.mkdirSync(path.join(root, 'operations/model/test'), {recursive: true});
+    fs.mkdirSync(path.join(root, 'operations/k3s/environments/test'), {recursive: true});
+    const scriptPath = path.join(root, 'operations/scripts/prepare-registry.sh');
+    fs.writeFileSync(scriptPath, script);
+    fs.writeFileSync(path.join(root, 'operations/config/test.private.yml'), [
+        'registry:',
+        '  host: "registry.example.test:5000"',
+        '  namespace: team',
+        '  scheme: http',
+        '  insecure: false',
+        ''
+    ].join('\n'));
+    execFileSync('bash', [scriptPath, 'test']);
+    const overlay = fs.readFileSync(path.join(root, 'operations/k3s/environments/test-registry/kustomization.yaml'), 'utf8');
+    assert.match(overlay, /newName: "registry\.example\.test:5000\/team\/federation-service"/);
+    assert.match(fs.readFileSync(path.join(root, 'operations/k3s/cluster/registries.yaml'), 'utf8'), /"docker.io":/);
+    const privateModel = JSON.parse(fs.readFileSync(path.join(root, 'operations/model/test/operations-model.private.json'), 'utf8'));
+    assert.equal(privateModel.registry.imagePrefix, 'registry.example.test:5000/team');
 });
 
 test('pushes dependency mirrors under the registry root instead of the application namespace', () => {
@@ -595,7 +662,7 @@ test('pushes dependency mirrors under the registry root instead of the applicati
             }
         }
     });
-    const script = generateOperationsFiles(model, { target: 'model', environment: 'dev' })['operations/images/dev/images.mjs'];
+    const script = generateOperationsFiles(model, { target: 'model', environment: 'dev' })['operations/images/images.mjs'];
 
     assert.match(script, /const dependencyImagePrefix = String/);
     assert.match(script, /rancher\/mirrored-pause:3\.6/);

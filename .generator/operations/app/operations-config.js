@@ -5,7 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const {parseSimpleYaml} = require('../../common/core/medol-workspace');
+const YAML = require('yaml');
 
 const configFiles = [
     'operations.config.json'
@@ -34,7 +34,10 @@ function loadOperationsConfig(cwd, workspace = {}, environment = 'dev') {
     const config = names.reduce((merged, name) => {
         const file = path.join(root, name);
         if (!fs.existsSync(file)) return merged;
-        const raw = parseSimpleYaml(fs.readFileSync(file, 'utf8'));
+        const raw = YAML.parse(fs.readFileSync(file, 'utf8'), {uniqueKeys: true}) ?? {};
+        if (typeof raw !== 'object' || Array.isArray(raw)) {
+            throw new Error(`Operations config must be a YAML mapping: ${file}`);
+        }
         return merge(merged, raw.operations ?? raw);
     }, hasDedicatedConfig ? {} : merge(fileConfig, workspaceConfig));
     return {operations: config};

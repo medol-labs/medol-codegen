@@ -22,7 +22,7 @@ function generateOperationsFiles(model, options = {}) {
     const environment = options.environment ?? 'dev';
     const environmentName = environmentDirectory(environment).split('/')[1];
     const modelRoot = `operations/model/${environmentName}`;
-    const imagesRoot = `operations/images/${environmentName}`;
+    const imagesRoot = 'operations/images';
     const baseModel = portableOperationsModel(model);
     const files = {
         [`${modelRoot}/.gitignore`]: 'operations-model.private.json\noperations-model.local.json\n',
@@ -30,10 +30,11 @@ function generateOperationsFiles(model, options = {}) {
         [`${modelRoot}/operations-model.private.json`]: `${JSON.stringify({ registry: model.registry ?? null }, null, 2)}\n`,
         [`${modelRoot}/README.md`]: renderDeployReadme(baseModel, environment),
         [`${modelRoot}/network-topology.md`]: renderNetworkTopology(baseModel, environment),
-        [`${imagesRoot}/images.mjs`]: renderOperationsImageScript(baseModel, environment),
+        [`${imagesRoot}/images.mjs`]: renderOperationsImageScript(baseModel),
         [`${imagesRoot}/image-config.mjs`]: readFileSync(path.join(__dirname, 'image-config-runtime.mjs'), 'utf8'),
         [`${imagesRoot}/release-runtime.mjs`]: readFileSync(path.join(__dirname, '../../common/release-runtime.mjs'), 'utf8'),
         [`${imagesRoot}/image-archive-runtime.mjs`]: readFileSync(path.join(__dirname, '../../common/image-archive-runtime.mjs'), 'utf8'),
+        'operations/scripts/prepare-registry.sh': renderRegistryPreparationScript(baseModel),
         ...documentSupportFiles(baseModel, environment)
     };
 
@@ -89,6 +90,14 @@ function portableOperationsModel(model) {
     };
 }
 
+function renderRegistryPreparationScript(model) {
+    const quote = (value) => `'${String(value).replace(/'/g, `'\\''`)}'`;
+    return readFileSync(path.join(__dirname, 'templates/prepare-registry.sh'), 'utf8')
+        .replace('__BASE_PREFIX__', quote(model.imagePrefix))
+        .replace('__IMAGE_TAG__', quote(model.imageTag))
+        .replace('__APPLICATIONS__', model.applications.map((application) => quote(application.artifactName ?? application.name)).join(' '));
+}
+
 function renderDeployReadme(model, environment) {
     const applications = model.applications
         .map((application) => `- ${application.name} (${application.kind}, port ${application.servicePort})`)
@@ -139,13 +148,13 @@ function renderDeployReadme(model, environment) {
         'Use `images.mjs` to orchestrate generated backend, frontend, and infrastructure images from this monorepo:',
         '',
         '```bash',
-        'node operations/images/<environment>/images.mjs list',
-        'node operations/images/<environment>/images.mjs all',
-        'node operations/images/<environment>/images.mjs build --exclude-service <service>',
-        'node operations/images/<environment>/images.mjs build --service <backend-module>',
-        'node operations/images/<environment>/images.mjs push --prefix registry.example.com/team',
-        'node operations/images/<environment>/images.mjs push-dependencies --prefix registry.example.com/team',
-        'node operations/images/<environment>/images.mjs import',
+        'node operations/images/images.mjs list --environment <environment>',
+        'node operations/images/images.mjs all --environment <environment>',
+        'node operations/images/images.mjs build --environment <environment> --exclude-service <service>',
+        'node operations/images/images.mjs build --environment <environment> --service <backend-module>',
+        'node operations/images/images.mjs push --environment <environment> --prefix registry.example.com/team',
+        'node operations/images/images.mjs push-dependencies --environment <environment> --prefix registry.example.com/team',
+        'node operations/images/images.mjs import --environment <environment>',
         '```',
         '',
         'Application image builds use the native Docker platform by default. Pass `--platform linux/amd64` or `--platform linux/arm64` only when you intentionally need a fixed target architecture; cross-architecture frontend builds can be much slower.',
@@ -167,7 +176,7 @@ function renderDeployReadme(model, environment) {
     ].join('\n');
 }
 
-function renderOperationsImageScript(model, environment) {
+function renderOperationsImageScript(model) {
     const applicationNames = model.applications.map((application) => application.name);
     const backendApplicationNames = model.applications
         .filter((application) => application.kind === 'backend')
@@ -211,9 +220,18 @@ import {resolveImageConfig} from './image-config.mjs';
 import {prepareRelease} from './release-runtime.mjs';
 import {verifyArchiveManifest, verifyLoadedImages} from './image-archive-runtime.mjs';
 
-const scriptDir = dirname(fileURLToPath(import.meta.url));
+const imagesDir = dirname(fileURLToPath(import.meta.url));
 const args = parseArgs(process.argv.slice(2));
 const command = args._[0] ?? 'help';
+const environment = String(args.environment ?? process.env.OPERATIONS_ENVIRONMENT ?? '').trim();
+if (command !== 'help' && command !== '--help' && command !== '-h' && !/^[a-zA-Z0-9_-]+$/.test(environment)) {
+    throw new Error('Specify a valid --environment <name> or OPERATIONS_ENVIRONMENT.');
+}
+const scriptDir = join(imagesDir, environment);
+if (command !== 'help' && command !== '--help' && command !== '-h' &&
+    !existsSync(join(imagesDir, '..', 'model', environment, 'operations-model.json'))) {
+    throw new Error(\`Operations model for environment \${environment} was not found. Generate that environment first.\`);
+}
 const monorepoRoot = resolve(scriptDir, args.root ?? process.env.MONOREPO_ROOT ?? '../../..');
 const platform = String(args.platform ?? process.env.DOCKER_DEFAULT_PLATFORM ?? '').trim();
 const dependencyPlatform = platform || hostDockerPlatform();
@@ -449,7 +467,7 @@ function writeManifest() {
     const manifest = {
         ...release.manifest,
         generatedAt: new Date().toISOString(),
-        environment: '${environment}',
+        environment,
         platform: platform || 'native',
         dependencyPlatform,
         imagePrefix,
@@ -647,7 +665,7 @@ function isConsoleProject(root) {
 
 function printPlan() {
     console.log('[operations-images] monorepo:', monorepoRoot);
-    console.log('[operations-images] environment:', '${environment}');
+    console.log('[operations-images] environment:', environment);
     console.log('[operations-images] application platform:', platform || 'native');
     console.log('[operations-images] dependency platform:', dependencyPlatform);
     console.log('[operations-images] fast build:', fastBuild ? 'enabled' : 'disabled');
@@ -836,17 +854,7 @@ function parseArgs(argv) {
 
 function printUsage() {
     console.log(\`Usage:
-  node operations/images/${environment}/images.mjs list [options]
-  node operations/images/${environment}/images.mjs build [options]
-  node operations/images/${environment}/images.mjs export [options]
-  node operations/images/${environment}/images.mjs import [options]
-  node operations/images/${environment}/images.mjs push --prefix <registry/namespace> [options]
-  node operations/images/${environment}/images.mjs pull-dependencies [options]
-  node operations/images/${environment}/images.mjs export-dependencies [options]
-  node operations/images/${environment}/images.mjs import-dependencies [options]
-  node operations/images/${environment}/images.mjs push-dependencies --prefix <registry/namespace> [options]
-  node operations/images/${environment}/images.mjs package [options]
-  node operations/images/${environment}/images.mjs all [options]
+  node operations/images/images.mjs <command> --environment <name> [options]
 
 Commands:
   build                Build backend and frontend images.
@@ -858,6 +866,9 @@ Commands:
   import-dependencies  Load dependency-images.tar.
   push-dependencies    Retag dependencies under a registry-root mirror path and push them.
   package, all         Build, pull dependencies, export images, collect compose files, and tar the bundle.
+
+Environment:
+  --environment <name>          Select operations/model/<name> configuration and images/<name> output.
 
 Options:
   --prefix <name>                 Image prefix or registry namespace. Defaults to DOCKER_IMAGE_PREFIX or ${defaultPrefix}.

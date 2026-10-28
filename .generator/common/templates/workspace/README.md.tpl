@@ -79,7 +79,7 @@ present in this repository.
 ## Local Registry
 
 Keep machine-specific registry settings in the ignored
-`operations/config/dev.private.yml` and regenerate the `dev` operations files:
+`operations/config/dev.private.yml`:
 
 ```yaml
 registry:
@@ -87,6 +87,15 @@ registry:
   namespace: team
   insecure: true
 ```
+
+After the environment has been generated once, refresh its local registry
+overlays and node configuration without rerunning the generator:
+
+```bash
+bash operations/scripts/prepare-registry.sh dev
+```
+
+The shell script uses Bash and awk and accepts simple scalar registry values.
 
 Generated registry overlays and `{{registryPath}}` are machine-local artifacts
 and should not be committed.

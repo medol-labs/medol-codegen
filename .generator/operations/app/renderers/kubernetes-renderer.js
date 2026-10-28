@@ -912,7 +912,7 @@ function renderKubernetesReadme(name, model) {
             '',
             `The committed \`environments/${environmentName}\` overlay keeps images in the \`${localImagePrefix(model)}/<service>:<tag>\` form.`,
             '',
-            'For machine-specific registry settings, keep `registry` in `operations/config/<environment>.private.yml` and regenerate operations files. Local registry overlays and `cluster/registries.yaml` are ignored by git.',
+            'For machine-specific registry settings, keep `registry` in `operations/config/<environment>.private.yml` and run `bash operations/scripts/prepare-registry.sh <environment>`. This creates ignored registry overlays and `cluster/registries.yaml` without rerunning the operations generator. The shell script uses Bash and awk and accepts simple scalar registry YAML.',
             '',
             `If \`environments/${environmentName}-registry\` was locally generated, use it in the Apply step after namespace and Secret objects are prepared.`,
             '',

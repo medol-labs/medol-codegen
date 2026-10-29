@@ -11,6 +11,13 @@ fi
 BASE_PREFIX=__BASE_PREFIX__
 IMAGE_TAG=__IMAGE_TAG__
 APPLICATIONS=(__APPLICATIONS__)
+SITE_NAMES=(__SITE_NAMES__)
+
+site_applications() {
+    case "$1" in
+__SITE_APPLICATION_CASES__
+    esac
+}
 
 CONFIG="$ROOT/operations/config/$ENVIRONMENT.private.yml"
 [[ -f "$CONFIG" ]] || { echo "Missing $CONFIG" >&2; exit 1; }
@@ -88,6 +95,23 @@ for target in k3s kubernetes; do
         printf 'patches:\n  - target:\n      kind: Deployment\n    path: image-pull-policy.yaml\n'
     } > "$overlay/kustomization.yaml"
     printf '%s\n' '- op: add' '  path: /spec/template/spec/containers/0/imagePullPolicy' '  value: Always' > "$overlay/image-pull-policy.yaml"
+
+    for site in "${SITE_NAMES[@]}"; do
+        site_source="$ROOT/operations/$target/environments/$ENVIRONMENT/sites/$site"
+        [[ -d "$site_source" ]] || { echo "Missing generated deployment site: $site_source" >&2; exit 1; }
+        site_overlay="$overlay/sites/$site"
+        mkdir -p "$site_overlay"
+        {
+            printf 'resources:\n  - ../../../%s/sites/%s\nimages:\n' "$ENVIRONMENT" "$site"
+            while IFS= read -r application; do
+                [[ -n "$application" ]] || continue
+                printf '  - name: "%s/%s"\n    newName: "%s/%s"\n    newTag: "%s"\n' \
+                    "$BASE_PREFIX" "$application" "$prefix" "$application" "$IMAGE_TAG"
+            done < <(site_applications "$site")
+            printf 'patches:\n  - target:\n      kind: Deployment\n    path: image-pull-policy.yaml\n'
+        } > "$site_overlay/kustomization.yaml"
+        cp "$overlay/image-pull-policy.yaml" "$site_overlay/image-pull-policy.yaml"
+    done
 done
 
 mkdir -p "$ROOT/operations/k3s/cluster"

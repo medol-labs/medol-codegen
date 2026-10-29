@@ -453,9 +453,11 @@ federation-learning/
     kubernetes/
       base/
       environments/dev/
+        sites/<site>/
     k3s/
       base/
       environments/dev/
+        sites/<site>/
       cluster/
       scripts/
     harbor/dev/
@@ -475,11 +477,20 @@ gateway routes, service ports, and active application dependencies for the
 selected environment. It is generated from the resolved operations model and
 does not claim to describe physical hosts, firewall policy, or observed traffic.
 
+Generating `all` or `docker-compose` for `local` also emits `operations/local/`.
+This host-development module contains infrastructure-only Compose, database
+initialization, `.env-example`, and instructions. Application code runs directly
+on the host; the full application-container topology remains under
+`operations/docker-compose/local/`. Project-specific launchers and training
+configuration belong in project-owned files alongside the generated module.
+
 To represent applications deployed in separate locations, declare
 `operations.networkTopology.sites` in `.medol/medol.yml`. Each named site lists
-its applications and local infrastructure instances; exactly one site owns the
-gateway when enabled. Optional `connections` describe directed inter-site API
-calls. The YAML configuration uses named mappings rather than lists:
+its applications and local infrastructure instances. When the gateway is
+enabled, one or more sites may own an independent gateway; each generated site
+entry contains only routes for applications assigned to that site. Optional
+`connections` describe directed inter-site API calls. The YAML configuration
+uses named mappings rather than lists:
 
 ```yaml
 operations:
@@ -494,6 +505,7 @@ operations:
           postgres: true
           umadb: true
       remote:
+        gateway: true
         applications:
           agent: true
         infrastructure:
@@ -506,10 +518,14 @@ operations:
         protocol: HTTP
 ```
 
-The diagram marks cross-site routes and connections as dashed links. It does
-not make generated single-stack Compose/Kubernetes manifests multi-site or
-configure APISIX with reachable cross-site upstream addresses; those require
-deployment-specific configuration.
+The diagram marks cross-site routes and connections as dashed links. Kubernetes
+and K3s generation also emits a complete
+`environments/<environment>/sites/<site>/` entry point for every site. Each
+entry contains only that site's applications, infrastructure, database
+initialization, ConfigMaps, Secret example, and optional gateway. The parent
+environment remains a combined compatibility overlay; physically separated
+deployments must use the site entry points. Cross-site endpoint values and
+network reachability remain deployment-specific configuration.
 
 Each `operations/images/<environment>` directory includes `images.mjs`, a monorepo-level image
 orchestrator for backend, frontend, and infrastructure images. With multiple
@@ -584,7 +600,9 @@ When `operations.registry` is omitted, generated image names keep the default
 and emits a K3s `cluster/registries.yaml` file for HTTP/insecure registry
 access. The default `environments/<environment>` overlay continues to use
 `medol/<service>:<tag>` so deployments can still run without a registry by
-importing local images.
+importing local images. When deployment sites are configured, matching
+`environments/<environment>-registry/sites/<site>/` overlays are generated as
+well.
 
 The generated files use placeholder environment references only. Real passwords, tokens, certificates, and Kubernetes Secret objects must be supplied by the operations environment.
 

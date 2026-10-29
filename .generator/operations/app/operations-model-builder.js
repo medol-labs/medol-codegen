@@ -99,7 +99,7 @@ function buildNetworkTopology(config, applications, infrastructure, gateway) {
     if (unassigned.length) {
         throw new Error(`networkTopology must place every application: ${unassigned.map((application) => application.name).join(', ')}.`);
     }
-    if (gateway && gatewaySites !== 1) throw new Error('networkTopology must place the gateway in exactly one site.');
+    if (gateway && gatewaySites < 1) throw new Error('networkTopology must place the gateway in at least one site.');
     if (!gateway && gatewaySites) throw new Error('networkTopology cannot place a disabled gateway.');
     for (const application of applications) {
         for (const dependency of application.dependencies ?? []) {

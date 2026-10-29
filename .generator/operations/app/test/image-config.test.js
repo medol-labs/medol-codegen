@@ -22,7 +22,10 @@ test('environment registry configuration is shared by build and deployment and s
         try {
             const c = f.config();
             assert.equal(c.imagePrefix, `${host}/team`);
-            assert.equal(c.buildPrefix, c.imagePrefix);
+            assert.equal(c.buildPrefix, 'team');
+            assert.equal(c.pushPrefix, c.imagePrefix);
+            assert.equal(f.config({pushPrefix: 'another.example/team'}).buildPrefix, 'team');
+            assert.equal(f.config({pushPrefix: 'another.example/team'}).pushPrefix, 'another.example/team');
             assert.equal(c.mode, 'registry');
             assert.equal(c.version, 'v1');
         } finally { f.close(); }
@@ -33,11 +36,12 @@ test('explicit overrides have precedence and invalid acquisition modes fail clea
     const f = await fixture({registry: {host: 'old.example', namespace: 'team'}});
     try {
         const c = f.config({prefix: 'new.example/group', version: 'v2', env: {DOCKER_IMAGE_PREFIX: 'ignored.example/team'}});
-        assert.equal(c.imagePrefix, 'new.example/group');
-        assert.equal(c.buildPrefix, c.imagePrefix);
+        assert.equal(c.imagePrefix, 'old.example/team');
+        assert.equal(c.buildPrefix, 'new.example/group');
+        assert.equal(c.pushPrefix, 'old.example/team');
         assert.equal(c.version, 'v2');
         assert.throws(() => f.config({mode: 'auto'}), /import or registry/);
-        assert.throws(() => f.config({prefix: 'team', mode: 'registry'}), /registry-qualified/);
+        assert.equal(f.config({prefix: 'team', mode: 'registry'}).buildPrefix, 'team');
     } finally { f.close(); }
 });
 

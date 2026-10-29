@@ -94,10 +94,14 @@ function pushImages() {
     ensureModules();
     release.claim();
     release.verifyImages(imageNames());
-    for (const imageName of imageNames()) {
-        run('docker', ['push', imageName]);
-    }
-    release.writeManifest('.medol/release-manifest.json', imageNames(), {requireRepoDigests: true});
+    const prefix = String(args['push-prefix'] ?? process.env.DOCKER_PUSH_IMAGE_PREFIX ?? imagePrefix).replace(/\/+$/, '');
+    const targets = imageNames().map((source) => {
+        const target = prefix + source.slice(imagePrefix.length);
+        if (source !== target) run('docker', ['tag', source, target]);
+        run('docker', ['push', target]);
+        return target;
+    });
+    release.writeManifest('.medol/release-manifest.json', targets, {requireRepoDigests: true});
 }
 
 function printPlan() {
@@ -229,6 +233,7 @@ function parseArgs(argv) {
 }
 
 function printUsage() {
+    console.log('--push-prefix <registry/namespace>: push destination only; defaults to DOCKER_PUSH_IMAGE_PREFIX or the source prefix. --prefix/DOCKER_IMAGE_PREFIX selects the local build/export name.');
     console.log(`Usage:
   node scripts/image-bundle.mjs build [options]
   node scripts/image-bundle.mjs export [options]

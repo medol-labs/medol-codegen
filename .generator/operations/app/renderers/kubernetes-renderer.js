@@ -94,6 +94,7 @@ function kubernetesLikeFiles(model, options) {
     resourcePatches.forEach((patch) => {
         files[`${options.root}/environments/${options.environmentName}/${patch.file}`] = renderYaml(patch.operations);
     });
+    Object.assign(files, deploymentSiteFiles(environmentResolved, options));
     if (options.name.toLowerCase() === 'k3s' && options.environmentName === 'dev') {
         files[`${options.root}/cluster/k3d-dev.yaml`] = renderK3dClusterConfig(baseResolved);
         files[`${options.root}/scripts/k3d-dev.sh`] = renderK3dDevHelper(baseResolved, options.environmentName);
@@ -115,6 +116,76 @@ function infrastructureResources(model) {
         if (component.type === 'redis') return statefulInfrastructure(component, '/data');
         return [];
     });
+}
+
+function deploymentSiteFiles(environmentModel, options) {
+    const sites = environmentModel.networkTopology?.sites ?? [];
+    return Object.fromEntries(sites.flatMap((site) => {
+        const model = modelForSite(environmentModel, site);
+        const root = `${options.root}/environments/${options.environmentName}/sites/${site.name}`;
+        const resources = [
+            'namespace.yaml',
+            'infrastructure.yaml',
+            'applications.yaml',
+            'configmap.yaml',
+            ...(model.gateway?.enabled ? ['apisix-config.yaml', 'apisix.yaml'] : [])
+        ];
+        const entries = [
+            [`${root}/kustomization.yaml`, renderYaml({
+                resources,
+                namespace: model.name,
+                labels: [{
+                    pairs: {
+                        'app.kubernetes.io/part-of': model.name,
+                        'medol.dev/environment': options.environmentName,
+                        'medol.dev/site': site.name
+                    },
+                    includeSelectors: true,
+                    includeTemplates: true
+                }],
+                patches: environmentPatchFiles(model).map((file) => ({path: file}))
+            })],
+            [`${root}/namespace.yaml`, renderYaml({
+                apiVersion: 'v1',
+                kind: 'Namespace',
+                metadata: {name: model.name}
+            })],
+            [`${root}/infrastructure.yaml`, renderDocuments(infrastructureResources(model))],
+            [`${root}/applications.yaml`, renderDocuments(applicationResources(model))],
+            [`${root}/configmap.yaml`, renderDocuments(environmentConfigMaps(model, options))],
+            [`${root}/secrets.example.yaml`, renderDocuments(environmentSecretExamples(model, options.environmentName))]
+        ];
+        if (model.gateway?.enabled) {
+            entries.push(
+                [`${root}/apisix-config.yaml`, renderApisixConfigMap(model)],
+                [`${root}/apisix.yaml`, renderDocuments(apisixResources(model, options.gatewayServiceType))]
+            );
+        }
+        for (const patch of environmentPatches(model)) {
+            entries.push([`${root}/${patch.file}`, renderYaml(patch.document)]);
+        }
+        return entries;
+    }));
+}
+
+function modelForSite(model, site) {
+    const applicationNames = new Set(site.applications);
+    const infrastructureNames = new Set(site.infrastructure);
+    const applications = model.applications.filter((application) => applicationNames.has(application.name));
+    const infrastructure = model.infrastructure.filter((component) => infrastructureNames.has(component.name));
+    const gateway = site.gateway && model.gateway?.enabled
+        ? {
+            ...model.gateway,
+            routes: model.gateway.routes.filter((route) => applicationNames.has(route.upstreamId)),
+            upstreams: model.gateway.upstreams.filter((upstream) => applicationNames.has(upstream.serviceName))
+        }
+        : undefined;
+    return {
+        ...model,
+        applications,
+        infrastructure,
+        ...(gateway ? {gateway} : {gateway: undefined})
+    };
 }
 
 function sharedBasePatches(base, environment, gatewayServiceType) {
@@ -334,6 +405,25 @@ function registryEnvironmentFiles(baseModel, registryModel, options) {
             path: 'image-pull-policy.yaml'
         }]
     });
+    for (const site of registryModel.networkTopology?.sites ?? []) {
+        const siteRoot = `${options.root}/environments/${environmentName}/sites/${site.name}`;
+        const applicationNames = new Set(site.applications);
+        files[`${siteRoot}/image-pull-policy.yaml`] = files[`${options.root}/environments/${environmentName}/image-pull-policy.yaml`];
+        files[`${siteRoot}/kustomization.yaml`] = renderYaml({
+            resources: [`../../../${options.environmentName}/sites/${site.name}`],
+            images: baseModel.applications
+                .filter((application) => applicationNames.has(application.name))
+                .map((application) => ({
+                    name: localApplicationImageName(baseModel, application),
+                    newName: registryApplicationImageName(registryModel, application),
+                    newTag: registryModel.imageTag
+                })),
+            patches: [{
+                target: {kind: 'Deployment'},
+                path: 'image-pull-policy.yaml'
+            }]
+        });
+    }
     return files;
 }
 
@@ -812,6 +902,14 @@ function renderKubernetesReadme(name, model) {
     const isK3s = name.toLowerCase() === 'k3s';
     const namespace = model.name;
     const environmentName = model.environment.name;
+    const hasDeploymentSites = Boolean(model.networkTopology?.sites?.length);
+    const environmentOverlay = hasDeploymentSites
+        ? 'environments/<environment>/sites/<site>'
+        : 'environments/<environment>';
+    const registryOverlay = hasDeploymentSites
+        ? 'environments/<environment>-registry/sites/<site>'
+        : 'environments/<environment>-registry';
+    const secretExample = `${environmentOverlay}/secrets.example.yaml`;
     const applicationImages = model?.applications?.map((application) => imageWithTag(localApplicationImageName(model, application), model.imageTag)) ?? [];
     const dependencyImages = model?.infrastructure
         ?.filter((component) => component.enabled !== false)
@@ -836,8 +934,9 @@ function renderKubernetesReadme(name, model) {
         ...(model.gateway?.enabled ? [model.gateway.name] : [])
     ];
     const iamApplication = model.applications.find((application) => hasApplicationContext(application, 'IdentityAccessManagement'));
+    const gatewayUpstreams = new Map((model.gateway?.upstreams ?? []).map((upstream) => [upstream.id, upstream.serviceName]));
     const routeLines = model.gateway?.routes?.length
-        ? model.gateway.routes.map((route) => `- \`${route.paths?.[0] ?? '/'}\` -> \`${route.serviceName}\``)
+        ? model.gateway.routes.map((route) => `- \`${route.paths?.[0] ?? '/'}\` -> \`${gatewayUpstreams.get(route.upstreamId) ?? route.upstreamId}\``)
         : ['- `/` -> generated frontend or configured gateway upstreams'];
     const pvcNames = model.infrastructure
         .flatMap((component) => [
@@ -871,6 +970,11 @@ function renderKubernetesReadme(name, model) {
         '- `environments/<environment>/patches/*-envfrom.yaml` attaches environment ConfigMaps and optional per-application Secrets to Deployments.',
         '- `environments/<environment>/patches/*-environment.yaml` contains resource differences from the common base.',
         '- `environments/<environment>-registry/` may be generated from local `operations.registry` settings. It rewrites application images to a registry without changing the committed base overlay.',
+        ...(hasDeploymentSites ? [
+            '- `environments/<environment>/sites/<site>/` is a complete site-specific entry point containing only that site\'s applications, infrastructure, gateway, ConfigMaps, and Secret example.',
+            '- `environments/<environment>-registry/sites/<site>/` applies Registry image names to the same isolated site.',
+            '- Deploy a site entry point directly. The parent environment remains a combined compatibility overlay and must not be used for physically separated sites.'
+        ] : []),
         ...(isK3s ? [
             '- `cluster/k3d-dev.yaml` creates a disposable local K3s development cluster with k3d.'
         ] : []),
@@ -944,16 +1048,16 @@ function renderKubernetesReadme(name, model) {
         `kubectl create namespace ${namespace} --dry-run=client -o yaml | kubectl apply -f -`,
         '```',
         '',
-        'The generated `secrets.example.yaml` contains `postgres-secret` and the per-application Secret objects required by the workloads. Copy it to an environment-owned file, replace every example value, and apply it separately:',
+        `The generated \`${secretExample}\` contains only the infrastructure and per-application Secret objects required by the selected deployment entry point. Copy it outside generated sources, replace every example value, and apply it separately:`,
         '',
         '```bash',
-        'cp environments/<environment>/secrets.example.yaml environments/<environment>/secrets.<environment>.yaml',
-        '# Edit secrets.<environment>.yaml and replace change-me, development tokens, and empty credentials.',
-        `kubectl -n ${namespace} apply -f environments/<environment>/secrets.<environment>.yaml`,
+        `cp ${secretExample} /secure/path/runtime-secrets.yaml`,
+        '# Edit /secure/path/runtime-secrets.yaml and replace change-me, development tokens, and empty credentials.',
+        `kubectl -n ${namespace} apply -f /secure/path/runtime-secrets.yaml`,
         `kubectl -n ${namespace} get secret postgres-secret`,
         '```',
         '',
-        '`secrets.<environment>.yaml` is intentionally not referenced by the generated Kustomization and must not be committed. Production deployments should create the same Secret objects through the selected secret manager or deployment pipeline instead.',
+        '`runtime-secrets.yaml` is intentionally not referenced by the generated Kustomization and must not be committed. Production deployments should create the same Secret objects through the selected secret manager or deployment pipeline instead.',
         '',
         '## First Administrator',
         '',
@@ -972,10 +1076,10 @@ function renderKubernetesReadme(name, model) {
         'Apply both files and restart the IAM application before submitting `POST /api/auth/setup-admin`:',
         '',
         '```bash',
-        `kubectl -n ${namespace} apply -f environments/<environment>/secrets.<environment>.yaml`,
-        'kubectl apply -k environments/<environment>',
+        `kubectl -n ${namespace} apply -f /secure/path/runtime-secrets.yaml`,
+        `kubectl apply -k ${environmentOverlay}`,
         '# Or, when a local registry overlay was generated:',
-        '# kubectl apply -k environments/<environment>-registry',
+        `# kubectl apply -k ${registryOverlay}`,
         ...(iamApplication ? [
             `kubectl -n ${namespace} rollout restart deploy/${iamApplication.name}`,
             `kubectl -n ${namespace} rollout status deploy/${iamApplication.name}`
@@ -990,8 +1094,8 @@ function renderKubernetesReadme(name, model) {
         '',
         'Generated Deployments keep non-sensitive application settings in environment ConfigMaps so each environment can own its runtime configuration:',
         '',
-        '- ConfigMaps are generated in `environments/<environment>/configmap.yaml` and are applied with the overlay through `envFrom`.',
-        '- Secret templates are generated in `environments/<environment>/secrets.example.yaml`; copy or translate them into your local/secret-manager workflow before applying real secrets.',
+        `- ConfigMaps are generated in \`${environmentOverlay}/configmap.yaml\` and are applied with the overlay through \`envFrom\`.`,
+        `- Secret templates are generated in \`${secretExample}\`; copy or translate them into your local/secret-manager workflow before applying real secrets.`,
         '- Base Deployments keep only direct secret references such as `DB_USERNAME` and `DB_PASSWORD`; non-sensitive values should be changed in the environment ConfigMap.',
         '',
         '## Apply',
@@ -999,9 +1103,9 @@ function renderKubernetesReadme(name, model) {
         'Apply exactly one environment overlay after the namespace and real Secret objects exist:',
         '',
         '```bash',
-        'kubectl apply -k environments/<environment>',
+        `kubectl apply -k ${environmentOverlay}`,
         '# Or, when a local registry overlay was generated:',
-        '# kubectl apply -k environments/<environment>-registry',
+        `# kubectl apply -k ${registryOverlay}`,
         `kubectl -n ${namespace} get pods,svc,pvc`,
         '```',
         '',
@@ -1031,13 +1135,13 @@ function renderKubernetesReadme(name, model) {
         'Apply environment ConfigMaps and generated manifests:',
         '',
         '```bash',
-        'kubectl apply -k environments/<environment>',
+        `kubectl apply -k ${environmentOverlay}`,
         '```',
         '',
-        'Apply Secret values when using a copied `secrets.<environment>.yaml` file:',
+        'Apply the real Secret manifest prepared outside generated sources:',
         '',
         '```bash',
-        `kubectl -n ${namespace} apply -f environments/<environment>/secrets.<environment>.yaml`,
+        `kubectl -n ${namespace} apply -f /secure/path/runtime-secrets.yaml`,
         '```',
         '',
         'ConfigMap and Secret changes are read when a Pod starts. Restart the affected Deployments after changing them:',

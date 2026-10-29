@@ -6,6 +6,7 @@
 const { apisixFiles } = require('./renderers/apisix-renderer');
 const { documentSupportFiles } = require('./document-support-generator');
 const { dockerComposeFiles } = require('./renderers/docker-compose-renderer');
+const { localDevelopmentFiles } = require('./renderers/local-development-renderer');
 const { k3sFiles, kubernetesFiles } = require('./renderers/kubernetes-renderer');
 const { resolveOperationsModel } = require('./environment-resolver');
 const { renderNetworkTopology } = require('./renderers/network-topology-renderer');
@@ -35,10 +36,14 @@ function generateOperationsFiles(model, options = {}) {
         [`${imagesRoot}/release-runtime.mjs`]: readFileSync(path.join(__dirname, '../../common/release-runtime.mjs'), 'utf8'),
         [`${imagesRoot}/image-archive-runtime.mjs`]: readFileSync(path.join(__dirname, '../../common/image-archive-runtime.mjs'), 'utf8'),
         'operations/scripts/prepare-registry.sh': renderRegistryPreparationScript(baseModel),
+        'operations/scripts/package-offline.mjs': readFileSync(path.join(__dirname, 'templates/package-offline.mjs'), 'utf8'),
         ...documentSupportFiles(baseModel, environment)
     };
 
     if (target === 'model') return files;
+    if (environment === 'local' && (target === 'all' || target === 'docker-compose')) {
+        Object.assign(files, localDevelopmentFiles(baseModel));
+    }
     if (target === 'all' || target === 'apisix' || target === 'docker-compose') {
         Object.assign(files, apisixFiles(baseModel, {
             root: `operations/apisix/${environmentName}`
@@ -92,10 +97,27 @@ function portableOperationsModel(model) {
 
 function renderRegistryPreparationScript(model) {
     const quote = (value) => `'${String(value).replace(/'/g, `'\\''`)}'`;
+    const artifacts = new Map(model.applications.map((application) => [
+        application.name,
+        application.artifactName ?? application.name
+    ]));
+    const sites = (model.networkTopology?.sites ?? []).map((site) => ({
+        name: site.name,
+        applications: site.applications.map((application) => artifacts.get(application))
+    }));
+    const siteFunction = sites.length
+        ? sites.map((site) => [
+            `        ${quote(site.name)})`,
+            ...site.applications.map((application) => `            printf '%s\\n' ${quote(application)}`),
+            '            ;;'
+        ].join('\n')).join('\n')
+        : '        *) return 0 ;;';
     return readFileSync(path.join(__dirname, 'templates/prepare-registry.sh'), 'utf8')
         .replace('__BASE_PREFIX__', quote(model.imagePrefix))
         .replace('__IMAGE_TAG__', quote(model.imageTag))
-        .replace('__APPLICATIONS__', model.applications.map((application) => quote(application.artifactName ?? application.name)).join(' '));
+        .replace('__APPLICATIONS__', model.applications.map((application) => quote(application.artifactName ?? application.name)).join(' '))
+        .replace('__SITE_NAMES__', sites.map((site) => quote(site.name)).join(' '))
+        .replace('__SITE_APPLICATION_CASES__', siteFunction);
 }
 
 function renderDeployReadme(model, environment) {
@@ -146,6 +168,8 @@ function renderDeployReadme(model, environment) {
         '## Image Bundle Command',
         '',
         'Use `images.mjs` to orchestrate generated backend, frontend, and infrastructure images from this monorepo:',
+        'Build/export names use the portable model prefix, independent of Registry configuration. Push retags verified local images to the Registry destination. Use --prefix / DOCKER_IMAGE_PREFIX only to override the local source name; use --push-prefix / DOCKER_PUSH_IMAGE_PREFIX for the push destination.',
+        'For offline K3s delivery, `node operations/scripts/package-offline.mjs --help` describes the generic packager. It collects existing archives and renders the selected environment with optional project components; it never builds or pulls images.',
         '',
         '```bash',
         'node operations/images/images.mjs list --environment <environment>',
@@ -193,12 +217,16 @@ function renderOperationsImageScript(model) {
         application.name,
         `${application.name}-images.tar`
     ]));
-    const infrastructureImages = [
-        ...model.infrastructure
-            .filter((component) => component.enabled !== false)
-            .map((component) => component.image)
-            .filter(Boolean),
-        model.gateway?.image,
+    const deploymentSites = (model.networkTopology?.sites ?? []).map((site) => ({
+        name: site.name,
+        applications: site.applications ?? [],
+        infrastructure: site.infrastructure ?? [],
+        gateway: site.gateway === true
+    }));
+    const infrastructureComponents = model.infrastructure
+        .filter((component) => component.enabled !== false && component.image)
+        .map((component) => ({name: component.name, image: component.image}));
+    const systemImages = [
         ...(model.cluster?.provider === 'k3s' || model.environments?.some((environment) => environment.name === 'dev')
             ? [
                 'rancher/mirrored-pause:3.6',
@@ -235,9 +263,9 @@ if (command !== 'help' && command !== '--help' && command !== '-h' &&
 const monorepoRoot = resolve(scriptDir, args.root ?? process.env.MONOREPO_ROOT ?? '../../..');
 const platform = String(args.platform ?? process.env.DOCKER_DEFAULT_PLATFORM ?? '').trim();
 const dependencyPlatform = platform || hostDockerPlatform();
-const imageConfig = resolveImageConfig(scriptDir, {prefix: args.prefix, version: args.version, mode: args['image-source'], operation: command});
+const imageConfig = resolveImageConfig(scriptDir, {prefix: args.prefix, pushPrefix: args['push-prefix'], version: args.version, mode: args['image-source'], operation: command});
 const imagePrefix = imageConfig.buildPrefix;
-const dependencyImagePrefix = String(args['dependency-prefix'] ?? process.env.DEPENDENCY_IMAGE_PREFIX ?? defaultDependencyImagePrefix(imagePrefix)).replace(/\\/+$/g, '');
+const dependencyImagePrefix = String(args['dependency-prefix'] ?? process.env.DEPENDENCY_IMAGE_PREFIX ?? defaultDependencyImagePrefix(imageConfig.pushPrefix)).replace(/\\/+$/g, '');
 const imageVersion = imageConfig.version;
 const outputRoot = resolve(scriptDir, args.output ?? process.env.IMAGE_BUNDLE_OUTPUT ?? '.work/image-bundle');
 const packageArchive = resolve(scriptDir, args.archive ?? process.env.IMAGE_BUNDLE_ARCHIVE ?? \`\${outputRoot}.tar.gz\`);
@@ -256,15 +284,30 @@ const applicationNames = ${JSON.stringify(applicationNames, null, 4)};
 const backendModuleNames = ${JSON.stringify(backendApplicationNames, null, 4)};
 const frontendApplications = ${JSON.stringify(frontendApplications, null, 4)};
 const frontendArchives = ${JSON.stringify(frontendArchives, null, 4)};
+const deploymentSites = ${JSON.stringify(deploymentSites, null, 4)};
+const infrastructureComponents = ${JSON.stringify(infrastructureComponents, null, 4)};
+const systemImages = ${JSON.stringify(systemImages, null, 4)};
+const gatewayImage = ${JSON.stringify(model.gateway?.image ?? null)};
+const siteName = String(args.site ?? process.env.OPERATIONS_SITE ?? '').trim();
+const selectedSite = siteName ? deploymentSites.find((site) => site.name === siteName) : undefined;
+if (siteName && !selectedSite) throw new Error(\`Unknown deployment site: \${siteName}. Available: \${deploymentSites.map((site) => site.name).join(', ')}\`);
+const archiveScope = siteName ? \`\${normalizeServiceName(siteName)}-\` : '';
+if (!siteName && deploymentSites.length > 0 && ['export', 'export-dependencies'].includes(command)) {
+    for (const site of deploymentSites) {
+        const result = spawnSync(process.execPath, [process.argv[1], ...process.argv.slice(2), '--site', site.name], {stdio: 'inherit'});
+        if (result.status !== 0) process.exit(result.status ?? 1);
+    }
+    process.exit(0);
+}
 const projectRoots = resolveProjectRoots();
 const appArchives = {
-    backend: join(outputRoot, 'images', 'backend-images.tar'),
+    backend: join(outputRoot, 'images', \`\${archiveScope}backend-images.tar\`),
     ...Object.fromEntries(Object.entries(frontendArchives).map(([name, file]) => [
         name,
-        join(outputRoot, 'images', file)
+        join(outputRoot, 'images', \`\${archiveScope}\${file}\`)
     ]))
 };
-const dependencyArchive = join(outputRoot, 'images', 'dependency-images.tar');
+const dependencyArchive = join(outputRoot, 'images', \`\${archiveScope}dependency-images.tar\`);
 
 switch (command) {
     case 'list':
@@ -312,16 +355,32 @@ switch (command) {
 }
 
 function packageImages() {
-    prepareOutput();
+    prepareOutput(true);
     buildImages();
-    exportImages();
-    if (!skipDependencies) {
-        pullDependencyImages();
-        exportDependencyImages();
+    if (!siteName && deploymentSites.length > 0) {
+        for (const site of deploymentSites) runSiteAction('export', site.name);
+        if (!skipDependencies) {
+            pullDependencyImages();
+            for (const site of deploymentSites) runSiteAction('export-dependencies', site.name);
+        }
+    } else {
+        exportImages();
+        if (!skipDependencies) {
+            pullDependencyImages();
+            exportDependencyImages();
+        }
     }
     collectComposeFiles();
     writeManifest();
     createPackageArchive();
+}
+
+function runSiteAction(action, site) {
+    const childArgs = process.argv.slice(2);
+    childArgs[0] = action;
+    childArgs.push('--site', site);
+    const result = spawnSync(process.execPath, [process.argv[1], ...childArgs], {stdio: 'inherit'});
+    if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
 function buildImages() {
@@ -392,6 +451,7 @@ function pushImages() {
         runNode(project.root, [
             'scripts/image-bundle.mjs',
             'push',
+            '--push-prefix', imageConfig.pushPrefix,
             ...platformArgs(),
             '--prefix',
             imagePrefix,
@@ -473,11 +533,18 @@ function writeManifest() {
         imagePrefix,
         dependencyImagePrefix,
         imageVersion,
+        site: siteName || null,
         monorepoRoot,
         applications: selectedApplicationNames(),
-        infrastructureImages: ${JSON.stringify(infrastructureImages, null, 8)},
+        infrastructureImages: infrastructureImages(),
         projects: Object.fromEntries(selectedProjects().map((project) => [project.key, project.root])),
-        archives: {
+        archives: !siteName && deploymentSites.length > 0 ? {
+            sites: Object.fromEntries(deploymentSites.map((site) => [site.name,
+                readdirSync(join(outputRoot, 'images'))
+                    .filter((name) => name.startsWith(\`\${normalizeServiceName(site.name)}-\`) && name.endsWith('.tar'))
+                    .map((name) => join(outputRoot, 'images', name))])),
+            package: packageArchive
+        } : {
             ...Object.fromEntries(selectedProjects().map((project) => [project.key, appArchives[project.key]])),
             ...(skipDependencies ? {} : {dependencies: dependencyArchive}),
             package: packageArchive
@@ -493,7 +560,8 @@ function writeManifest() {
 function writeAggregateManifest(action, preflight = false) {
     const components = selectedProjects().map((project) => {
         const names = project.key === 'backend' ? project.modules : [project.application.name];
-        const requestedImages = names.map((name) => \`\${imagePrefix}/\${name}:\${imageVersion}\`);
+        const deliveryPrefix = action === 'push' && !preflight ? imageConfig.pushPrefix : imagePrefix;
+        const requestedImages = names.map((name) => \`\${deliveryPrefix}/\${name}:\${imageVersion}\`);
         const file = action === 'export' && !preflight ? \`\${appArchives[project.key]}.manifest.json\`
             : join(project.root, '.medol', action === 'push' && !preflight ? 'release-manifest.json' : 'build-manifest.json');
         if (dryRun) return {project: project.key, manifest: relative(monorepoRoot, file)};
@@ -532,12 +600,12 @@ function createPackageArchive() {
     run('tar', ['-czf', packageArchive, '-C', outputParent, outputName], scriptDir);
 }
 
-function prepareOutput() {
+function prepareOutput(reset = false) {
     if (dryRun) {
         console.log(\`[operations-images] would prepare \${outputRoot}\`);
         return;
     }
-    if (clean && existsSync(outputRoot)) {
+    if (reset && clean && existsSync(outputRoot)) {
         rmSync(outputRoot, {recursive: true, force: true});
     }
     mkdirSync(join(outputRoot, 'images'), {recursive: true});
@@ -546,8 +614,8 @@ function prepareOutput() {
 
 function selectedProjects() {
     validateServiceFilters();
-    const selectedBackendModules = backendModuleNames.filter((moduleName) => serviceMatches([moduleName]));
-    const selectedFrontends = frontendApplications.filter((application) => !skipConsole && serviceMatches(frontendServiceAliases(application)));
+    const selectedBackendModules = backendModuleNames.filter((moduleName) => siteAllows(moduleName) && serviceMatches([moduleName]));
+    const selectedFrontends = frontendApplications.filter((application) => !skipConsole && siteAllows(application.name) && serviceMatches(frontendServiceAliases(application)));
     const missingFrontends = selectedFrontends.filter((application) => !projectRoots.frontends[application.name]);
     if (missingFrontends.length > 0) {
         fail(\`Missing frontend project root(s): \${missingFrontends.map((application) => application.name).join(', ')}. Generate each frontend application directory or pass --<frontend-service>-root.\`);
@@ -570,11 +638,15 @@ function selectedProjects() {
 
 function selectedApplicationNames() {
     return [
-        ...backendModuleNames.filter((moduleName) => serviceMatches([moduleName])),
+        ...backendModuleNames.filter((moduleName) => siteAllows(moduleName) && serviceMatches([moduleName])),
         ...frontendApplications
-            .filter((application) => projectRoots.frontends[application.name] && !skipConsole && serviceMatches(frontendServiceAliases(application)))
+            .filter((application) => projectRoots.frontends[application.name] && !skipConsole && siteAllows(application.name) && serviceMatches(frontendServiceAliases(application)))
             .map((application) => application.name)
     ];
+}
+
+function siteAllows(applicationName) {
+    return !selectedSite || selectedSite.applications.includes(applicationName);
 }
 
 function projectImageArgs(project) {
@@ -666,6 +738,7 @@ function isConsoleProject(root) {
 function printPlan() {
     console.log('[operations-images] monorepo:', monorepoRoot);
     console.log('[operations-images] environment:', environment);
+    console.log('[operations-images] deployment site:', siteName || 'all');
     console.log('[operations-images] application platform:', platform || 'native');
     console.log('[operations-images] dependency platform:', dependencyPlatform);
     console.log('[operations-images] fast build:', fastBuild ? 'enabled' : 'disabled');
@@ -748,10 +821,15 @@ function serviceFilterValues(...keys) {
 }
 
 function infrastructureImages() {
+    const selectedInfrastructure = selectedSite
+        ? infrastructureComponents.filter((component) => selectedSite.infrastructure.includes(component.name))
+        : infrastructureComponents;
     return unique([
-        ...${JSON.stringify(infrastructureImages, null, 8)},
+        ...selectedInfrastructure.map((component) => component.image),
+        ...(!selectedSite || selectedSite.gateway ? [gatewayImage] : []),
+        ...systemImages,
         ...extraDependencyImages()
-    ]);
+    ].filter(Boolean));
 }
 
 function dependencyRegistryImage(image) {
@@ -862,13 +940,14 @@ Commands:
   import               Load application and dependency image archives.
   push                 Push application images to --prefix / DOCKER_IMAGE_PREFIX.
   pull-dependencies    Pull generated infrastructure and K3s system images.
-  export-dependencies  Save infrastructure images into dependency-images.tar.
-  import-dependencies  Load dependency-images.tar.
+  export-dependencies  Save infrastructure images into a site-prefixed dependency archive when --site is used.
+  import-dependencies  Load the selected infrastructure dependency archive.
   push-dependencies    Retag dependencies under a registry-root mirror path and push them.
   package, all         Build, pull dependencies, export images, collect compose files, and tar the bundle.
 
 Environment:
   --environment <name>          Select operations/model/<name> configuration and images/<name> output.
+  --site <name>                 Select one networkTopology site. Omit it to export every configured site.
 
 Options:
   --prefix <name>                 Image prefix or registry namespace. Defaults to DOCKER_IMAGE_PREFIX or ${defaultPrefix}.
@@ -882,7 +961,7 @@ Options:
   --root <dir>                    Monorepo root. Defaults to ../../.. from this image environment.
   --backend-root <dir>            Override backend project root.
   --console-root <dir>            Override the first frontend project root for legacy workspaces.
-  --<frontend-service>-root <dir> Override one frontend project root, for example --participant-console-root ./participant-console.
+  --<frontend-service>-root <dir> Override one generated frontend project root.
   --service <name[,name]>         Only process selected application services. Can be repeated.
   --exclude-service <name[,name]> Skip selected application services. Can be repeated.
   --skip-service <name[,name]>    Alias for --exclude-service.

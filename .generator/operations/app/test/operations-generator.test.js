@@ -282,6 +282,28 @@ test('generates operations target file sets', () => {
     assert(files['operations/zot/dev/config.json']);
 });
 
+test('incremental image exports preserve application and dependency archives', () => {
+    const script = generateOperationsFiles(buildOperationsModel(sampleModel), {target: 'model'})['operations/images/images.mjs'];
+    const body = script.slice(script.indexOf('function prepareOutput('), script.indexOf('function selectedProjects('));
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'export-output-'));
+    try {
+        const prepare = new Function('existsSync', 'rmSync', 'mkdirSync', 'join', 'outputRoot', 'clean', 'dryRun', `${body}; return prepareOutput;`)(fs.existsSync, fs.rmSync, fs.mkdirSync, path.join, directory, true, false);
+        prepare();
+        const application = path.join(directory, 'images/backend-images.tar');
+        const dependency = path.join(directory, 'images/dependency-images.tar');
+        fs.writeFileSync(application, 'application');
+        prepare();
+        fs.writeFileSync(dependency, 'dependency');
+        prepare();
+        assert.equal(fs.readFileSync(application, 'utf8'), 'application');
+        assert.equal(fs.readFileSync(dependency, 'utf8'), 'dependency');
+        prepare(true);
+        assert(!fs.existsSync(application));
+        assert(!fs.existsSync(dependency));
+        assert.match(script, /function packageImages\(\)\s*\{\s*prepareOutput\(true\)/);
+    } finally {fs.rmSync(directory, {recursive: true, force: true});}
+});
+
 test('generates one environment-independent image helper', () => {
     const model = buildOperationsModel(sampleModel);
     const dev = generateOperationsFiles(model, {target: 'model', environment: 'dev'});
@@ -289,6 +311,8 @@ test('generates one environment-independent image helper', () => {
     assert.equal(dev['operations/images/images.mjs'], local['operations/images/images.mjs']);
     assert(!Object.keys(dev).some((file) => /^operations\/images\/dev\//.test(file)));
     assert.match(dev['operations/images/images.mjs'], /--environment <name>/);
+    assert.match(dev['operations/scripts/package-offline.mjs'], /export async function packageOffline/);
+    assert.doesNotMatch(dev['operations/scripts/package-offline.mjs'], /federation-learning|runtime-scheduling|pytorch/);
 });
 
 test('shares Kubernetes bases while keeping replica overrides in environment patches', () => {
@@ -304,7 +328,8 @@ test('shares Kubernetes bases while keeping replica overrides in environment pat
 
 test('renders network topology from configured gateway routes and active service dependencies', () => {
     const model = buildOperationsModel(sampleModel);
-    const topology = generateOperationsFiles(model, { target: 'model', environment: 'dev' })['operations/model/dev/network-topology.md'];
+    const files = generateOperationsFiles(model, { target: 'model', environment: 'dev' });
+    const topology = files['operations/model/dev/network-topology.md'];
 
     assert.match(topology, /```mermaid\nflowchart LR/);
     assert.match(topology, /Client \/ Browser/);
@@ -321,7 +346,8 @@ test('omits gateway routes when disabled and follows environment exposure', () =
     const model = buildOperationsModel(sampleModel, {
         operations: { gateway: { enabled: false } }
     });
-    const topology = generateOperationsFiles(model, { target: 'model', environment: 'dev' })['operations/model/dev/network-topology.md'];
+    const files = generateOperationsFiles(model, { target: 'model', environment: 'dev' });
+    const topology = files['operations/model/dev/network-topology.md'];
 
     assert.doesNotMatch(topology, /apisix :/);
     assert.match(topology, /Client \/ Browser/);
@@ -343,7 +369,11 @@ test('places services and local data dependencies in configured deployment sites
             }
         }
     });
-    const topology = generateOperationsFiles(model, { target: 'model', environment: 'dev' })['operations/model/dev/network-topology.md'];
+    const files = generateOperationsFiles(model, { target: 'model', environment: 'dev' });
+    const topology = files['operations/model/dev/network-topology.md'];
+    const images = files['operations/images/images.mjs'];
+    const registryPreparation = files['operations/scripts/prepare-registry.sh'];
+    const k3s = k3sFiles(model);
 
     assert.match(topology, /subgraph Site1\["Central environment"\]/);
     assert.match(topology, /subgraph Site2\["Remote environment"\]/);
@@ -353,6 +383,32 @@ test('places services and local data dependencies in configured deployment sites
     assert.equal((topology.match(/\["umadb :50051"\]/g) ?? []).length, 2);
     assert.match(topology, /A container service name alone will not resolve across sites/);
     assert.match(topology, /must be split or configured separately/);
+    assert.match(images, /const deploymentSites =/);
+    assert.match(images, /--site <name>/);
+    assert.match(images, /siteAllows\(application\.name\)/);
+    assert.match(images, /archiveScope.*backend-images\.tar/);
+    assert.match(images, /runSiteAction\('export', site\.name\)/);
+    assert.match(images, /runSiteAction\('export-dependencies', site\.name\)/);
+    assert.match(registryPreparation, /SITE_NAMES=\('central' 'remote'\)/);
+    assert.match(registryPreparation, /environments\/\$ENVIRONMENT\/sites\/\$site/);
+    const centralRoot = 'operations/k3s/environments/dev/sites/central';
+    const remoteRoot = 'operations/k3s/environments/dev/sites/remote';
+    assert.match(k3s[`${centralRoot}/applications.yaml`], /name: "console"/);
+    assert.match(k3s[`${centralRoot}/applications.yaml`], /name: "federation-service"/);
+    assert.doesNotMatch(k3s[`${centralRoot}/applications.yaml`], /name: "dataset-service"/);
+    assert.match(k3s[`${remoteRoot}/applications.yaml`], /name: "dataset-service"/);
+    assert.doesNotMatch(k3s[`${remoteRoot}/applications.yaml`], /name: "federation-service"/);
+    assert.match(k3s[`${centralRoot}/infrastructure.yaml`], /federation_service/);
+    assert.doesNotMatch(k3s[`${centralRoot}/infrastructure.yaml`], /dataset_service/);
+    assert.match(k3s[`${remoteRoot}/infrastructure.yaml`], /dataset_service/);
+    assert.doesNotMatch(k3s[`${remoteRoot}/infrastructure.yaml`], /federation_service/);
+    assert.match(k3s[`${centralRoot}/apisix-config.yaml`], /federation-service/);
+    assert.doesNotMatch(k3s[`${centralRoot}/apisix-config.yaml`], /dataset-service/);
+    assert.equal(k3s[`${remoteRoot}/apisix-config.yaml`], undefined);
+    assert.match(k3s[`${centralRoot}/secrets.example.yaml`], /federation-service-dev-secret/);
+    assert.doesNotMatch(k3s[`${centralRoot}/secrets.example.yaml`], /dataset-service-dev-secret/);
+    assert.match(k3s[`${remoteRoot}/secrets.example.yaml`], /dataset-service-dev-secret/);
+    assert.match(k3s[`${centralRoot}/kustomization.yaml`], /"medol.dev\/site": "central"/);
 });
 
 test('rejects incomplete or ambiguous deployment site assignments', () => {
@@ -362,6 +418,35 @@ test('rejects incomplete or ambiguous deployment site assignments', () => {
     assert.throws(() => buildOperationsModel(sampleModel, { operations: { networkTopology: { sites: [
         sites[0], { name: 'remote', applications: ['dataset-service', 'console'], infrastructure: ['postgres', 'umadb'] }
     ] } } }), /assigns application console to multiple sites/);
+});
+
+test('supports an independent filtered gateway in more than one deployment site', () => {
+    const model = buildOperationsModel(sampleModel, { operations: { networkTopology: { sites: [
+        {
+            name: 'central',
+            gateway: true,
+            applications: ['console', 'federation-service'],
+            infrastructure: ['postgres', 'umadb']
+        },
+        {
+            name: 'remote',
+            gateway: true,
+            applications: ['dataset-service'],
+            infrastructure: ['postgres', 'umadb']
+        }
+    ] } } });
+    const k3s = k3sFiles(model);
+    const central = k3s['operations/k3s/environments/dev/sites/central/apisix-config.yaml'];
+    const remote = k3s['operations/k3s/environments/dev/sites/remote/apisix-config.yaml'];
+
+    assert.match(central, /federation-service/);
+    assert.doesNotMatch(central, /dataset-service/);
+    assert.match(remote, /dataset-service/);
+    assert.doesNotMatch(remote, /federation-service/);
+
+    const readme = k3s['operations/k3s/README.md'];
+    assert.match(readme, /`\/api\/federations\/\*` -> `federation-service`/);
+    assert.doesNotMatch(readme, /-> `undefined`/);
 });
 
 test('accepts named topology maps from the workspace YAML parser', () => {
@@ -442,8 +527,8 @@ test('renders Kubernetes and K3s manifests from the same operations model', () =
     assert.match(k3s['operations/k3s/README.md'], /project-specific Kubernetes extensions in a separate overlay/);
     assert.doesNotMatch(k3s['operations/k3s/README.md'], /runtime-agent-scheduler-rbac/);
     assert.doesNotMatch(k3s['operations/k3s/README.md'], /medol\.dev\/runtime-infrastructure-id/);
-    assert.match(k3s['operations/k3s/README.md'], /cp environments\/<environment>\/secrets\.example\.yaml environments\/<environment>\/secrets\.<environment>\.yaml/);
-    assert.match(k3s['operations/k3s/README.md'], /apply -f environments\/<environment>\/secrets\.<environment>\.yaml/);
+    assert.match(k3s['operations/k3s/README.md'], /cp environments\/<environment>\/secrets\.example\.yaml \/secure\/path\/runtime-secrets\.yaml/);
+    assert.match(k3s['operations/k3s/README.md'], /apply -f \/secure\/path\/runtime-secrets\.yaml/);
     assert.match(k3s['operations/k3s/README.md'], /must not be committed/);
     assert.match(k3s['operations/k3s/README.md'], /NodePort service on `30080`/);
     assert.match(kubernetes['operations/kubernetes/base/apisix-config.yaml'], /apisix.yaml: \|/);
@@ -670,7 +755,7 @@ test('pushes dependency mirrors under the registry root instead of the applicati
     assert.match(script, /rancher\/mirrored-library-busybox:1\.36\.1/);
     assert.match(script, /rancher\/mirrored-coredns-coredns:1\.12\.3/);
     assert.match(script, /rancher\/mirrored-metrics-server:v0\.8\.0/);
-    assert.match(script, /defaultDependencyImagePrefix\(imagePrefix\)/);
+    assert.match(script, /defaultDependencyImagePrefix\(imageConfig.pushPrefix\)/);
     assert.doesNotMatch(script, /imagePrefix}\/dependencies/);
     assert.match(script, /--image', infrastructureImages\(\)\.join\(','\)/);
 });

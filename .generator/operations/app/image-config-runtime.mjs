@@ -27,12 +27,14 @@ export function resolveImageConfig(directory, options = {}) {
     const configuredPrefix = clean(options.prefix) || clean(env.DOCKER_IMAGE_PREFIX);
     const registryPrefix = clean(registry?.imagePrefix)
         || (registry?.host ? [clean(registry.host), clean(registry.namespace)].filter(Boolean).join('/') : '');
-    const imagePrefix = configuredPrefix || registryPrefix || clean(model.imagePrefix);
+    const buildPrefix = configuredPrefix || clean(model.imagePrefix);
+    const imagePrefix = registryPrefix || buildPrefix;
     if (!imagePrefix || imagePrefix.includes('://') || /\s/.test(imagePrefix)) {
         throw new Error('Configure an image prefix without a URL scheme in the operations model, environment, or --prefix.');
     }
-    const pushPrefix = !configuredPrefix && registry?.pushHost
-        ? [clean(registry.pushHost), imagePrefix.includes('/') ? imagePrefix.slice(imagePrefix.indexOf('/') + 1) : ''].filter(Boolean).join('/') : imagePrefix;
+    const pushPrefix = clean(options.pushPrefix) || clean(env.DOCKER_PUSH_IMAGE_PREFIX) || (registry?.pushHost
+        ? [clean(registry.pushHost), imagePrefix.includes('/') ? imagePrefix.slice(imagePrefix.indexOf('/') + 1) : ''].filter(Boolean).join('/') : imagePrefix);
+    if (!pushPrefix || pushPrefix.includes('://') || /\s/.test(pushPrefix)) throw new Error('Invalid push image prefix.');
     const version = clean(options.version) || clean(env.IMAGE_VERSION) || clean(recordedVersion) || baselineVersion || clean(model.imageTag);
     if (!version || /[\s/@:]/.test(version)) throw new Error('Configure a valid image version.');
     const mode = options.mode ?? env.MEDOL_IMAGE_SOURCE ?? local.imageSource ?? (registryPrefix || hasRegistry(imagePrefix) ? 'registry' : 'import');
@@ -41,7 +43,7 @@ export function resolveImageConfig(directory, options = {}) {
         throw new Error('Registry mode requires a registry-qualified image prefix.');
     }
     return {
-        imagePrefix, buildPrefix: pushPrefix, version, mode, baseVersion: model.imageTag,
+        imagePrefix, buildPrefix, pushPrefix, version, mode, baseVersion: model.imageTag,
         applications: model.applications ?? [],
         buildImage: (image) => image.startsWith(`${imagePrefix}/`)
             ? `${pushPrefix}/${image.slice(imagePrefix.length + 1)}` : image,

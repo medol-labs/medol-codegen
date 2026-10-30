@@ -1,4 +1,7 @@
 target/
+# Build provenance belongs to images and release bundles.
+**/.medol/build-manifest.json
+**/medol-build.json
 .env
 .idea/
 *.iml

@@ -9,6 +9,9 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+# Build provenance belongs to images and release bundles.
+**/.medol/build-manifest.json
+**/medol-build.json
 dist
 dist-ssr
 *.local

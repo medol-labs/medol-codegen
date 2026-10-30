@@ -98,3 +98,6 @@ operations/**/kubernetes/overlays/*-registry/**
 *.sqlite
 *.sqlite3
 *.db
+# Build provenance belongs to images and release bundles.
+**/.medol/build-manifest.json
+**/medol-build.json

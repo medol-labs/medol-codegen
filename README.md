@@ -309,8 +309,7 @@ gen /opt/codegen/.generator/app/ --generator refine --generator-type all
 The `operations` generator reads the same `codegen-model.json` and derives an intermediate `OperationsModel` before rendering platform files. The model keeps application topology, infrastructure, gateway routes, images, ports, health checks, environment defaults, and per-environment overrides separate from renderer-specific details.
 
 Run generators from the generated system root. By default the generator reads
-`.medol/codegen-model.json`, `.medol/medol.yml`, and optional local workspace
-overrides from `.medol/medol.local.yml` in the current directory. Operations
+`.medol/codegen-model.json` and `.medol/medol.yml` in the current directory. Operations
 deployment settings are loaded separately from `operations/config/`. Legacy
 `codegen-model.json` at the current directory root is still accepted for
 compatibility.

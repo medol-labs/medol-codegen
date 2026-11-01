@@ -7,9 +7,9 @@ const ejs = require('./.generator/node_modules/ejs');
 const {generationRecord} = require('./.generator/common/core/generation-provenance');
 const {loadMedolWorkspace} = require('./.generator/common/core/medol-workspace');
 
-function syncReleaseSupport({cwd = process.cwd(), root, target, model, modules, image, environment = 'dev'}) {
+function syncReleaseSupport({cwd = process.cwd(), root, target, model, modules, image, environment}) {
     root = path.resolve(root ?? cwd);
-    const options = {codegenModel: model, environment, scope: 'release-support'};
+    const options = {codegenModel: model, ...(target === 'operations' ? {environment: environment ?? 'dev'} : {}), scope: 'release-support'};
     const record = generationRecord(cwd, root, target, options);
     const files = new Map();
     const runtime = fs.readFileSync(path.join(__dirname, '.generator/common/release-runtime.mjs'), 'utf8');
@@ -35,7 +35,7 @@ function syncReleaseSupport({cwd = process.cwd(), root, target, model, modules, 
         const {generateOperationsFiles} = require('./.generator/operations/app/operations-generator');
         const loaded = loadGeneratorModel(cwd, options);
         const workspace = loadMedolWorkspace(cwd, options);
-        const generated = generateOperationsFiles(buildOperationsModel(loaded.codegenModel, loadOperationsConfig(cwd, workspace)), {target: 'model', environment});
+        const generated = generateOperationsFiles(buildOperationsModel(loaded.codegenModel, loadOperationsConfig(cwd, workspace, options.environment)), {target: 'model', environment: options.environment});
         for (const [file, text] of Object.entries(generated)) {
             if (/\/(images|image-config|release-runtime|image-archive-runtime)\.mjs$/.test(file)) files.set(file, text);
         }

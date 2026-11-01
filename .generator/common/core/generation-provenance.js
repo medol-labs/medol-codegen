@@ -80,6 +80,7 @@ function generationRecord(cwd, outputRoot, target, options = {}) {
             .map((file) => path.resolve(cwd, file)).filter((file) => fs.existsSync(file))]);
     const selection = {};
     for (const key of ['generatorType', 'frontendApp', 'frontendApplication', 'environment', 'allSlices', 'allCommands', 'sliceNames', 'slices', 'slice', 'contexts', 'context', 'sliceFilter', 'filter', 'commands']) {
+        if (key === 'environment' && ['axon5', 'refine'].includes(target)) continue;
         if (options[key] !== undefined) selection[key] = options[key];
     }
     for (const key of ['CODEGEN_DOMAIN', 'CODEGEN_DEPLOYMENT', 'CODEGEN_FRONTEND_APP']) {

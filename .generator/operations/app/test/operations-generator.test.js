@@ -38,6 +38,55 @@ const sampleModel = {
     }]
 };
 
+test('native single-node entries exist for every environment without replacing isolated sites', () => {
+    for (const environment of ['local', 'dev', 'test', 'staging', 'prod']) {
+        const model = buildOperationsModel(sampleModel);
+        const files = generateOperationsFiles(model, {target: 'k3s', environment});
+        const entry = files[`operations/k3s/environments/${environment}/single-node/kustomization.yaml`];
+        assert.match(entry, /applications.yaml/);
+        assert.doesNotMatch(entry, /sites\//);
+        const script = files['operations/k3s/scripts/k3s-single-node.sh'];
+        assert.match(script, /ctr -n k8s.io images import/);
+        assert.match(script, /exactly one node/);
+        assert.match(script, /SECRETS_FILE/);
+        assert.doesNotMatch(script, /k3d (cluster|image)|kubectl taint/);
+        assert(!script.includes('__NAMESPACE__'));
+        execFileSync('bash', ['-n'], {input: script});
+    }
+});
+
+test('native helper rejects taints and placeholder credentials and propagates rollout failure', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'native-k3s-'));
+    try {
+        const files = generateOperationsFiles(buildOperationsModel(sampleModel), {target: 'k3s', environment: 'test'});
+        for (const [name, content] of Object.entries(files).filter(([name]) => name.startsWith('operations/k3s/'))) {
+            fs.mkdirSync(path.dirname(path.join(root, name)), {recursive: true});
+            fs.writeFileSync(path.join(root, name), content);
+        }
+        const bin = path.join(root, 'bin');
+        fs.mkdirSync(bin);
+        fs.writeFileSync(path.join(bin, 'uname'), '#!/bin/sh\nif [ "$1" = -s ]; then echo Linux; else echo aarch64; fi\n', {mode: 0o755});
+        fs.writeFileSync(path.join(bin, 'k3s'), `#!/bin/sh
+case "$*" in
+  'kubectl get nodes -o name') echo node/one ;;
+  *spec.taints*) echo "$TEST_TAINT" ;;
+  *storageclass*jsonpath*) echo true ;;
+  *'get deployments -o name') echo deployment/app ;;
+  *'rollout status'*) exit 9 ;;
+  *'apply -f -') cat >/dev/null ;;
+esac
+`, {mode: 0o755});
+        const script = path.join(root, 'operations/k3s/scripts/k3s-single-node.sh');
+        const env = {...process.env, PATH: `${bin}:${process.env.PATH}`};
+        assert.throws(() => execFileSync('bash', [script, 'test', 'check'], {env: {...env, TEST_TAINT: 'NoSchedule'}, stdio: 'pipe'}));
+        const secret = path.join(root, 'secret.yaml');
+        fs.writeFileSync(secret, 'password: change-me\n');
+        assert.throws(() => execFileSync('bash', [script, 'test', 'apply'], {env: {...env, SECRETS_FILE: secret}, stdio: 'pipe'}), /Command failed/);
+        fs.writeFileSync(secret, 'password: fixture-only\n');
+        assert.throws(() => execFileSync('bash', [script, 'test', 'apply'], {env: {...env, SECRETS_FILE: secret}, stdio: 'pipe'}), (error) => error.status === 9);
+    } finally {fs.rmSync(root, {recursive: true, force: true});}
+});
+
 test('tenant-enabled deployments share database and schema while ordinary deployments remain separate', () => {
     const model = buildOperationsModel({...sampleModel, tenancy: {enabled: true}});
     const backends = model.applications.filter((application) => application.kind === 'backend');
@@ -48,6 +97,27 @@ test('tenant-enabled deployments share database and schema while ordinary deploy
     const ordinary = buildOperationsModel(sampleModel).applications.filter((application) => application.kind === 'backend');
     assert.equal(new Set(ordinary.map((application) => application.environmentVariables.find((item) => item.name === 'DB_URL').value)).size, 2);
     assert(ordinary.every((application) => !application.environmentVariables.some((item) => item.name === 'DB_SCHEMA')));
+});
+
+test('resource budgets, startup protection and storage sizing survive environment generation', () => {
+    const name = buildOperationsModel(sampleModel).applications.find((app) => app.kind === 'backend').name;
+    const model = buildOperationsModel(sampleModel, {
+        applications: {[name]: {resources: {requests: {memory: '512Mi'}, limits: {memory: '1536Mi'}}, healthCheck: {startupTimeoutSeconds: 180}}},
+        infrastructure: {postgres: {storageSize: '10Gi', storageClassName: 'local-path'}, umadb: {storageSize: '8Gi'}},
+        environments: {test: {applicationOverrides: {[name]: {healthCheck: {startupTimeoutSeconds: 240}}}}}
+    });
+    for (const environment of ['dev', 'test', 'prod']) {
+        const files = generateOperationsFiles(model, {target: 'k3s', environment});
+        const prefix = `operations/k3s/environments/${environment}/single-node`;
+        const apps = files[`${prefix}/applications.yaml`];
+        assert.match(apps, /memory: "512Mi"/);
+        assert.match(apps, /memory: "1536Mi"/);
+        assert.match(apps, /startupProbe:/);
+        assert.match(apps, new RegExp(`failureThreshold: ${environment === 'test' ? 24 : 18}`));
+        assert.match(files[`${prefix}/infrastructure.yaml`], /storage: "10Gi"/);
+        assert.match(files[`${prefix}/infrastructure.yaml`], /storage: "8Gi"/);
+        assert.match(files[`${prefix}/infrastructure.yaml`], /storageClassName: "local-path"/);
+    }
 });
 
 test('builds operations model applications, infrastructure, gateway, and environment defaults', () => {
@@ -619,7 +689,7 @@ test('loads operations registry configuration from .medol/medol.yml', () => {
     assert.equal(model.imagePrefix, 'registry.internal:5000/team');
 });
 
-test('loads local operations registry overrides from .medol/medol.local.yml', () => {
+test('ignores retired local workspace override files', () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'operations-workspace-'));
     fs.mkdirSync(path.join(workspace, '.medol'));
     fs.writeFileSync(path.join(workspace, '.medol/medol.yml'), [
@@ -630,21 +700,17 @@ test('loads local operations registry overrides from .medol/medol.local.yml', ()
         '    insecure: true',
         ''
     ].join('\n'));
-    fs.writeFileSync(path.join(workspace, '.medol/medol.local.yml'), [
-        'operations:',
-        '  registry:',
-        '    namespace: local',
-        ''
-    ].join('\n'));
+    for (const name of ['.medol/medol.local.yml', '.medol/medol.local.yaml', 'medol.local.yml', 'medol.local.yaml']) {
+        fs.writeFileSync(path.join(workspace, name), 'invalid: [retired configuration');
+    }
 
     const operationsConfig = loadOperationsConfig(workspace, loadMedolWorkspace(workspace));
     const model = buildOperationsModel(sampleModel, operationsConfig);
 
     assert.deepEqual(loadMedolWorkspace(workspace).configPaths.map((file) => path.basename(file)), [
-        'medol.yml',
-        'medol.local.yml'
+        'medol.yml'
     ]);
-    assert.equal(model.imagePrefix, 'registry.internal:5000/local');
+    assert.equal(model.imagePrefix, 'registry.internal:5000/committed');
     assert.equal(model.registry.insecure, true);
 });
 

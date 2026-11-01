@@ -174,6 +174,7 @@ function buildBackendApplications(source, operationsConfig, imagePrefix) {
             imageName: override.imageName ?? `${imagePrefix}/${name}`,
             servicePort: override.servicePort ?? port,
             exposeExternally: Boolean(override.exposeExternally),
+            ...(override.resources ? {resources: override.resources} : {}),
             contexts: Array.from(module.contexts ?? []),
             gatewayPath: override.gatewayPath ?? gatewayPathForApplication(name, operationsConfig),
             environmentVariables: [
@@ -208,7 +209,8 @@ function buildBackendApplications(source, operationsConfig, imagePrefix) {
                 intervalSeconds: 10,
                 timeoutSeconds: 5,
                 retries: 12,
-                startPeriodSeconds: 30
+                startPeriodSeconds: 30,
+                ...override.healthCheck
             },
             deploymentProfile: {
                 replicas: 1,
@@ -342,6 +344,8 @@ function buildInfrastructure(operationsConfig) {
             image: postgresConfig.image ?? 'postgres:16',
             servicePort: postgresConfig.servicePort ?? 5432,
             volumeName: postgresConfig.volumeName ?? 'postgres_data',
+            storageSize: postgresConfig.storageSize ?? '1Gi',
+            ...(postgresConfig.storageClassName !== undefined ? {storageClassName: postgresConfig.storageClassName} : {}),
             environmentVariables: [
                 { name: 'POSTGRES_USER', value: '${POSTGRES_USER:-medol}' },
                 { name: 'POSTGRES_PASSWORD', value: '${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}' },
@@ -364,6 +368,8 @@ function buildInfrastructure(operationsConfig) {
             image: umadbConfig.image ?? 'umadb/umadb:0.7.8',
             servicePort: umadbConfig.servicePort ?? 50051,
             volumeName: umadbConfig.volumeName ?? 'umadb_data',
+            storageSize: umadbConfig.storageSize ?? '1Gi',
+            ...(umadbConfig.storageClassName !== undefined ? {storageClassName: umadbConfig.storageClassName} : {}),
             environmentVariables: umadbConfig.environmentVariables ?? [],
             enabled: true
         });

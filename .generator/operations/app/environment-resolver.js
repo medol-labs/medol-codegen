@@ -41,6 +41,7 @@ function resolveApplication(application, environment, defaultImageTag, tenancy) 
         replicas: override.replicas ?? application.deploymentProfile?.replicas ?? 1,
         exposePorts: Boolean(override.exposePorts),
         environmentVariables: mergeEnvironmentVariables(variables),
+        ...((application.healthCheck || override.healthCheck) ? {healthCheck: {...application.healthCheck, ...override.healthCheck}} : {}),
         ...(tenantStorage ? {
             tenantStorage,
             healthCheck: {...application.healthCheck, ...override.healthCheck,

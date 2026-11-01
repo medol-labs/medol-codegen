@@ -95,6 +95,28 @@ function kubernetesLikeFiles(model, options) {
         files[`${options.root}/environments/${options.environmentName}/${patch.file}`] = renderYaml(patch.operations);
     });
     Object.assign(files, deploymentSiteFiles(environmentResolved, options));
+    if (options.name.toLowerCase() === 'k3s') {
+        const combined = deploymentSiteFiles({...environmentResolved, networkTopology: {sites: [{
+            name: 'single-node', applications: environmentResolved.applications.map((item) => item.name),
+            infrastructure: environmentResolved.infrastructure.map((item) => item.name), gateway: true
+        }]}}, options);
+        for (const [file, content] of Object.entries(combined)) {
+            files[file.replace('/sites/single-node/', '/single-node/')] = content;
+        }
+        files[`${options.root}/scripts/k3s-single-node.sh`] = require('node:fs').readFileSync(
+            require('node:path').join(__dirname, '../templates/k3s-single-node.sh'), 'utf8'
+        ).replaceAll('__NAMESPACE__', baseResolved.name);
+        files[`${options.root}/environments/${options.environmentName}/single-node/README.md`] = [
+            '# Native single-node deployment', '',
+            'This entry combines all applications and infrastructure once. Do not also apply the site entries.',
+            'Use one Linux K3s server with its agent enabled and a default StorageClass. On macOS use a Linux VM.',
+            'The helper does not install K3s, create credentials, taint nodes or configure business-specific schedulers.',
+            'Import version/architecture-matched system, application and engine archives into K3s containerd.',
+            'Set SECRETS_FILE to a real Secret manifest; keep it outside Git. EXTRA_COMPONENT accepts a reviewed Kustomize component directory.',
+            `Run: bash operations/k3s/scripts/k3s-single-node.sh ${options.environmentName} render|check|import|apply`,
+            'Access NodePort services through the Linux node address. Review resource budgets, storage sizes and node-local data paths.', ''
+        ].join('\n');
+    }
     if (options.name.toLowerCase() === 'k3s' && options.environmentName === 'dev') {
         files[`${options.root}/cluster/k3d-dev.yaml`] = renderK3dClusterConfig(baseResolved);
         files[`${options.root}/scripts/k3d-dev.sh`] = renderK3dDevHelper(baseResolved, options.environmentName);
@@ -232,6 +254,7 @@ function applicationResources(model) {
         const containers = [{
             name: application.name,
             image: application.image,
+            ...(application.resources ? {resources: application.resources} : {}),
             ports: [{ containerPort: application.servicePort }],
             ...(baseEnv.length ? { env: baseEnv } : {}),
             ...(application.tenantStorage ? {volumeMounts: [{name: 'tenant-storage', mountPath: '/etc/medol/tenant-storage.yml', subPath: 'tenant-storage.yml', readOnly: true}]} : {}),
@@ -482,9 +505,10 @@ function postgresResources(component, model) {
             metadata: namedMetadata(volumeName, 'infrastructure'),
             spec: {
                 accessModes: ['ReadWriteOnce'],
+                ...(component.storageClassName !== undefined ? {storageClassName: component.storageClassName} : {}),
                 resources: {
                     requests: {
-                        storage: '1Gi'
+                        storage: component.storageSize ?? '1Gi'
                     }
                 }
             }
@@ -529,9 +553,10 @@ function statefulInfrastructure(component, mountPath) {
             metadata: namedMetadata(volumeName, 'infrastructure'),
             spec: {
                 accessModes: ['ReadWriteOnce'],
+                ...(component.storageClassName !== undefined ? {storageClassName: component.storageClassName} : {}),
                 resources: {
                     requests: {
-                        storage: '1Gi'
+                        storage: component.storageSize ?? '1Gi'
                     }
                 }
             }

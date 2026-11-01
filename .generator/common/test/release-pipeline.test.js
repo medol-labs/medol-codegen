@@ -60,6 +60,20 @@ test('draft and metadata-free legacy defaults remain compatible', async (t) => {
     assert.equal(validateDeliveryVersion('latest').imageVersion, 'latest');
 });
 
+test('application generation identities are environment-independent while operations retain environment', (t) => {
+    const {root} = fixture(t);
+    for (const target of ['axon5', 'refine']) {
+        const dev = generationRecord(root, root, target, {environment: 'dev'});
+        const prod = generationRecord(root, root, target, {environment: 'prod'});
+        assert.equal(dev.selection.environment, undefined);
+        assert.equal(prod.selection.environment, undefined);
+        assert.equal(dev.config.sha256, prod.config.sha256);
+    }
+    for (const environment of ['test', 'prod']) {
+        assert.equal(generationRecord(root, root, 'operations', {environment}).selection.environment, environment);
+    }
+});
+
 test('artifact commands default to the last matching build instead of revision zero', async (t) => {
     const f = fixture(t);
     const {defaultImageVersion} = await runtime;
@@ -188,6 +202,7 @@ test('focused sync updates delivery files and package references without touchin
     const before = fs.readFileSync(path.join(f.root, 'app.js'));
     syncReleaseSupport({cwd: f.root, root: f.root, target: 'axon5', modules: ['test-app']});
     assert.equal(JSON.parse(fs.readFileSync(path.join(f.root, '.medol/generation/axon5.json'))).scope, 'release-support');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(f.root, '.medol/generation/axon5.json'))).selection.environment, undefined);
     assert.equal(fs.readFileSync(path.join(f.root, 'pom.xml'), 'utf8').includes('SNAPSHOT'), false);
     assert.deepEqual(fs.readFileSync(path.join(f.root, 'app.js')), before);
     const result = spawnSync(process.execPath, ['scripts/image-bundle.mjs', 'list', '--dry-run'], {cwd: f.root, encoding: 'utf8'});

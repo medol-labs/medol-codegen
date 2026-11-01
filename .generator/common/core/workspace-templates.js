@@ -10,14 +10,14 @@ const TEMPLATE_ROOT = path.join(__dirname, '..', 'templates', 'workspace');
 
 const INITIAL_WORKSPACE_FILES = [
     ['.medol/medol.yml', 'medol.yml.tpl'],
-    ['operations/config/dev.private.example.yml', 'medol.local.example.yml.tpl'],
+    ['operations/config/dev.private.example.yml', 'operations.private.example.yml.tpl'],
     ['README.md', 'README.md.tpl'],
     ['AGENTS.md', 'AGENTS.md.tpl'],
     ['.gitignore', 'gitignore.tpl']
 ];
 
 const GENERATOR_WORKSPACE_FILES = [
-    ['operations/config/dev.private.example.yml', 'medol.local.example.yml.tpl'],
+    ['operations/config/dev.private.example.yml', 'operations.private.example.yml.tpl'],
     ['README.md', 'README.md.tpl'],
     ['AGENTS.md', 'AGENTS.md.tpl'],
     ['.gitignore', 'gitignore.tpl']

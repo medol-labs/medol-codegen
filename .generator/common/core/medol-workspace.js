@@ -68,13 +68,7 @@ function resolveMedolConfigPaths(cwd, options = {}) {
         'medol.yml',
         'medol.yaml'
     ].map((candidate) => absolutePath(cwd, candidate)).find((candidate) => fs.existsSync(candidate));
-    const local = [
-        '.medol/medol.local.yml',
-        '.medol/medol.local.yaml',
-        'medol.local.yml',
-        'medol.local.yaml'
-    ].map((candidate) => absolutePath(cwd, candidate)).find((candidate) => fs.existsSync(candidate));
-    return [base, local].filter(Boolean);
+    return [base].filter(Boolean);
 }
 
 function generatorConfig(workspace, generatorName) {

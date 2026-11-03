@@ -92,11 +92,11 @@ function RefineApplication() {
                 syncWithLocation: true,
                 warnWhenUnsavedChanges: true,
                 title: {
-                  text: "<%= appTitle %>",
+                  text: <%- appTitleLiteral %>,
                   icon: (
                     <img
-                      src={`${import.meta.env.BASE_URL}medol-logo.png`}
-                      alt="<%= appTitle %> logo"
+                      src={`${import.meta.env.BASE_URL}domain-icon.svg`}
+                      alt={<%- domainTitleLiteral %>}
                       className="block h-full w-full shrink-0 object-contain"
                     />
                   ),
@@ -108,7 +108,7 @@ function RefineApplication() {
               <Toaster />
               <RefineKbar />
               <UnsavedChangesNotifier />
-              <DocumentTitleHandler />
+              <DocumentTitleHandler handler={() => <%- appTitleLiteral %>} />
             </Refine>
             <DevtoolsPanel />
           </DevtoolsProvider>

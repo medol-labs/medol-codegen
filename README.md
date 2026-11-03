@@ -250,6 +250,19 @@ Create/edit/delete capabilities are generated only when matching event-modeling 
 
 When generating `all`, `resources`, `router`, or `pages`, the refine generator prompts for the commands to generate. Unselected commands are omitted from resource metadata, routes, list action buttons, and command form pages.
 
+### Generated Frontend Branding
+
+Refine skeletons derive the application title and green, white-letter SVG icon
+from the initials of the modeled domain (for example, `FederationLearningPlatform`
+becomes `FLP`). The selected frontend application's `domain` takes precedence in
+multi-domain models. Sidebar/login branding, browser title and favicon use the
+same identity; frontend names and output directory names remain unchanged.
+
+Regenerate `Skeleton` to update these root files in an existing frontend, then
+run the usual resources/pages generation. Resource-only generation does not
+rewrite `src/App.tsx` or `index.html`. The previous fixed image assets are no
+longer copied into new skeletons; existing unused assets are not deleted.
+
 ### Frontend extension, override, and blueprint model
 
 Generated Refine projects use generated pages as fallback implementations and

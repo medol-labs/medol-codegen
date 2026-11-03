@@ -8,6 +8,7 @@ const Generator = YeomanGenerator.default ?? YeomanGenerator;
 var path = require('path');
 const fs = require('fs');
 const {loadGeneratorModel} = require("../../common/core/config-loader");
+const {domainBranding} = require('./branding');
 const {generatorOutputRoot, loadMedolWorkspace} = require("../../common/core/medol-workspace");
 const {
     buildFrontendModel,
@@ -505,11 +506,16 @@ const RefineGenerator = class extends Generator {
     _writeSkeleton(frontendApp) {
         const model = buildFrontendModel(codegenModel, undefined, { frontendApp });
         const appName = model.frontendApplication?.name ?? codegenModel?.domain ?? 'frontend-foundation';
-        const appTitle = model.frontendApplication?.title ?? toDisplayName(appName);
+        const brand = domainBranding(codegenModel, model.frontendApplication);
+        const appTitle = brand.initials;
         const imageName = toKebab(appName);
         const skeletonModel = {
             appName,
             appTitle,
+            appTitleLiteral: JSON.stringify(appTitle),
+            domainTitle: brand.title,
+            domainTitleLiteral: JSON.stringify(brand.title),
+            brandIconSvg: brand.icon,
             imageName,
             imageTarName: `${imageName}-images.tar`,
             backendModules: model.backendModules,
@@ -520,7 +526,9 @@ const RefineGenerator = class extends Generator {
         this.fs.copyTpl(
             this.templatePath('root'),
             this.destinationPath('.'),
-            skeletonModel
+            skeletonModel,
+            {},
+            {globOptions: {ignore: ['**/public/medol-logo.png', '**/public/favicon.ico']}}
         );
         this._writeTenantRuntime();
         const appExtensionsPath = this.destinationPath('./src/domain/app-extensions.tsx');

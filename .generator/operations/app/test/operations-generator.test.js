@@ -293,6 +293,35 @@ test('renders Docker Compose topology with gateway, applications, infrastructure
     assert.equal(actual, expected);
 });
 
+test('Compose environments isolate names and carry security, startup and resource configuration', () => {
+    const YAML = require('yaml');
+    const base = buildOperationsModel(sampleModel);
+    const app = base.applications.find((item) => item.kind === 'backend').name;
+    const model = buildOperationsModel(sampleModel, {applications: {[app]: {
+        resources: {limits: {cpu: '500m', memory: '1536Mi'}}, healthCheck: {startupTimeoutSeconds: 180}
+    }}});
+    for (const environment of ['local', 'dev', 'test', 'staging', 'prod']) {
+        const files = generateOperationsFiles(model, {target: 'docker-compose', environment});
+        const root = `operations/docker-compose/${environment}`;
+        const compose = YAML.parse(files[`${root}/docker-compose.yml`]);
+        assert(compose.name.endsWith(`-${environment}`));
+        for (const service of Object.values(compose.services)) {
+            assert.equal(service.container_name, undefined);
+            assert.equal(service.logging.options['max-file'], '${LOG_MAX_FILES:-5}');
+        }
+        assert.equal(compose.services[app].healthcheck.start_period, '180s');
+        assert.equal(compose.services[app].deploy.resources.limits.memory, '1536m');
+        assert.equal(compose.services[app].deploy.resources.limits.cpus, '0.5');
+        assert.match(compose.services[app].environment.MEDOL_SECURITY_JWT_SECRET, /\?Set/);
+        assert(compose.services.apisix.volumes[0].includes(`/apisix/${environment}/`));
+        assert(files[`${root}/.gitignore`].includes('.env'));
+        for (const line of files[`${root}/infrastructure/postgres/init/01-create-databases.sql`].split('\n').filter((line) => line.startsWith('SELECT'))) {
+            assert(line.endsWith(String.fromCharCode(92) + 'gexec'));
+            assert.equal(line.split(String.fromCharCode(92)).length, 2);
+        }
+    }
+});
+
 test('generates operations target file sets', () => {
     const model = buildOperationsModel(sampleModel);
     const files = generateOperationsFiles(model, { target: 'all', environment: 'dev' });
@@ -350,6 +379,34 @@ test('generates operations target file sets', () => {
     assert(files['operations/zot/dev/.env-example']);
     assert(files['operations/zot/dev/docker-compose.yml']);
     assert(files['operations/zot/dev/config.json']);
+});
+
+test('Compose splits arbitrary modeled deployment sites including gateway, storage and remote URLs', () => {
+    const YAML = require('yaml');
+    const model = buildOperationsModel(sampleModel, {applications: {'dataset-service': {environmentVariables: [
+        {name: 'REMOTE_API', value: 'http://federation-service:8080'},
+    ]}}, networkTopology: {sites: [
+        {name: 'central', gateway: true, applications: ['console', 'federation-service'], infrastructure: ['postgres', 'umadb']},
+        {name: 'remote', gateway: true, applications: ['dataset-service'], infrastructure: ['postgres', 'umadb']}
+    ]}});
+    for (const environment of ['local', 'dev', 'test', 'staging', 'prod']) {
+        const files = generateOperationsFiles(model, {target: 'docker-compose', environment});
+        const root = `operations/docker-compose/${environment}`;
+        assert(!files[`${root}/docker-compose.yml`]);
+        const central = YAML.parse(files[`${root}/sites/central/docker-compose.yml`]);
+        const remote = YAML.parse(files[`${root}/sites/remote/docker-compose.yml`]);
+        assert.notEqual(central.name, remote.name);
+        assert(central.services['federation-service']);
+        assert(!central.services['dataset-service']);
+        assert(remote.services['dataset-service']);
+        assert(!remote.services['federation-service']);
+        assert.match(remote.services['dataset-service'].environment.REMOTE_API, /\?Set reachable/);
+        assert.match(files[`${root}/sites/remote/.env-example`], /REMOTE_API=/);
+        assert.deepEqual(remote.services.apisix.volumes, ['./gateway/config.yaml:/usr/local/apisix/conf/config.yaml:ro', './gateway/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro']);
+        assert.doesNotMatch(files[`${root}/sites/remote/gateway/apisix.yaml`], /federation-service/);
+        assert.doesNotMatch(files[`${root}/sites/central/infrastructure/postgres/init/01-create-databases.sql`], /dataset_service/);
+        assert.doesNotMatch(files[`${root}/sites/remote/infrastructure/postgres/init/01-create-databases.sql`], /federation_service/);
+    }
 });
 
 test('incremental image exports preserve application and dependency archives', () => {

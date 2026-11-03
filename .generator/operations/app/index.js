@@ -74,6 +74,11 @@ module.exports = class extends Generator {
             environment: this.answers.environment
         });
 
+        if (operationsModel.networkTopology?.sites?.length && ['all', 'docker-compose'].includes(target)) {
+            for (const name of ['docker-compose.yml', '.env-example']) {
+                this.fs.delete(this.destinationPath(`operations/docker-compose/${this.answers.environment}/${name}`));
+            }
+        }
         Object.entries(files).forEach(([file, content]) => {
             this.fs.write(this.destinationPath(file), content);
         });

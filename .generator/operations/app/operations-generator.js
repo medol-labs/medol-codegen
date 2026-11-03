@@ -492,6 +492,19 @@ function pushDependencyImages() {
 
 function collectComposeFiles() {
     const composeRoot = join(outputRoot, 'compose');
+    if (deploymentSites.length) {
+        for (const site of selectedSite ? [selectedSite] : deploymentSites) {
+            const source = join(monorepoRoot, 'operations/docker-compose', environment, 'sites', site.name);
+            if (!existsSync(join(source, 'docker-compose.yml'))) throw new Error('Generate Compose deployment site first: ' + source);
+            copyKnownFiles(source, join(composeRoot, 'sites', site.name), [
+                'docker-compose.yml', '.env-example', 'README.md',
+                'gateway/config.yaml', 'gateway/apisix.yaml', 'configuration/tenant-storage.yml',
+                'infrastructure/postgres/init/01-create-databases.sql',
+                ...infrastructureComponents.map((component) => 'infrastructure/' + component.name + '/init/01-create-databases.sql')
+            ]);
+        }
+        return;
+    }
     const projects = selectedProjects();
     const backendProject = projects.find((project) => project.key === 'backend');
     const frontendProjects = projects.filter((project) => project.kind === 'frontend');
@@ -512,7 +525,7 @@ function collectComposeFiles() {
 
 function copyKnownFiles(sourceRoot, targetRoot, files) {
     if (!sourceRoot) return;
-    for (const file of files) {
+    for (const file of new Set(files)) {
         const source = join(sourceRoot, file);
         if (!existsSync(source) || !statSync(source).isFile()) continue;
         const target = join(targetRoot, file);
@@ -540,7 +553,7 @@ function writeManifest() {
         projects: Object.fromEntries(selectedProjects().map((project) => [project.key, project.root])),
         archives: !siteName && deploymentSites.length > 0 ? {
             sites: Object.fromEntries(deploymentSites.map((site) => [site.name,
-                readdirSync(join(outputRoot, 'images'))
+                (dryRun && !existsSync(join(outputRoot, 'images')) ? [] : readdirSync(join(outputRoot, 'images')))
                     .filter((name) => name.startsWith(\`\${normalizeServiceName(site.name)}-\`) && name.endsWith('.tar'))
                     .map((name) => join(outputRoot, 'images', name))])),
             package: packageArchive

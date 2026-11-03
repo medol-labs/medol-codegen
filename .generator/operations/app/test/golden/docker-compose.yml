@@ -2,7 +2,6 @@ name: "learning-platform-dev"
 services:
   apisix:
     image: "${APISIX_IMAGE:-apache/apisix:3.13.0-debian}"
-    container_name: "${APISIX_CONTAINER_NAME:-apisix}"
     restart: "unless-stopped"
     ports:
       - "${GATEWAY_PORT:-9080}:9080"
@@ -18,9 +17,13 @@ services:
         condition: "service_healthy"
     networks:
       - "medol-network"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILES:-5}"
   console:
     image: "${CONSOLE_IMAGE:-medol/learning-platform-console:0.0.1-SNAPSHOT}"
-    container_name: "${CONSOLE_CONTAINER_NAME:-console}"
     restart: "unless-stopped"
     expose:
       - "80"
@@ -39,13 +42,22 @@ services:
       interval: "10s"
       timeout: "3s"
       retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILES:-5}"
   federation-service:
     image: "${FEDERATION_SERVICE_IMAGE:-medol/federation-service:0.0.1-SNAPSHOT}"
-    container_name: "${FEDERATION_SERVICE_CONTAINER_NAME:-federation-service}"
     restart: "unless-stopped"
     expose:
       - "8080"
     environment:
+      MEDOL_SECURITY_JWT_SECRET: "${MEDOL_SECURITY_JWT_SECRET:?Set MEDOL_SECURITY_JWT_SECRET}"
+      MEDOL_SECURITY_INTERNAL_TOKEN: "${MEDOL_SECURITY_INTERNAL_TOKEN:?Set MEDOL_SECURITY_INTERNAL_TOKEN}"
+      MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED: "${MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED:-false}"
+      MEDOL_SECURITY_ADMIN_BOOTSTRAP_SETUP_TOKEN: "${MEDOL_SECURITY_ADMIN_BOOTSTRAP_SETUP_TOKEN:-}"
+      MEDOL_SECURITY_ALLOWED_ORIGINS: "${MEDOL_SECURITY_ALLOWED_ORIGINS:-}"
       AXON_SERVER_ENABLED: "false"
       AXON_SERVER_EVENT_STORE_ENABLED: "false"
       AXON_SERVER_SERVERS: "${AXON_SERVER_SERVERS:-axon-server:8124}"
@@ -79,13 +91,22 @@ services:
       start_period: "30s"
     ports:
       - "${FEDERATION_SERVICE_PORT:-8080}:8080"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILES:-5}"
   dataset-service:
     image: "${DATASET_SERVICE_IMAGE:-medol/dataset-service:0.0.1-SNAPSHOT}"
-    container_name: "${DATASET_SERVICE_CONTAINER_NAME:-dataset-service}"
     restart: "unless-stopped"
     expose:
       - "8081"
     environment:
+      MEDOL_SECURITY_JWT_SECRET: "${MEDOL_SECURITY_JWT_SECRET:?Set MEDOL_SECURITY_JWT_SECRET}"
+      MEDOL_SECURITY_INTERNAL_TOKEN: "${MEDOL_SECURITY_INTERNAL_TOKEN:?Set MEDOL_SECURITY_INTERNAL_TOKEN}"
+      MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED: "${MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED:-false}"
+      MEDOL_SECURITY_ADMIN_BOOTSTRAP_SETUP_TOKEN: "${MEDOL_SECURITY_ADMIN_BOOTSTRAP_SETUP_TOKEN:-}"
+      MEDOL_SECURITY_ALLOWED_ORIGINS: "${MEDOL_SECURITY_ALLOWED_ORIGINS:-}"
       AXON_SERVER_ENABLED: "false"
       AXON_SERVER_EVENT_STORE_ENABLED: "false"
       AXON_SERVER_SERVERS: "${AXON_SERVER_SERVERS:-axon-server:8124}"
@@ -119,6 +140,11 @@ services:
       start_period: "30s"
     ports:
       - "${DATASET_SERVICE_PORT:-8081}:8081"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILES:-5}"
   postgres:
     image: "${POSTGRES_IMAGE:-postgres:16}"
     restart: "unless-stopped"
@@ -142,6 +168,11 @@ services:
       - "medol-network"
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILES:-5}"
   umadb:
     image: "${UMADB_IMAGE:-umadb/umadb:0.7.8}"
     restart: "unless-stopped"
@@ -153,6 +184,11 @@ services:
       - "medol-network"
     ports:
       - "${UMADB_PORT:-50051}:50051"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILES:-5}"
   axon-server:
     image: "${AXON_SERVER_IMAGE:-axoniq/axonserver:2026.0.3-jdk-21}"
     hostname: "axon-server"
@@ -179,6 +215,12 @@ services:
       start_period: "30s"
     networks:
       - "medol-network"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILES:-5}"
+    restart: "unless-stopped"
 networks:
   medol-network:
     driver: "bridge"

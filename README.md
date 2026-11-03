@@ -319,6 +319,13 @@ gen /opt/codegen/.generator/app/ --generator refine --generator-type all
 
 ## Generate operations artifacts
 
+When `networkTopology.sites` is configured, Compose also follows those deployment
+boundaries: `operations/docker-compose/<environment>/sites/<site>/` contains one
+self-contained project, local gateway configuration and site-specific database
+initialization files. The environment root is an index, not a combined release.
+Each site's remote service URLs must be configured through its private `.env`.
+With no modeled sites, the conventional combined Compose output remains available.
+
 The `operations` generator reads the same `codegen-model.json` and derives an intermediate `OperationsModel` before rendering platform files. The model keeps application topology, infrastructure, gateway routes, images, ports, health checks, environment defaults, and per-environment overrides separate from renderer-specific details.
 
 Run generators from the generated system root. By default the generator reads

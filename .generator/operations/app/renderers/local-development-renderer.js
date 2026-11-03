@@ -3,7 +3,7 @@ const {dockerComposeFiles} = require('./docker-compose-renderer');
 
 function localDevelopmentFiles(model) {
     const root = 'operations/local';
-    const original = dockerComposeFiles(model, 'local', {root});
+    const original = dockerComposeFiles(model, 'local', {root, combined: true});
     const compose = YAML.parse(original[`${root}/docker-compose.yml`]);
     const infrastructure = new Set(model.infrastructure.map((component) => component.name));
     compose.name = `${model.name}-host-local`;

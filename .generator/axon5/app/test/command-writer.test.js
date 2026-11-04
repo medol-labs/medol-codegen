@@ -299,8 +299,9 @@ test('writes import support for importable commands', () => {
     assert.match(service, /fun writeFailureIndex/);
     assert.match(service, /failure-index\.csv/);
     assert.match(processor, /fun on\(event: DataImportRequestedEvent, message: EventMessage\)/);
-    assert.match(processor, /userId = MetadataFactory\.value\(message\.metadata\[MetadataKeys\.USER_ID\]\?\.toString\(\)\)/);
-    assert.doesNotMatch(processor, /lifecyclePort\.markProcessing/);
+    assert.match(processor, /userId = MetadataFactory\.value\(message\.metadata\(\)\[MetadataKeys\.USER_ID\]\?\.toString\(\)\)/);
+    assert(processor.indexOf('lifecyclePort.markProcessing(event.dataImportJobId, 0L)') >= 0);
+    assert(processor.indexOf('lifecyclePort.markProcessing(') < processor.indexOf('registry.executor('));
     assert.match(executor, /override val commandName: String = "ImportRuntimeNodeInventory"/);
     assert.match(executor, /runtimeNodeInventoryId = dataImportService\.uuid\(row, "runtimeNodeInventoryId", true\)!!/);
     assert.match(executor, /nodeReady = dataImportService\.boolean\(row, "nodeReady", false\)/);
@@ -309,4 +310,27 @@ test('writes import support for importable commands', () => {
     assert.match(executor, /rowHash = rowHash/);
     assert.match(executor, /errorCode = ex\.javaClass\.simpleName/);
     assert.doesNotMatch(executor, /rawValue = row\.toString\(\)/);
+});
+
+test('selection snapshots use their sibling ID, with one lookup and a consistency check', () => {
+    const command = {id: 'add', name: 'AddValue', title: 'Add Value', startsLifecycle: true, fields: [
+        {name: 'valueId', type: 'UUID', idAttribute: true},
+        {name: 'catalogId', type: 'UUID', source: {kind: 'direct', from: ['Catalog.catalogId']}},
+        {name: 'catalogCode', type: 'String', source: {kind: 'direct', from: ['Catalog.code']}}
+    ]};
+    const slice = {id: 'add', name: 'AddValue', title: 'Add Value', context: 'Examples', concepts: ['Value'], commands: [command], events: []};
+    const catalog = {name: 'Catalog', title: 'Catalog', context: 'Examples', readmodels: [{name: 'Catalog', title: 'Catalog', fields: [
+        {name: 'catalogId', type: 'UUID', idAttribute: true}, {name: 'code', type: 'String'}, {name: 'active', type: 'Boolean'}
+    ], eligibility: [{conditions: [{left: 'Catalog.active', operator: '==', right: true}]}]}]};
+    const model = {rootPackage: 'example', slices: [slice, catalog], concepts: [], transitions: []};
+    let output;
+    const writer = {model, fs: {write: (_, code) => { output = code; }}, _kotlinPath: path => path};
+    const generate = () => commandWriterMethods._writeCommandHandlers.call(writer, 'example.examples.addvalue', 'examples', 'addvalue', slice, selectionFor(slice, model), [], []);
+    generate();
+    assert.equal((output.match(/val catalogReadModelSelection =/g) ?? []).length, 1);
+    assert.match(output, /findById\(command.catalogId\)/);
+    assert.doesNotMatch(output, /findById\(command.catalogCode\)/);
+    assert.match(output, /catalogReadModelSelection.code == command.catalogCode/);
+    command.fields = command.fields.filter(field => field.name !== 'catalogId');
+    assert.throws(generate, /one unambiguous scalar ID field/);
 });

@@ -598,7 +598,8 @@ test('writes export support for exportable read models', () => {
     assert.match(processor, /AxonDataExportJobRequestPort\.DEPLOYMENT_NAME/);
     assert.match(processor, /requestedAt = event\.requestedAt\.toInstant\(ZoneOffset\.UTC\)/);
     assert.match(processor, /snapshotUpperBound = event\.snapshotUpperBound\.toInstant\(ZoneOffset\.UTC\)/);
-    assert.doesNotMatch(processor, /lifecyclePort\.markProcessing/);
+    assert(processor.indexOf('lifecyclePort.markProcessing(event.dataExportJobId)') >= 0);
+    assert(processor.indexOf('lifecyclePort.markProcessing(') < processor.indexOf('registry.executor('));
     assert.match(processor, /registry\.executor\(event\.resourceName\)\.execute\(task\)/);
     assert.match(processor, /lifecyclePort\.complete\(event\.dataExportJobId, result\.fileName, result\.filePath, result\.rowCount\)/);
     assert.doesNotMatch(processor, /outbox|DataExportWorker|DataExportJobWorkPort/);

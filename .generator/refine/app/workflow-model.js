@@ -868,7 +868,7 @@ function hasExplicitReadModelSource(field) {
 }
 
 function stateControlForTransition(transition, readModel) {
-    const allowedStates = normalizeArray(transition?.from).filter(Boolean);
+    const allowedStates = unique(normalizeArray(transition?.fromStates?.length ? transition.fromStates : transition?.from).filter(Boolean));
     const conceptName = transition?.owner?.name ?? transition?.owner?.title;
     return {
         allowedStates,
@@ -935,7 +935,7 @@ function stateFieldForReadModel(readModel, conceptName, transition) {
 
 function workflowTokensForTransition(transition) {
     return unique([
-        ...normalizeArray(transition?.from),
+        ...normalizeArray(transition?.fromStates?.length ? transition.fromStates : transition?.from),
         transition?.to
     ].filter(Boolean)
         .flatMap(splitWorkflowStateName)

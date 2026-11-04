@@ -1,0 +1,8 @@
+import operation-audit as Audit deploy Support
+context Records {
+  slice RecordChange {
+    command ChangeRecord { recordId: UUID id }
+    event RecordChanged { recordId: UUID id }
+  }
+}
+deployment Support { includes Records }

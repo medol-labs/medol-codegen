@@ -3,7 +3,6 @@
  * Licensed under the MIT License.
  */
 
-const {AUDIT_TRAIL_PROCESSING_GROUP} = require('./axon-processing');
 
 function writeMetadataSupport(generator) {
         const tenancy = Boolean(generator.model.tenancy);
@@ -45,16 +44,17 @@ import jakarta.servlet.http.HttpServletRequest
 import org.axonframework.messaging.core.Metadata
 import java.util.UUID
 ${tenancy ? `import ${generator.model.rootPackage}.shared.application.tenancy.TenantScope\n` : ''}
-${tenancy ? `import ${generator.model.rootPackage}.shared.security.CurrentUser\nimport org.springframework.security.core.context.SecurityContextHolder\n` : ''}
+import ${generator.model.rootPackage}.shared.security.CurrentUser
+import org.springframework.security.core.context.SecurityContextHolder
 
 object MetadataFactory {
     const val DEFAULT_USER_ID = "anonymous"
 
     fun from(request: HttpServletRequest): Metadata {
-        val correlationId = header(request, MetadataHeaders.CORRELATION_ID) ?: UUID.randomUUID().toString()
+        val correlationId = header(request, MetadataHeaders.CORRELATION_ID) ?: request.getAttribute("medol.audit.correlationId")?.toString() ?: UUID.randomUUID().toString()
         val values = linkedMapOf<String, String?>()
 
-        put(values, MetadataKeys.USER_ID, ${tenancy ? 'TenantScope.current()?.userId ?: (SecurityContextHolder.getContext().authentication?.principal as? CurrentUser)?.id?.toString() ?: request.userPrincipal?.name ?: DEFAULT_USER_ID' : 'header(request, MetadataHeaders.USER_ID) ?: request.userPrincipal?.name ?: DEFAULT_USER_ID'})
+        put(values, MetadataKeys.USER_ID, ${tenancy ? 'TenantScope.current()?.userId ?: ' : ''}(SecurityContextHolder.getContext().authentication?.principal as? CurrentUser)?.id?.toString() ?: request.userPrincipal?.name ?: DEFAULT_USER_ID)
         put(values, MetadataKeys.SESSION_ID, header(request, MetadataHeaders.SESSION_ID) ?: request.requestedSessionId ?: request.getSession(false)?.id ?: UUID.randomUUID().toString())
         put(values, MetadataKeys.CORRELATION_ID, correlationId)
         put(values, MetadataKeys.CAUSATION_ID, header(request, MetadataHeaders.CAUSATION_ID) ?: correlationId)
@@ -223,138 +223,17 @@ class MetadataCommandInterceptor : MessageDispatchInterceptor<CommandMessage> {
     }
 }
 `);
-        generator.fs.write(generator._sharedKernelKotlinPath('shared/application/metadata/AuditLogEntry.kt'), `package ${generator.model.rootPackage}.shared.application.metadata
-
-import jakarta.persistence.Column
-import jakarta.persistence.Entity
-import jakarta.persistence.GeneratedValue
-import jakarta.persistence.GenerationType
-import jakarta.persistence.Id
-import jakarta.persistence.Lob
-import jakarta.persistence.Table
-import java.time.Instant
-
-@Entity
-@Table(name = "audit_log"${tenancy ? ', schema = "__medol_control__"' : ''})
-class AuditLogEntry {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    var id: Long? = null
-
-    var userId: String? = null
-    var sessionId: String? = null
-    var correlationId: String? = null
-    var causationId: String? = null
-    var traceId: String? = null
-    var tenantId: String? = null
-
-    @Column(name = "event_type")
-    var eventType: String? = null
-
-    @Column(name = "event_timestamp")
-    var timestamp: Instant? = null
-
-    @Lob
-    @Column(columnDefinition = "TEXT")
-    var payload: String? = null
-}
-`);
-        generator.fs.write(generator._sharedKernelKotlinPath('shared/application/metadata/AuditLogRepository.kt'), `package ${generator.model.rootPackage}.shared.application.metadata
-
-import org.springframework.data.domain.Page
-import org.springframework.data.domain.Pageable
-import org.springframework.data.jpa.repository.JpaRepository
-${tenancy ? 'import org.springframework.data.jpa.repository.JpaSpecificationExecutor\n' : ''}
-
-${tenancy ? `@${generator.model.rootPackage}.shared.application.tenancy.TenantControlRepository\n` : ''}\
-interface AuditLogRepository : JpaRepository<AuditLogEntry, Long>${tenancy ? ', JpaSpecificationExecutor<AuditLogEntry>' : ''} {
-    fun findAllByCorrelationId(correlationId: String, pageable: Pageable): Page<AuditLogEntry>
-    fun findAllByUserId(userId: String, pageable: Pageable): Page<AuditLogEntry>
-    fun findAllBySessionId(sessionId: String, pageable: Pageable): Page<AuditLogEntry>
-    fun findAllByTraceId(traceId: String, pageable: Pageable): Page<AuditLogEntry>
-    fun findAllByTenantId(tenantId: String, pageable: Pageable): Page<AuditLogEntry>
-}
-`);
-        generator.fs.write(generator._sharedKernelKotlinPath('shared/application/metadata/AuditTrailProjection.kt'), `package ${generator.model.rootPackage}.shared.application.metadata
-
-import com.fasterxml.jackson.databind.ObjectMapper
-import org.axonframework.messaging.eventhandling.EventMessage
-import org.axonframework.messaging.eventhandling.annotation.EventHandler
-import org.axonframework.messaging.core.annotation.Namespace
-import org.springframework.stereotype.Component
-
-@Namespace("${AUDIT_TRAIL_PROCESSING_GROUP}")
-@Component
-class AuditTrailProjection(
-    private val repository: AuditLogRepository,
-    private val objectMapper: ObjectMapper
-) {
-    @EventHandler
-    fun on(event: Any, message: EventMessage) {
-        val metadata = message.metadata()
-        val entry = AuditLogEntry().apply {
-            userId = metadata[MetadataKeys.USER_ID]
-            sessionId = metadata[MetadataKeys.SESSION_ID]
-            correlationId = metadata[MetadataKeys.CORRELATION_ID]
-            causationId = metadata[MetadataKeys.CAUSATION_ID]
-            traceId = metadata[MetadataKeys.TRACE_ID]
-            tenantId = metadata[MetadataKeys.TENANT_ID]
-            eventType = event::class.simpleName ?: event.javaClass.simpleName
-            timestamp = message.timestamp()
-            payload = objectMapper.writeValueAsString(event)
+        // Remove only legacy generated sources; retain historical database tables/data.
+        for (const file of ['AuditLogEntry.kt', 'AuditLogRepository.kt', 'AuditTrailProjection.kt', 'AuditTrailResource.kt']) {
+            generator.fs.delete(generator._sharedKernelKotlinPath(`shared/application/metadata/${file}`));
         }
-
-        repository.save(entry)
-    }
-}
-`);
-        generator.fs.write(generator._sharedKernelKotlinPath('shared/application/metadata/AuditTrailResource.kt'), `package ${generator.model.rootPackage}.shared.application.metadata
-
-import org.springframework.data.domain.Page
-import org.springframework.data.domain.Pageable
-import org.springframework.data.web.PageableDefault
-import org.springframework.web.bind.annotation.CrossOrigin
-import org.springframework.web.bind.annotation.GetMapping
-import org.springframework.web.bind.annotation.RequestMapping
-import org.springframework.web.bind.annotation.RequestParam
-import org.springframework.web.bind.annotation.RestController
-
-@CrossOrigin
-@RestController
-@RequestMapping("/audit-trail")
-class AuditTrailResource(private val repository: AuditLogRepository) {
-${tenancy ? '    @org.springframework.security.access.prepost.PreAuthorize("hasAuthority(\'*:*\') or hasAuthority(\'audit-trail:read\')")\n' : ''}\
-    @GetMapping
-    fun findAll(
-        @RequestParam(required = false) correlationId: String?,
-        @RequestParam(required = false) userId: String?,
-        @RequestParam(required = false) sessionId: String?,
-        @RequestParam(required = false) traceId: String?,
-        @RequestParam(required = false) tenantId: String?,
-        @PageableDefault(size = 20) pageable: Pageable
-    ): Page<AuditLogEntry> =
-${tenancy ? `        run {
-        val verifiedTenant = ${generator.model.rootPackage}.shared.application.tenancy.TenantScope.requireTenant()
-        repository.findAll(org.springframework.data.jpa.domain.Specification<AuditLogEntry> { root, _, builder ->
-            val predicates = mutableListOf(builder.equal(root.get<String>("tenantId"), verifiedTenant))
-            correlationId?.let { predicates.add(builder.equal(root.get<String>("correlationId"), it)) }
-            userId?.let { predicates.add(builder.equal(root.get<String>("userId"), it)) }
-            sessionId?.let { predicates.add(builder.equal(root.get<String>("sessionId"), it)) }
-            traceId?.let { predicates.add(builder.equal(root.get<String>("traceId"), it)) }
-            builder.and(*predicates.toTypedArray())
-        }, pageable)
-        }` : `        when {
-            !correlationId.isNullOrBlank() -> repository.findAllByCorrelationId(correlationId, pageable)
-            !userId.isNullOrBlank() -> repository.findAllByUserId(userId, pageable)
-            !sessionId.isNullOrBlank() -> repository.findAllBySessionId(sessionId, pageable)
-            !traceId.isNullOrBlank() -> repository.findAllByTraceId(traceId, pageable)
-            !tenantId.isNullOrBlank() -> repository.findAllByTenantId(tenantId, pageable)
-            else -> repository.findAll(pageable)
-        }`}
-}
-`);
+        if (generator.model.operationAudit) {
+            generator.fs.copyTpl(generator.templatePath('operation-audit/OperationExecutionRecorded.kt.tpl'),
+                generator._sharedKernelKotlinPath('shared/application/metadata/OperationExecutionRecorded.kt'),
+                {rootPackage: generator.model.rootPackage});
+        } else {
+            generator.fs.delete(generator._sharedKernelKotlinPath('shared/application/metadata/OperationExecutionRecorded.kt'));
+        }
 }
 
-module.exports = {
-    writeMetadataSupport
-};
+module.exports = { writeMetadataSupport };

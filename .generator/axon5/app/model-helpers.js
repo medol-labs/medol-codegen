@@ -511,9 +511,15 @@ function outboundEvents(command, events) {
 }
 
 function transitionForCommand(model, command) {
-    return (model.transitions ?? []).find((transition) =>
-        transition.command?.id === command.id || transition.command?.name === command.name
-    );
+    const transitions = model.transitions ?? [];
+    if (command.id) {
+        const exact = transitions.find(transition => transition.command?.id === command.id);
+        if (exact) return exact;
+    }
+    const candidates = transitions.filter(transition => transition.command?.name === command.name
+        && (!command.modelContext || transition.context === command.modelContext)
+        && (!command.id || !transition.command?.id));
+    return candidates.length === 1 ? candidates[0] : undefined;
 }
 
 function commandStartsLifecycle(command) {

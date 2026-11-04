@@ -90,55 +90,6 @@ const {infrastructurePortForCommand} = require('./infrastructure-port-writer');
 const {tenantScoped} = require('./tenant-support');
 const {renderCommandAssertions} = require('./command-assertions');
 
-function normalizeOutcomeName(value) {
-    return String(value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-function semanticOutcomeWords(value) {
-    const synonyms = {
-        failure: 'failed',
-        fail: 'failed',
-        fails: 'failed',
-        failing: 'failed',
-        installation: 'deployment',
-        installed: 'deployment',
-        install: 'deployment',
-        succeeded: 'ready',
-        success: 'ready',
-        established: 'connected'
-    };
-    return String(value ?? '')
-        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-        .replace(/[^A-Za-z0-9]+/g, ' ')
-        .trim()
-        .split(/\s+/)
-        .filter(Boolean)
-        .map((word) => word.toLowerCase())
-        .map((word) => synonyms[word] ?? word);
-}
-
-function bestStateForEvent(event, states) {
-    const eventName = normalizeOutcomeName(`${event.name} ${event.title}`);
-    const direct = states.find((state) => eventName.includes(normalizeOutcomeName(state)));
-    if (direct) {
-        return direct;
-    }
-
-    const eventWords = semanticOutcomeWords(`${event.name} ${event.title}`);
-    const ranked = states
-        .map((state) => {
-            const stateWords = semanticOutcomeWords(state);
-            const overlap = stateWords.filter((word) => eventWords.includes(word)).length;
-            const extraStateWords = stateWords.filter((word) => !eventWords.includes(word)).length;
-            return {
-                state,
-                score: overlap * 3 - extraStateWords
-            };
-        })
-        .sort((left, right) => right.score - left.score || left.state.length - right.state.length);
-    return ranked[0]?.score > 0 ? ranked[0].state : undefined;
-}
-
 function selectionTagValueExpression(field) {
     const value = `selection.${field.alias}`;
     return valueTypeForField(field)?.kind === 'scalar'
@@ -260,7 +211,8 @@ ${properties}${scoped ? `,\n    @EventTag(key = "__medol_tenant")\n    val medol
         const concept = primaryConcept(slice);
         const childTransitionByEventId = new Map(childTransitions.map((transition) => [transition.eventId, transition]));
         const transitionByEventId = new Map((this.model.transitions ?? [])
-            .filter((transition) => transition.owner?.name === concept)
+            .filter((transition) => transition.owner?.name === concept
+                && (!transition.context || transition.context === slice.context))
             .filter((transition) => transition.event?.id)
             .map((transition) => [transition.event.id, transition]));
         const hasChildMemberState = childTransitions.length > 0;
@@ -282,15 +234,8 @@ ${properties}${scoped ? `,\n    @EventTag(key = "__medol_tenant")\n    val medol
         const sourcingHandlers = events.map((event) => {
             const transition = childTransitionByEventId.get(event.id);
             const stateTransition = transitionByEventId.get(event.id);
-            const inferredState = hasConceptState && !stateTransition
-                ? bestStateForEvent(event, (this.model.concepts ?? [])
-                    .find((candidate) => candidate.name === concept && (!slice.context || candidate.context === slice.context))
-                    ?.states
-                    ?? [])
-                : undefined;
             const assignments = [
                 ...(hasConceptState && stateTransition && stateTransition.from !== stateTransition.to && !transition && conceptHasState(this.model, slice.context, concept, stateTransition.to) ? [`        currentState = ${stateEnumName}.${stateEnumEntry(stateTransition.to)}`] : []),
-                ...(hasConceptState && inferredState && !transition ? [`        currentState = ${stateEnumName}.${stateEnumEntry(inferredState)}`] : []),
                 ...event.fields
                     .filter((field) => !(transition?.keyField && field.name === transition.keyField))
                     .map((field) => `        ${field.name} = event.${field.name}`),

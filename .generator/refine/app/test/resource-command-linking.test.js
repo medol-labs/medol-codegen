@@ -1825,3 +1825,14 @@ test('keeps dictionary state filters aligned with modeled state values', () => {
     ]);
     assert.equal(fields.selects.get('modelFormat')?.optionI18nPrefix, 'dictionaries.MODEL_FORMAT.');
 });
+
+
+test('state-preserving workflow guards retain every modeled source state', () => {
+    const {stateControlForTransition} = require('../workflow-model');
+    const control = stateControlForTransition({owner: {name: 'StoredFile'}, from: 'Available', fromStates: ['Available', 'Referenced']}, {
+        fields: [{name: 'state', type: 'StoredFile.State'}]
+    });
+    assert.deepEqual(control.allowedStates, ['Available', 'Referenced']);
+    assert.equal(control.targetState, undefined);
+    assert.equal(control.stateField, 'state');
+});

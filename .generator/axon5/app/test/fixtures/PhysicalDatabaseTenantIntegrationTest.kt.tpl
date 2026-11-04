@@ -35,8 +35,7 @@ class PhysicalDatabaseTenantIntegrationTest @Autowired constructor(
     private val defaults: org.springframework.boot.autoconfigure.jdbc.DataSourceProperties,
     private val business: TenantBusinessConnections, private val execution: TenantExecution,
     private val manager: PlatformTransactionManager, private val factory: jakarta.persistence.EntityManagerFactory, private val records: RecordCatalogReadModelRepository,
-    private val jdbc: JdbcTemplate, private val gateway: CommandGateway, private val probe: ControlProbe,
-    private val audit: <%= rootPackage %>.shared.application.metadata.AuditLogRepository
+    private val jdbc: JdbcTemplate, private val gateway: CommandGateway, private val probe: ControlProbe
 ) {
 <%- tenantFixture %>
     @org.springframework.boot.test.context.TestConfiguration(proxyBeanMethods = false)
@@ -118,7 +117,6 @@ class PhysicalDatabaseTenantIntegrationTest @Autowired constructor(
                 assertEquals(1, probe.count())
                 assertEquals("test-tenant", probe.logicalTenant())
                 assertEquals("test-tenant", access.verify("test-tenant", "test-user").tenantId)
-                assertDoesNotThrow { audit.count() }
                 assertEquals("test-tenant", TenantScope.requireTenant())
                 records.findById(UUID.randomUUID())
             }

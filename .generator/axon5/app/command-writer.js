@@ -184,11 +184,28 @@ function eligibilityGuardsForCommand(model, command, slice, warningsTarget) {
             slice: candidateSlice,
             context: candidateSlice.context ?? candidateSlice.chapter
         })));
-    return (command.fields ?? [])
+    const guards = (command.fields ?? [])
         .filter((field) => field?.source?.kind === 'direct')
         .flatMap((field) => normalizeArray(field?.source?.from).map((source) => ({field, source: String(source)})))
         .map(({field, source}) => eligibilityGuardForField(model, command, slice, field, source, readModels, warningsTarget))
         .filter(Boolean);
+    const grouped = new Map();
+    for (const guard of guards) {
+        const key = `${guard.repositoryImport}/${guard.lookupField.name}`;
+        const existing = grouped.get(key);
+        if (existing) existing.snapshotChecks.push(...guard.snapshotChecks);
+        else grouped.set(key, guard);
+    }
+    const result = [...grouped.values()];
+    const variableCounts = new Map();
+    for (const guard of result) variableCounts.set(guard.projectionVariable, (variableCounts.get(guard.projectionVariable) ?? 0) + 1);
+    for (const guard of result) {
+        if (variableCounts.get(guard.projectionVariable) > 1) {
+            // Different IDs may select two different rows of the same catalog.
+            guard.projectionVariable += pascal(guard.lookupField.name);
+        }
+    }
+    return result;
 }
 
 function eligibilityGuardForField(model, command, slice, field, source, readModels, warningsTarget) {
@@ -223,6 +240,30 @@ function eligibilityGuardForField(model, command, slice, field, source, readMode
         if (tenantReference) throw new Error('Tenant selection eligibility cannot be mapped to its projection fields.');
         return null;
     }
+    const idFields = (info.readmodel.fields ?? []).filter(candidate => candidate.idAttribute || candidate.id);
+    if (idFields.length !== 1) throw new Error(`Selection ${source} requires a projection with one modeled ID field.`);
+    const idField = idFields[0];
+    let lookupField = field;
+    const snapshotChecks = [];
+    if (sourceField !== idField.name) {
+        const siblings = (command.fields ?? []).filter(candidate => candidate.source?.kind === 'direct'
+            && normalizeArray(candidate.source.from).some(reference => {
+                const parts = String(reference).split('.');
+                const name = parts.pop();
+                const owner = parts.pop();
+                const context = parts.join('.');
+                return name === idField.name && readModelMatchesSource(info.readmodel, owner)
+                    && (!context || context === info.context);
+            }));
+        if (siblings.length !== 1 || siblings[0].cardinality === 'Multiple' || field.cardinality === 'Multiple') {
+            throw new Error(`Selection ${source} needs one unambiguous scalar ID field from the same projection in command ${command.name}.`);
+        }
+        lookupField = siblings[0];
+        snapshotChecks.push(`${sourceField} == ${readModelStorageExpression(field, `command.${field.name}`)}`);
+    }
+    if (lookupField.cardinality === 'Multiple') {
+        throw new Error(`Collection selection ${command.name}.${lookupField.name} requires per-item eligibility validation; it cannot use a scalar lookup.`);
+    }
     const readModelName = _readmodelTitle(info.readmodel.title);
     const repositoryName = `${readModelName}Repository`;
     const repositoryVariable = lowerCamel(repositoryName);
@@ -231,6 +272,8 @@ function eligibilityGuardForField(model, command, slice, field, source, readMode
     return {
         rootPackage: model.rootPackage,
         field,
+        lookupField,
+        snapshotChecks,
         readmodel: info.readmodel,
         repositoryName,
         repositoryVariable,
@@ -357,14 +400,15 @@ function eligibilityConditionText(condition) {
 }
 
 function renderEligibilityGuard(guard) {
-    const checks = guard.conditions
-        .map((condition) => `${guard.projectionVariable}.${condition.expression}`)
-        .join(' && ') || 'true';
-    const lookup = guard.field.optional
-        ? `command.${guard.field.name}?.let { ${guard.repositoryVariable}.findById(it) }`
-        : `${guard.repositoryVariable}.findById(command.${guard.field.name})`;
-    const requireExpression = guard.field.optional
-        ? `command.${guard.field.name} == null || (${guard.projectionVariable} != null && ${checks})`
+    const checks = [
+        ...guard.conditions.map((condition) => `${guard.projectionVariable}.${condition.expression}`),
+        ...guard.snapshotChecks.map(check => `${guard.projectionVariable}.${check}`)
+    ].join(' && ') || 'true';
+    const lookup = guard.lookupField.optional
+        ? `command.${guard.lookupField.name}?.let { ${guard.repositoryVariable}.findById(it) }`
+        : `${guard.repositoryVariable}.findById(command.${guard.lookupField.name})`;
+    const requireExpression = guard.lookupField.optional
+        ? `command.${guard.lookupField.name} == null || (${guard.projectionVariable} != null && ${checks})`
         : `${guard.projectionVariable} != null && ${checks}`;
     return `        val ${guard.projectionVariable} = ${lookup}
         if (!(${requireExpression})) {
@@ -1126,15 +1170,23 @@ ${this.model.tenancy ? `        digest.update(${this.model.rootPackage}.shared.a
         }
         this._dataImportJobAxonPortsWritten = true;
         const packageName = `${this.model.rootPackage}.dataexchange.dataimportjob`;
+        const lifecycleCommandNames = ['RequestDataImport', 'MarkDataImportProcessing', 'CompleteDataImport', 'FailDataImport'];
+        const lifecycleCommandImports = lifecycleCommandNames.map((name) => {
+            const owner = (this.model.slices ?? []).find((candidate) =>
+                candidate.context === 'DataExchange' && (candidate.commands ?? []).some((command) => command.name === name));
+            // Older models keep all lifecycle commands in the job slice.
+            const commandPackage = owner
+                ? `${this.model.rootPackage}.${contextPackage(owner.context)}.${_sliceTitle(owner.title ?? owner.name)}`
+                : packageName;
+            return `import ${commandPackage}.${name}Command`;
+        }).join('\n');
+
         this.fs.write(this._kotlinPath('dataexchange/dataimportjob/DataImportJobPorts.kt'), `package ${packageName}
 
 import org.axonframework.messaging.commandhandling.gateway.CommandGateway
 import org.axonframework.messaging.core.Metadata
 import org.springframework.stereotype.Component
-import ${this.model.rootPackage}.dataexchange.dataimportjob.RequestDataImportCommand
-import ${this.model.rootPackage}.dataexchange.dataimportjob.MarkDataImportProcessingCommand
-import ${this.model.rootPackage}.dataexchange.dataimportjob.CompleteDataImportCommand
-import ${this.model.rootPackage}.dataexchange.dataimportjob.FailDataImportCommand
+${lifecycleCommandImports}
 import ${this.model.rootPackage}.shared.application.importing.DataImportJobLifecyclePort
 import ${this.model.rootPackage}.shared.application.importing.DataImportJobRequestMessage
 import ${this.model.rootPackage}.shared.application.importing.DataImportJobRequestPort
@@ -1251,14 +1303,15 @@ ${this.model.tenancy ? `        ${this.model.rootPackage}.shared.application.ten
             requestedLocale = event.requestedLocale,
             requestedAt = event.requestedAt.toInstant(ZoneOffset.UTC),
             requestHash = event.requestHash,
-            userId = MetadataFactory.value(message.metadata[MetadataKeys.USER_ID]?.toString()),
-            sessionId = MetadataFactory.value(message.metadata[MetadataKeys.SESSION_ID]?.toString()),
-            correlationId = MetadataFactory.value(message.metadata[MetadataKeys.CORRELATION_ID]?.toString()),
-            causationId = MetadataFactory.value(message.metadata[MetadataKeys.CAUSATION_ID]?.toString()),
-            traceId = MetadataFactory.value(message.metadata[MetadataKeys.TRACE_ID]?.toString()),
-            tenantId = MetadataFactory.value(message.metadata[MetadataKeys.TENANT_ID]?.toString())
+            userId = MetadataFactory.value(message.metadata()[MetadataKeys.USER_ID]?.toString()),
+            sessionId = MetadataFactory.value(message.metadata()[MetadataKeys.SESSION_ID]?.toString()),
+            correlationId = MetadataFactory.value(message.metadata()[MetadataKeys.CORRELATION_ID]?.toString()),
+            causationId = MetadataFactory.value(message.metadata()[MetadataKeys.CAUSATION_ID]?.toString()),
+            traceId = MetadataFactory.value(message.metadata()[MetadataKeys.TRACE_ID]?.toString()),
+            tenantId = MetadataFactory.value(message.metadata()[MetadataKeys.TENANT_ID]?.toString())
         )
         try {
+            lifecyclePort.markProcessing(event.dataImportJobId, 0L)
             val result = registry.executor(event.commandName).execute(task)
             lifecyclePort.complete(event.dataImportJobId, result.totalRows, result.successRows, result.failedRows, result.failureIndexPath)
         } catch (ex: Exception) {

@@ -3,7 +3,7 @@ const test = require('node:test');
 const {processorWriterMethods} = require('../processor-writer');
 const {configureValueTypes} = require('../../../common/util/value-types');
 
-for (const tenantEnabled of [false, true]) test(`writes system notification processors with tenant mode ${tenantEnabled}`, () => {
+for (const tenantEnabled of [false, true]) for (const businessCategory of [true, false]) test(`writes system notification processors with tenant mode ${tenantEnabled}, business category ${businessCategory}`, () => {
     const model = {
         rootPackage: 'tech.medo',
         contexts: [
@@ -11,7 +11,7 @@ for (const tenantEnabled of [false, true]) test(`writes system notification proc
             {name: 'SystemNotification'}
         ],
         valueTypes: [
-            {name: 'NotificationCategory', context: 'SystemNotification', kind: 'enum', baseType: 'String', values: ['SYSTEM', 'TRAINING']},
+            {name: 'NotificationCategory', context: 'SystemNotification', kind: 'enum', baseType: 'String', values: businessCategory ? ['SYSTEM', 'TRAINING'] : ['SYSTEM', 'DATA_EXCHANGE', 'SECURITY']},
             {name: 'NotificationSeverity', context: 'SystemNotification', kind: 'enum', baseType: 'String', values: ['INFO', 'SUCCESS', 'ERROR']},
             {name: 'NotificationToastPolicy', context: 'SystemNotification', kind: 'enum', baseType: 'String', values: ['NONE', 'DEFAULT', 'IMPORTANT']}
         ],
@@ -77,7 +77,7 @@ for (const tenantEnabled of [false, true]) test(`writes system notification proc
         assert.doesNotMatch(processor, /message.metadata\(\)/);
     }
     assert.match(processor, /PublishSystemNotificationCommand/);
-    assert.match(processor, /category = NotificationCategory\.TRAINING/);
+    assert(processor.includes(`category = NotificationCategory.${businessCategory ? 'TRAINING' : 'SYSTEM'}`));
     assert.match(processor, /severity = NotificationSeverity\.SUCCESS/);
     assert.match(processor, /messageKey = "notifications.trainingJobCompleted"/);
     assert.match(processor, /objectMapper\.writeValueAsString\(mapOf\("trainingJobId" to event\.trainingJobId, "trainingJobObjective" to event\.trainingJobObjective\)\)/);

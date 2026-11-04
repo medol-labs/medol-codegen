@@ -1126,3 +1126,18 @@ concept FederationMembership {
 ```
 
 This generates a composite Axon entity selection and matching event tags. If a slice does not declare `tags`, the Axon 5 generator now falls back to all command fields marked `id`; if there are no `id` fields, it falls back to the first command field.
+
+
+## Operation audit (Axon 5)
+
+Import `operation-audit` into each backend deployment that should collect operations. MEDOL exports an explicit `operationAudit` contract. Refine generates a read-only catalog; the backend generates a single `AuditTrailProjection` and operation capture interceptors. A same-named user context does not enable this infrastructure.
+
+Command/query completion and HTTP boundaries publish `OperationExecutionRecorded` to Axon's `EventStore`, independently of the business ProcessingContext and transaction. Publication uses `REQUIRES_NEW` and deliberately passes a null processing context, so rejected commands do not roll back their audit events. Persistent storage must be configured for restart durability; `inmemory` remains a development-only store. Event publication failure is logged without changing the original operation result; no durable outbox covers failure before append.
+
+The streaming `AuditTrailProjection` consumes operation-result events and business event types declared in the deployment model into the same catalog. Operation-result events are filtered by their originating deployment; business event subscriptions are generated from the model, because Axon 5 does not treat an Any/Object handler as a wildcard. Deployment-scoped v2 processor names avoid sharing tokens with the legacy projector or other deployments. Stable IDs prevent duplicate rows on replay; projection failures propagate to Axon for retry. Audit events are not treated as additional business-event audit rows, and the projection publishes no further events. Metadata is stored, not full business payloads.
+
+The generator removes legacy generated `AuditLogEntry`, `AuditLogRepository`, `AuditTrailProjection`, and `/audit-trail` resource sources. Historical `audit_log` data is retained, not automatically migrated. Use a clean build when regenerating so obsolete class files cannot stay registered. The new readmodel permissions replace the old endpoint permission. With tenancy enabled, the catalog and operation-result event publication use the control plane; audit access is platform-wide.
+
+Runtime regression fixture: `.generator/axon5/app/test/fixtures/OperationAuditRuntimeTest.kt.tpl`. Generate a temporary backend importing the capability, replace `<%= rootPackage %>` with its configured package, and copy the fixture to `src/test/kotlin/<package path>/auditcheck/OperationAuditRuntimeTest.kt`. Run `mvn -Dtest=OperationAuditRuntimeTest clean test`. The fixture exercises real Axon UnitOfWork callbacks, EventStore publication and replay, H2 transactions, failed projections, and synchronous/asynchronous HTTP outcomes.
+
+For a full Spring/Axon streaming check, export `test/fixtures/operation-audit.medol` (under the Axon5 app directory) using MEDOL, generate a backend, and render `OperationAuditSpringTest.kt.tpl` into its test sources. Run `mvn -Dtest=OperationAuditSpringTest clean test`. This starts the generated application with H2 and an in-memory Axon event store, verifies JSON serialization, and verifies that actual asynchronous handlers project both operation results and modeled business events. Persistent deployment storage is not exercised by this local fixture.

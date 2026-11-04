@@ -84,6 +84,7 @@ const {
 } = require('./model-helpers');
 const {readModelProcessingGroup} = require('./axon-processing');
 const {contextPackage} = require('../../common/util/value-types');
+const {writeOperationAudit} = require('./operation-audit-writer');
 const {_commandTitle, _eventTitle, _readmodelTitle, _sliceTitle} = require('../../common/util/naming');
 const {tenantScoped} = require('./tenant-support');
 
@@ -547,6 +548,7 @@ ${assignMetadata}
                 this._writeDataExportSupport();
             }
             this._writeReadModelResource(packageName, context, slicePackage, slice, readmodel, name, idFields);
+            writeOperationAudit(this, {packageName, context, slicePackage, slice, readmodel, name});
             this._writeReadModelProjector(packageName, context, slicePackage, slice, readmodel, name, idFields);
             this._writeDictionaryDataExportLabelProviderIfNeeded(packageName, context, slicePackage, slice, readmodel);
             if (readmodel.sync) {
@@ -1121,9 +1123,21 @@ class DataExportJobResource(
             return;
         }
         const packageName = `${this.model.rootPackage}.dataexchange.dataexportjob`;
+        const lifecycleCommandNames = ['RequestDataExport', 'MarkDataExportProcessing', 'CompleteDataExport', 'FailDataExport'];
+        const lifecycleCommandImports = lifecycleCommandNames.map((name) => {
+            const owner = (this.model.slices ?? []).find((candidate) =>
+                candidate.context === 'DataExchange' && (candidate.commands ?? []).some((command) => command.name === name));
+            // Older models keep all lifecycle commands in the job slice.
+            const commandPackage = owner
+                ? `${this.model.rootPackage}.${contextPackage(owner.context)}.${_sliceTitle(owner.title ?? owner.name)}`
+                : packageName;
+            return `import ${commandPackage}.${name}Command`;
+        }).join('\n');
+
         const localDeploymentName = deploymentName(this);
         this.fs.write(this._kotlinPath('dataexchange/dataexportjob/DataExportJobPorts.kt'), `package ${packageName}
 
+${lifecycleCommandImports}
 import org.axonframework.messaging.commandhandling.gateway.CommandGateway
 import org.axonframework.messaging.core.Metadata
 import org.springframework.stereotype.Component
@@ -1245,6 +1259,7 @@ ${this.model.tenancy ? `        ${this.model.rootPackage}.shared.application.ten
             fileName = event.fileName
         )
         try {
+            lifecyclePort.markProcessing(event.dataExportJobId)
             val result = registry.executor(event.resourceName).execute(task)
             lifecyclePort.complete(event.dataExportJobId, result.fileName, result.filePath, result.rowCount)
         } catch (ex: Exception) {

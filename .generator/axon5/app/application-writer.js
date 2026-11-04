@@ -10,11 +10,13 @@ const {configureValueTypes} = require('../../common/util/generator');
 const {pascal, kebab, safeDatabaseName, safeDatabaseIdentifier, safeIdentifier, filterModelByDeployment} = require('./model-helpers');
 const {manualInfrastructurePortPathForCommand} = require('./infrastructure-port-writer');
 const {writeMetadataSupport} = require('./metadata-support');
+const {cleanupOperationAudit} = require('./operation-audit-writer');
 const {tenantTestFixture, writeTenantRuntimeContract, writeTenantBootstrap} = require('./tenant-support');
 const {writeTenantMigrations} = require('./tenant-schema');
 const {actorSecurityModel, iamSecurityContract} = require('./security-model');
 const {
-    AUDIT_TRAIL_PROCESSING_GROUP,
+    auditProcessingGroup,
+    hasLocalOperationAudit,
     automationProcessingGroup,
     beanNameForProcessingGroup,
     integrationProcessingGroup,
@@ -259,6 +261,7 @@ const applicationWriterMethods = {
     },
 
     _writeEventProcessorConfiguration() {
+        cleanupOperationAudit(this);
         const namespaces = this._eventProcessorNamespaces();
         const usedBeanNames = new Set();
         const beanMethods = namespaces
@@ -284,9 +287,10 @@ ${beanMethods}
     },
 
     _eventProcessorNamespaces() {
-        const namespaces = new Set([AUDIT_TRAIL_PROCESSING_GROUP]);
+        const namespaces = new Set(hasLocalOperationAudit(this.model) ? [auditProcessingGroup(this)] : []);
         for (const slice of this.model.slices ?? []) {
             for (const readmodel of slice.readmodels ?? []) {
+                if (this.model.operationAudit?.context === slice.context && this.model.operationAudit.readModel === readmodel.name) continue;
                 namespaces.add(readModelProcessingGroupFor(this, slice.context, readmodel));
             }
             for (const processor of slice.processors ?? []) {

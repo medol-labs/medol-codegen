@@ -225,12 +225,12 @@ function notificationMessageKey(eventName) {
     return `notifications.${lowerCamel(eventName)}`;
 }
 
-function inferNotificationCategory(eventRef) {
-    const text = `${eventRef.slice.context} ${eventRef.slice.name} ${eventRef.event.name}`.toLowerCase();
-    if (text.includes('dataexport') || text.includes('dataimport') || text.includes('dataexchange')) return 'DATA_EXCHANGE';
-    if (text.includes('training')) return 'TRAINING';
-    if (text.includes('runtime')) return 'RUNTIME';
-    return 'SYSTEM';
+function inferNotificationCategory(eventRef, model) {
+    const text = `${eventRef.slice.context} ${eventRef.slice.name} ${eventRef.event.name}`.replace(/[^a-z0-9]/gi, '').toLowerCase();
+    const category = (model.valueTypes ?? []).find((type) =>
+        type.context === 'SystemNotification' && type.name === 'NotificationCategory');
+    return (category?.values ?? []).find((value) => value !== 'SYSTEM'
+        && text.includes(String(value).replace(/[^a-z0-9]/gi, '').toLowerCase())) ?? 'SYSTEM';
 }
 
 function inferNotificationSeverity(eventName) {
@@ -318,7 +318,7 @@ const processorWriterMethods = {
         const targetId = targetKey && eventFields.has(targetKey)
             ? `event.${targetKey}.toString()`
             : 'null';
-        const category = safeIdentifier(inferNotificationCategory(eventRef));
+        const category = safeIdentifier(inferNotificationCategory(eventRef, this.model));
         const severity = safeIdentifier(inferNotificationSeverity(eventRef.event.name));
         const toastPolicy = safeIdentifier(defaultToastPolicy(severity));
         const messageKey = notificationMessageKey(eventRef.event.name);

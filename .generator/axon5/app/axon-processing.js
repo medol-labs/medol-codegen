@@ -1,6 +1,14 @@
 const {kebab, pascal, safeIdentifier} = require('./model-helpers');
 
-const AUDIT_TRAIL_PROCESSING_GROUP = 'audit-trail';
+function auditDeploymentName(generator) {
+    const singleDeployment = generator.model.deployments?.length === 1 ? generator.model.deployments[0].name : undefined;
+    return kebab(generator.currentDeployment?.name || generator.model.deployment || generator.modulePrefix || singleDeployment || generator.model.name || 'application');
+}
+function auditProcessingGroup(generator) { return `audit-${auditDeploymentName(generator)}-trail-v2`; }
+function hasLocalOperationAudit(model) {
+    return !!model.operationAudit && (model.slices ?? []).some(slice => slice.context === model.operationAudit.context
+        && (slice.readmodels ?? []).some(readmodel => readmodel.name === model.operationAudit.readModel));
+}
 
 function lowerCamel(value) {
     const name = pascal(value);
@@ -32,7 +40,9 @@ function beanNameForProcessingGroup(processingGroup, usedNames = new Set()) {
 }
 
 module.exports = {
-    AUDIT_TRAIL_PROCESSING_GROUP,
+    auditDeploymentName,
+    auditProcessingGroup,
+    hasLocalOperationAudit,
     automationProcessingGroup,
     beanNameForProcessingGroup,
     integrationProcessingGroup,

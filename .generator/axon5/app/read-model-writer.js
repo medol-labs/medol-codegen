@@ -2285,6 +2285,7 @@ ${assignments}
     },
 
     _writeReadModelJpaRepository(readModelPackageName, context, slicePackage, slice, readmodel, name, idFields, hasJsonJpaFields = false) {
+        const numberingRuleProjection = this.model.numbering?.context === slice.context && readmodel.name === 'NumberingRuleCatalog';
         const scoped = tenantScoped(this.model, slice.context);
         const tenantField = readModelMetadataFields(readmodel).find((field) => field.key === 'TENANT_ID').name;
         const entityName = `${name}Entity`;
@@ -2370,6 +2371,9 @@ ${imports}
 ${idFields.length > 1 ? `import ${readModelPackageName}.${name}Key\n` : ''}
 interface ${springDataRepositoryName} : JpaRepository<${entityName}, ${scoped ? `${name}TenantKey` : idType}>, JpaSpecificationExecutor<${entityName}> {
 ${partialLookupMethods}
+${numberingRuleProjection ? `    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("select r from NumberingRuleRow r where r.id = :id")
+    fun lockRuleForProjection(@org.springframework.data.repository.query.Param("id") id: ${idType}): java.util.Optional<${this.model.rootPackage}.numbering.infrastructure.NumberingRuleRow>` : ''}
 }
 `);
         this.fs.write(this._kotlinPath(`${readModelPersistencePath(context, name)}/${adapterName}.kt`), `package ${packageName}
@@ -2405,8 +2409,11 @@ ${criteriaImplementation}
     override fun findByIdWithAccessPolicy(id: ${idType}): ${name}? =
         jpaRepository.findOne(idSpecification(id).and(accessSpecification())).map { it.toProjection().toReadModel() }.orElse(null)
 
-    override fun findProjectionById(id: ${idType}): ${name}Projection? =
-        ${scoped ? 'jpaRepository.findOne(idSpecification(id).and(tenantSpecification()))' : 'jpaRepository.findById(id)'}.map { it.toProjection() }.orElse(null)
+    override fun findProjectionById(id: ${idType}): ${name}Projection? ${numberingRuleProjection ? `{
+        check(jpaRepository.lockRuleForProjection(id).isPresent) { "Authoritative numbering rule is missing; restore numbering data before replay." }
+        return jpaRepository.findById(id).map { it.toProjection() }.orElse(null)
+    }` : `=
+        ${scoped ? 'jpaRepository.findOne(idSpecification(id).and(tenantSpecification()))' : 'jpaRepository.findById(id)'}.map { it.toProjection() }.orElse(null)`}
 
 ${projectionLookupMethods ? `${projectionLookupMethods}\n\n` : ''}    override fun save(projection: ${name}Projection) {
 ${scoped ? `        val tenant = ${this.model.rootPackage}.shared.application.tenancy.TenantScope.requireTenant()
@@ -2968,6 +2975,9 @@ ${indent})`
                 const initializeIds = idFields
                     .map((field) => `                this.${field.name} = ${singleKeyEventField?.optional && field.name === idFields[0].name ? 'key' : readModelStorageExpression(field, `event.${field.name}`)}`)
                     .join('\n');
+                const numberingVersionGuard = this.model.numbering?.context === slice.context && readmodel.name === 'NumberingRuleCatalog'
+                    ? '        if ((entity.ruleVersion ?: 0L) >= event.ruleVersion) return\n'
+                    : '';
                 return `    @Transactional
     open override fun update(
         event: ${_eventTitle(event.title)},
@@ -2977,7 +2987,7 @@ ${keyGuard}
         val entity = repository.findProjectionById(${keyExpression}) ?: ${name}Projection().apply {
 ${initializeIds}
         }
-${saveAssignments || '        // No read-model fields are present on this event.'}
+${numberingVersionGuard}${saveAssignments || '        // No read-model fields are present on this event.'}
         repository.save(entity)
 ${appendOutbox(keyExpression)}
     }`;

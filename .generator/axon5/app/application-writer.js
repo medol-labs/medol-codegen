@@ -194,6 +194,7 @@ const applicationWriterMethods = {
             rootPackage: this.model.rootPackage,
             applicationClass
         });
+        require('./numbering-writer').writeNumberingRuntime(this);
         this._writeEventProcessorConfiguration();
         writeTenantBootstrap(this);
         writeTenantMigrations(this);

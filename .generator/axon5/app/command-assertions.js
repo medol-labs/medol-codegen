@@ -37,11 +37,13 @@ function operand(token, command) {
     return {expression: access, kind: numeric.has(type) ? 'numeric' : type, nullable: field.optional};
 }
 
-function renderCommandAssertions(model, slice, command) {
+function renderCommandAssertions(model, slice, command, options = {}) {
     const expressions = [...new Set((slice.specifications ?? []).flatMap(spec => spec.expressions ?? []))]
         .filter(expression => /^assert\s/.test(expression));
     return expressions.map(expression => {
         const [leftToken, operator, rightToken] = parseAssertion(expression);
+        if ([leftToken, rightToken].some(token => !token.startsWith('"')
+            && (options.excludeFields ?? []).includes(token.split('.').at(-1)))) return '';
         // Specifications may describe another command in the same slice.
         const owners = [leftToken, rightToken]
             .map(token => /^([A-Za-z_]\w*)\./.exec(token)?.[1])

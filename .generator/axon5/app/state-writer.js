@@ -430,7 +430,7 @@ ${interfaceMethods}
 `);
 
         const domainPackage = `${this.model.rootPackage}.domain.${context}.${slicePackage}`;
-        this._writeCreateOnly(this._rootKotlinPath(`domain/${context}/${slicePackage}/${decisionComponentName}.kt`), `package ${domainPackage}
+        if (this.model.numbering?.context !== slice.context) this._writeCreateOnly(this._rootKotlinPath(`domain/${context}/${slicePackage}/${decisionComponentName}.kt`), `package ${domainPackage}
 
 import org.springframework.stereotype.Component
 import ${packageName}.${decisionName}

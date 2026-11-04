@@ -5,6 +5,7 @@
 
 
 function writeMetadataSupport(generator) {
+        require('./numbering-writer').writeNumberingApi(generator);
         const tenancy = Boolean(generator.model.tenancy);
         generator.fs.write(generator._sharedKernelKotlinPath('shared/application/metadata/MetadataKeys.kt'), `package ${generator.model.rootPackage}.shared.application.metadata
 

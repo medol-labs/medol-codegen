@@ -468,8 +468,8 @@ const commandWriterMethods = {
         ].filter(Boolean), (value) => value).join('\n');
         const selectionImport = selectionPackageName === packageName ? '' : `import ${selectionPackageName}.${selection.name}\n`;
         const properties = commandFields.map((field) => {
-            const defaultValue = field.generated ? ` = ${fallbackValue(field)}` : '';
-            return `    val ${field.name}: ${mappedType(field, field.optional)}${defaultValue}`;
+            const defaultValue = field.numbering ? ' = ""' : field.generated ? ` = ${fallbackValue(field)}` : '';
+            return `${field.numbering ? '    @param:com.fasterxml.jackson.annotation.JsonProperty(access = com.fasterxml.jackson.annotation.JsonProperty.Access.READ_ONLY)\n' : ''}    val ${field.name}: ${mappedType(field, field.optional)}${defaultValue}`;
         }).join(',\n');
         const selectionArgs = [...selection.fields.map((field) => `${field.alias} = ${field.commandExpression}`), ...(scoped ? ['medolTenantScope = requireNotNull(medolTenantScope) { "Tenant command has not been verified." }'] : [])].join(', ');
         const selectionEntityIds = selection.fields
@@ -508,6 +508,8 @@ ${reservationSelections ? `\n${reservationSelections}` : ''}
     },
 
     _writeCommandHandlers(packageName, context, slicePackage, slice, selection, events, reservations = []) {
+        if (require('./numbering-writer').writeManagementHandler(this, packageName, context, slicePackage, slice)) return;
+        const usesNumbering = slice.commands.some(c => (c.fields ?? []).some(f => f.numbering));
         const scoped = tenantScoped(this.model, slice.context);
         const stateTarget = stateTargetFor(this.model, slice);
         const stateName = stateTarget.name;
@@ -549,10 +551,15 @@ ${reservationSelections ? `\n${reservationSelections}` : ''}
                 ...(port?.failureEvent ? ['now'] : [])
             ].join(', ');
             const transition = transitionForCommand(this.model, command);
-            const portPrecondition = usePort && includeState && transitionUsesConceptState(this.model, transition)
+            const numbered = (command.fields ?? []).some(field => field.numbering);
+            const numberPrecondition = numbered ? [
+                includeState && transitionUsesConceptState(this.model, transition) ? renderStateGuard(this.model, transition) : '',
+                renderCommandAssertions(this.model, slice, command, {excludeFields: command.fields.filter(field => field.numbering).map(field => field.name)})
+            ].filter(Boolean).join('\n') + '\n' : '';
+            const portPrecondition = usePort && !numbered && includeState && transitionUsesConceptState(this.model, transition)
                 ? `${renderStateGuard(this.model, transition)}\n`
                 : '';
-            const assertionPrecondition = usePort ? renderCommandAssertions(this.model, slice, command) : '';
+            const assertionPrecondition = usePort && !numbered ? renderCommandAssertions(this.model, slice, command) : '';
             const portStatements = usePort
                 ? `${portPrecondition}${assertionPrecondition ? assertionPrecondition + '\n' : ''}        val input = ${capability.inputName}(${constructorArgsFromCommand(inputFields)})
         val portResult = ${lowerCamel(capability.portName)}.${capability.methodName}(input)
@@ -573,6 +580,7 @@ ${scoped ? `        return tenantExecution.run(
             ${this.model.rootPackage}.shared.application.tenancy.TenantIdentity(requireNotNull(command.medolTenantScope), requireNotNull(command.medolTenantUser))
         ) {\n` : ''}
 ${eligibilityStatements ? `${eligibilityStatements}\n` : ''}\
+${numberPrecondition}${require('./numbering-writer').numberAssignments(this, slice, command)}\
 ${portStatements}\
 ${bodyEnd}
 ${scoped ? '        }' : ''}
@@ -638,7 +646,7 @@ ${handlerImports}
 
 @Component
 class ${pascal(slice.name)}CommandHandler(
-    private val decision: ${decisionName}${portConstructorParams}${eligibilityConstructorParams}${scoped ? `,\n    private val tenantExecution: ${this.model.rootPackage}.shared.application.tenancy.TenantExecution = ${this.model.rootPackage}.shared.application.tenancy.TenantExecution()` : ''}
+    private val decision: ${decisionName}${usesNumbering ? `,\n    private val numbering: ${this.model.rootPackage}.shared.application.numbering.NumberingClient` : ''}${portConstructorParams}${eligibilityConstructorParams}${scoped ? `,\n    private val tenantExecution: ${this.model.rootPackage}.shared.application.tenancy.TenantExecution = ${this.model.rootPackage}.shared.application.tenancy.TenantExecution()` : ''}
 ) {
 ${handlers}
 }

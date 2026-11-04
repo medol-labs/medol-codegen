@@ -18,7 +18,7 @@ function writeOperationAudit(generator, {packageName, context, slicePackage, sli
         return [`        is ${type} -> listOf(${ids.map(field => `payload.${field.name}?.toString()`).join(', ')}).filterNotNull().joinToString(",").take(255)`];
     })).join('\n');
     // Axon 5 resolves exact event names; an Any/Object handler is NOT a catch-all.
-    const businessTypes = [...new Set((generator.model.slices ?? []).filter(owner => owner.commands?.length).flatMap(owner =>
+    const businessTypes = [...new Set((generator.model.slices ?? []).filter(owner => owner.commands?.length || (generator.model.numbering && owner.context === generator.model.numbering.context)).flatMap(owner =>
         relatedEventsForSlice(generator.model, owner).map(event => {
             const eventOwner = generator.model.slices.find(candidate => candidate.title === event.slice || candidate.name === event.slice) ?? owner;
             return `${generator.model.rootPackage}.${contextPackage(eventOwner.context)}.events.${_eventTitle(event.title ?? event.name)}`;

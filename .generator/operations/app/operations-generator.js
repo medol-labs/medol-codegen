@@ -37,6 +37,7 @@ function generateOperationsFiles(model, options = {}) {
         [`${imagesRoot}/image-archive-runtime.mjs`]: readFileSync(path.join(__dirname, '../../common/image-archive-runtime.mjs'), 'utf8'),
         'operations/scripts/prepare-registry.sh': renderRegistryPreparationScript(baseModel),
         'operations/scripts/package-offline.mjs': readFileSync(path.join(__dirname, 'templates/package-offline.mjs'), 'utf8'),
+        'operations/scripts/package-compose.mjs': readFileSync(path.join(__dirname, 'templates/package-compose.mjs'), 'utf8'),
         ...documentSupportFiles(baseModel, environment)
     };
 
@@ -170,6 +171,7 @@ function renderDeployReadme(model, environment) {
         'Use `images.mjs` to orchestrate generated backend, frontend, and infrastructure images from this monorepo:',
         'Build/export names use the portable model prefix, independent of Registry configuration. Push retags verified local images to the Registry destination. Use --prefix / DOCKER_IMAGE_PREFIX only to override the local source name; use --push-prefix / DOCKER_PUSH_IMAGE_PREFIX for the push destination.',
         'For offline K3s delivery, `node operations/scripts/package-offline.mjs --help` describes the generic packager. It collects existing archives and renders the selected environment with optional project components; it never builds or pulls images.',
+        'For Compose delivery, use `node operations/scripts/package-compose.mjs --environment <env>`. It copies site Compose files, public configuration and existing application/dependency archives, and creates checksums and an install.sh entry point. Real .env files are excluded. Export images first; packaging never builds or pulls.',
         '',
         '```bash',
         'node operations/images/images.mjs list --environment <environment>',

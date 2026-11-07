@@ -100,7 +100,14 @@ function composeSiteModel(model, site) {
             environmentVariables: item.environmentVariables.map((variable) => {
                 let host;
                 try {host = new URL(variable.value).hostname;} catch {return variable;}
-                return remote.has(host) ? {...variable, value: '${' + variable.name + ':?Set reachable remote service URL}'} : variable;
+                if (!remote.has(host)) return variable;
+                const remoteSite = model.networkTopology.sites.find((candidate) => candidate.applications.includes(host));
+                const route = model.gateway?.routes.find((candidate) => candidate.upstreamId === host);
+                const path = route?.paths?.[0]?.replace(/\/\*$/, '') ?? '';
+                return {...variable, value: '${' + variable.name + ':?Set reachable remote service URL}',
+                    exampleUrl: route && remoteSite?.gateway
+                        ? `http://${remoteSite.name}-gateway.example.com:${model.gateway.servicePort ?? 9080}${path}`
+                        : `http://${host}.example.com:${new URL(variable.value).port || 80}${new URL(variable.value).pathname.replace(/\/$/, '')}`};
             })
         })),
         gateway: site.gateway && model.gateway?.enabled ? {...model.gateway,
@@ -306,7 +313,8 @@ function renderEnvironmentExample(model, environmentName) {
             'MEDOL_SECURITY_JWT_SECRET=',
             'MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED=false',
             'MEDOL_SECURITY_ADMIN_BOOTSTRAP_SETUP_TOKEN=',
-            'MEDOL_SECURITY_ALLOWED_ORIGINS='
+            '# Replace with the browser-facing origin (scheme, host and port; no API path).',
+            'MEDOL_SECURITY_ALLOWED_ORIGINS=http://console.example.com:9080'
         ] : []),
         ...(resolved.applications.some((application) => application.tenantIsolation) ? [
             `DB_SCHEMA=${storage?.controlSchema ?? 'public'}`,
@@ -330,6 +338,7 @@ function renderEnvironmentExample(model, environmentName) {
     ];
 
     resolved.applications.forEach((application) => {
+        lines.push(`# Registry deployment example: registry.example.com:5000/<namespace>/${application.image.split('/').pop()}; offline deployments keep the imported tag.`);
         lines.push(`${application.envVarPrefix}_IMAGE=${application.image}`);
         if (application.exposePorts) {
             lines.push(`${application.envVarPrefix}_PORT=${application.hostPort ?? application.servicePort}`);
@@ -341,7 +350,7 @@ function renderEnvironmentExample(model, environmentName) {
         for (const variable of app.environmentVariables) {
             const match = typeof variable.value === 'string' && variable.value.match(/^\$\{([A-Z0-9_]+):\?Set reachable remote service URL\}$/);
             if (match && !existingKeys.has(match[1])) {
-                lines.push(`# Required remote endpoint for ${app.name}; include the gateway API path.`, `${match[1]}=`);
+                lines.push(`# Required remote endpoint for ${app.name}; replace the example host/port, keeping the gateway API path.`, `${match[1]}=${variable.exampleUrl ?? 'http://remote-gateway.example.com:9080'}`);
                 existingKeys.add(match[1]);
             }
         }

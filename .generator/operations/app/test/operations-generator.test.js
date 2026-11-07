@@ -401,7 +401,11 @@ test('Compose splits arbitrary modeled deployment sites including gateway, stora
         assert(remote.services['dataset-service']);
         assert(!remote.services['federation-service']);
         assert.match(remote.services['dataset-service'].environment.REMOTE_API, /\?Set reachable/);
-        assert.match(files[`${root}/sites/remote/.env-example`], /REMOTE_API=/);
+        const remoteEnv = files[`${root}/sites/remote/.env-example`];
+        const routePath = model.gateway.routes.find(route => route.upstreamId === 'federation-service').paths[0].replace(/\/\*$/, '');
+        assert(remoteEnv.includes(`REMOTE_API=http://central-gateway.example.com:${model.gateway.servicePort}${routePath}`));
+        assert.match(remoteEnv, /MEDOL_SECURITY_ALLOWED_ORIGINS=http:\/\/console.example.com:9080/);
+        assert.match(remoteEnv, /Registry deployment example: registry.example.com:5000/);
         assert.deepEqual(remote.services.apisix.volumes, ['./gateway/config.yaml:/usr/local/apisix/conf/config.yaml:ro', './gateway/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro']);
         assert.doesNotMatch(files[`${root}/sites/remote/gateway/apisix.yaml`], /federation-service/);
         assert.doesNotMatch(files[`${root}/sites/central/infrastructure/postgres/init/01-create-databases.sql`], /dataset_service/);
@@ -439,6 +443,8 @@ test('generates one environment-independent image helper', () => {
     assert(!Object.keys(dev).some((file) => /^operations\/images\/dev\//.test(file)));
     assert.match(dev['operations/images/images.mjs'], /--environment <name>/);
     assert.match(dev['operations/scripts/package-offline.mjs'], /export async function packageOffline/);
+    assert.match(dev['operations/scripts/package-compose.mjs'], /export async function packageCompose/);
+    assert.doesNotMatch(dev['operations/scripts/package-compose.mjs'], /federation-learning|runtime-scheduling|pytorch/);
     assert.doesNotMatch(dev['operations/scripts/package-offline.mjs'], /federation-learning|runtime-scheduling|pytorch/);
 });
 

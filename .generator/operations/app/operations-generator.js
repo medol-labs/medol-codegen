@@ -27,6 +27,7 @@ function generateOperationsFiles(model, options = {}) {
     const baseModel = portableOperationsModel(model);
     const files = {
         [`${modelRoot}/.gitignore`]: 'operations-model.private.json\noperations-model.local.json\n',
+        'operations/.gitignore': '# Generated delivery packages and packaging scratch directories\n/bundles/\n',
         [`${modelRoot}/operations-model.json`]: `${JSON.stringify(baseModel, null, 2)}\n`,
         [`${modelRoot}/operations-model.private.json`]: `${JSON.stringify({ registry: model.registry ?? null }, null, 2)}\n`,
         [`${modelRoot}/README.md`]: renderDeployReadme(baseModel, environment),

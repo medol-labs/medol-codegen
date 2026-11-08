@@ -348,6 +348,13 @@ test('writes read model projector as overridable projection updater', () => {
     assert.match(projector, /updater\.update\(event, message\)/);
     assert.doesNotMatch(projector, /outbox\.append/);
     assert.doesNotMatch(projector, /MedolOutboxAppender/);
+    writer.model.archiving = {context: 'Archiving'};
+    writer.model.slices.push({context: 'Archiving'});
+    writer._writeReadModelProjector('tech.medo.organizationmanagement.organizationdirectory',
+        'organizationmanagement', 'organizationdirectory', slice, readmodel, 'OrganizationDirectory', [readmodel.fields[0]]);
+    const guarded = writes.get('kotlin/organizationmanagement/organizationdirectory/OrganizationDirectoryProjector.kt');
+    assert.match(guarded, /private val archiving: tech.medo.archiving.infrastructure.ArchivingService/);
+    assert.match(guarded, /archiving.project\("OrganizationManagement", "OrganizationDirectory", event\) \{ updater.update\(event, message\) \}/);
 });
 
 test('writes sync source read model updater with transactional outbox append', () => {

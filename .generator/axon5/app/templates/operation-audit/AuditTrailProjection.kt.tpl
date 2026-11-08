@@ -41,8 +41,14 @@ class AuditTrailProjection(
             // Stable across retries, replay and independent tenant event stores.
             id = UUID.nameUUIDFromBytes(("EVENT:" + metadata["medol.eventSource"].orEmpty() + ":" +
                 metadata["tenantId"].orEmpty() + ":" + message.identifier()).toByteArray(Charsets.UTF_8))
-            observation = OperationAuditObservation(
-                category = "EVENT", operation = message.type().toString(), outcome = "RECORDED",
+<% if (archiving) { %>            observation = if (event is <%= rootPackage %>.archiving.infrastructure.ArchiveOperationRecorded) OperationAuditObservation(
+                category = "ARCHIVING", operation = event.operation, outcome = event.state,
+                started = message.timestamp(), completed = message.timestamp(),
+                actorId = metadata["userId"], messageId = message.identifier(), correlationId = metadata["correlationId"],
+                targetId = (event.archiveId ?: event.batchId ?: event.restoreId)?.toString()
+            ) else OperationAuditObservation(
+<% } else { %>            observation = OperationAuditObservation(
+<% } %>                category = "EVENT", operation = message.type().toString(), outcome = "RECORDED",
                 started = message.timestamp(), completed = message.timestamp(),
                 actorId = metadata["userId"], tenantId = metadata["tenantId"],
                 messageId = message.identifier(), correlationId = metadata["correlationId"]

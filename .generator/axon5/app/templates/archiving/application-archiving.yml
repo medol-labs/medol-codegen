@@ -1,0 +1,9 @@
+medol:
+  archiving:
+    enabled: ${ARCHIVING_ENABLED:false}
+    datasource:
+      url: ${ARCHIVE_DATASOURCE_URL:}
+      username: ${ARCHIVE_DATASOURCE_USERNAME:}
+      password: ${ARCHIVE_DATASOURCE_PASSWORD:}
+    worker-delay-ms: 1000
+    outbox-delay-ms: 1000

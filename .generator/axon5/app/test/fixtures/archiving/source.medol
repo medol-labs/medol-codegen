@@ -1,0 +1,13 @@
+import archiving as Archives deploy App
+import operation-audit as Audit deploy App
+context Reports {
+ slice RunReport {
+  startsLifecycle
+  command RunReport { runId: UUID id requestedAt: DateTime reportCode: String }
+  event ReportRequested { runId: UUID id requestedAt: DateTime reportCode: String }
+  state Requested
+ }
+ slice ReportCatalog { readmodel ReportCatalog[] { runId: UUID id reportCode: String display requestedAt: DateTime subscribe ReportRequested } }
+ concept ReportRun { state Requested slice RunReport }
+}
+deployment App { includes Reports }

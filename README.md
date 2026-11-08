@@ -1176,3 +1176,9 @@ protection, and actual command/outbox-to-projection delivery. It creates a tempo
 Import MEDOL `scheduling` and bind targets with `provider scheduledCommand from Context.Command`. The generator emits Axon event-sourced schedule lifecycle handlers, a typed command whitelist, durable reconciliation/delivery records, a SnailJob 2.0.2 OpenAPI adapter, and a standalone worker. See the generated `scheduling/README.md` and `scheduling/application-scheduling.yml`. Provider instances are selected per plan; `SchedulingProvider` supports adding PowerJob without changing business plans. A PowerJob adapter is not shipped. Redis is not required. Runtime verification: `node .generator/axon5/app/test/run-scheduling-runtime-smoke.mjs` (MEDOL source and Maven required).
 
 Built-in context usage and configuration: [overview](../medol/docs/builtin-contexts/README.md), [scheduling](../medol/docs/builtin-contexts/scheduling.md), [operation audit](../medol/docs/builtin-contexts/operation-audit.md), [tenant management](../medol/docs/builtin-contexts/tenant-management.md).
+
+### Built-in archiving (Axon 5)
+
+Import `archiving` to generate event-backed batch and restore requests, durable execution records, a separate JDBC archive store, authenticated history APIs, and replay guards for registered business projections. Implement `ArchiveTargetAdapter` in a handwritten infrastructure package to enforce business eligibility, retention, freezing, manifest export, cleanup, and restore. The runtime never infers business eligibility from table names and never deletes Axon events. Configure the generated `archiving/application-archiving.yml`; processing is disabled until explicitly enabled. Tenant models are rejected in this first version.
+
+See the [archiving guide](../medol/docs/builtin-contexts/archiving.md). Runtime verification: `node .generator/axon5/app/test/run-archiving-runtime-smoke.mjs`.

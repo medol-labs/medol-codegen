@@ -196,6 +196,7 @@ const applicationWriterMethods = {
         });
         require('./numbering-writer').writeNumberingRuntime(this);
         require('./scheduling-writer').writeRuntime(this);
+        require('./archiving-writer').writeRuntime(this);
         this._writeEventProcessorConfiguration();
         writeTenantBootstrap(this);
         writeTenantMigrations(this);
@@ -291,6 +292,7 @@ ${beanMethods}
     _eventProcessorNamespaces() {
         const namespaces = new Set(hasLocalOperationAudit(this.model) ? [auditProcessingGroup(this)] : []);
         if (require('./scheduling-writer').localScheduling(this)) namespaces.add('scheduling-integration');
+        if (require('./archiving-writer').localArchiving(this)) namespaces.add('archiving-integration');
         for (const slice of this.model.slices ?? []) {
             for (const readmodel of slice.readmodels ?? []) {
                 if (this.model.operationAudit?.context === slice.context && this.model.operationAudit.readModel === readmodel.name) continue;

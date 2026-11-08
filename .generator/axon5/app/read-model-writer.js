@@ -2884,6 +2884,7 @@ class ${resourceName}(
 
     _writeReadModelProjector(packageName, context, slicePackage, slice, readmodel, name, idFields) {
         const scoped = tenantScoped(this.model, slice.context);
+        const archiveGuard = require('./archiving-writer').localArchiving(this) && slice.context !== this.model.archiving.context;
         if (readmodel.name === 'SystemNotificationSummary') {
             this._writeSystemNotificationSummaryProjector(packageName, context, slicePackage, readmodel, name);
             return;
@@ -3043,7 +3044,7 @@ ${appendOutbox(readModelKey, '            ')}
 ${scopedDataExchangeReadModel ? '        if (!accepts(message)) return\n' : ''}${scoped ? `        tenantExecution.verifyEventTenant(event.medolTenantScope, message)
         tenantExecution.project(
             ${this.model.rootPackage}.shared.application.tenancy.TenantIdentity(event.medolTenantScope, message.metadata()["userId"] ?: "event-projector"), "${packageName}.${name}Projector", message.identifier(), message.metadata()["medol.eventSource"]
-        ) { updater.update(event, message) }` : '        updater.update(event, message)'}
+        ) { updater.update(event, message) }` : archiveGuard ? `        archiving.project("${slice.context}", "${readmodel.name}", event) { updater.update(event, message) }` : '        updater.update(event, message)'}
     }`).join('\n\n');
 
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${name}Projector.kt`), `package ${packageName}
@@ -3089,7 +3090,7 @@ class ${name}ProjectionUpdaterConfiguration {
 @Namespace("${readModelProcessingGroupFor(this, context, readmodel)}")
 @Component
 class ${name}Projector(
-    private val updater: ${name}ProjectionUpdater${scoped ? `,\n    private val tenantExecution: ${this.model.rootPackage}.shared.application.tenancy.TenantExecution = ${this.model.rootPackage}.shared.application.tenancy.TenantExecution()` : ''}
+    private val updater: ${name}ProjectionUpdater${archiveGuard ? `,\n    private val archiving: ${this.model.rootPackage}.archiving.infrastructure.ArchivingService` : ''}${scoped ? `,\n    private val tenantExecution: ${this.model.rootPackage}.shared.application.tenancy.TenantExecution = ${this.model.rootPackage}.shared.application.tenancy.TenantExecution()` : ''}
 ) {
 ${scopedDataExchangeReadModel ? `    private fun accepts(message: EventMessage): Boolean =
         message.metadata()[MetadataKeys.DEPLOYMENT_NAME]?.toString() == "${deploymentName(this)}"

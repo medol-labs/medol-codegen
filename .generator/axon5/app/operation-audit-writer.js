@@ -23,11 +23,13 @@ function writeOperationAudit(generator, {packageName, context, slicePackage, sli
             const eventOwner = generator.model.slices.find(candidate => candidate.title === event.slice || candidate.name === event.slice) ?? owner;
             return `${generator.model.rootPackage}.${contextPackage(eventOwner.context)}.events.${_eventTitle(event.title ?? event.name)}`;
         })))];
+    const archiving = require('./archiving-writer').localArchiving(generator);
+    if (archiving) businessTypes.push(`${generator.model.rootPackage}.archiving.infrastructure.ArchiveOperationRecorded`);
     const businessHandlers = businessTypes.map((type, index) => `    @EventHandler
     fun onBusiness${index}(event: ${type}, message: EventMessage) = on(event, message)`).join('\n\n');
     const options = {
         rootPackage: generator.model.rootPackage, packageName, readModelName: name,
-        tenancy: Boolean(generator.model.tenancy), targets, businessHandlers,
+        tenancy: Boolean(generator.model.tenancy), archiving, targets, businessHandlers,
         deployment: auditDeploymentName(generator), processingGroup: auditProcessingGroup(generator)
     };
     for (const file of ['OperationAuditSupport', 'AuditTrailProjection']) {

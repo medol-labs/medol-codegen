@@ -288,7 +288,7 @@ ${sourcingHandlers}
     },
 
     _writeDecision(packageName, context, slicePackage, slice, selection, events, reservations = []) {
-        if (this.model.scheduling?.context === slice.context) return;
+        if (this.model.scheduling?.context === slice.context || this.model.archiving?.context === slice.context) return;
         const stateTarget = stateTargetFor(this.model, slice);
         const stateName = stateTarget.name;
         const decisionName = `${pascal(slice.name)}Decision`;

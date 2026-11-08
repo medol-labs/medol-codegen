@@ -2885,6 +2885,8 @@ class ${resourceName}(
     _writeReadModelProjector(packageName, context, slicePackage, slice, readmodel, name, idFields) {
         const scoped = tenantScoped(this.model, slice.context);
         const archiveGuard = require('./archiving-writer').localArchiving(this) && slice.context !== this.model.archiving.context;
+        const managementCapability = this.model.organizationManagement?.context === slice.context ? 'organization' : this.model.systemConfiguration?.context === slice.context ? 'configuration' : this.model.businessCalendar?.context === slice.context ? 'calendar' : null;
+        const documentCatalogueGuard = this.model.documentGeneration?.context === slice.context && ['DocumentTemplateCatalog','GeneratedDocumentCatalog'].includes(readmodel.name);
         if (readmodel.name === 'SystemNotificationSummary') {
             this._writeSystemNotificationSummaryProjector(packageName, context, slicePackage, readmodel, name);
             return;
@@ -2980,7 +2982,9 @@ ${indent})`
                 const initializeIds = idFields
                     .map((field) => `                this.${field.name} = ${singleKeyEventField?.optional && field.name === idFields[0].name ? 'key' : readModelStorageExpression(field, `event.${field.name}`)}`)
                     .join('\n');
-                const numberingVersionGuard = this.model.numbering?.context === slice.context && readmodel.name === 'NumberingRuleCatalog'
+                const numberingVersionGuard = managementCapability ? '        if ((entity.revision ?: 0L) >= event.revision) return\n' : this.model.documentGeneration?.context === slice.context && ['DocumentTemplateCatalog','GeneratedDocumentCatalog'].includes(readmodel.name)
+                    ? '        if ((entity.revision ?: 0L) >= event.revision) return\n'
+                    : this.model.numbering?.context === slice.context && readmodel.name === 'NumberingRuleCatalog'
                     ? '        if ((entity.ruleVersion ?: 0L) >= event.ruleVersion) return\n'
                     : this.model.scheduling?.context === slice.context && readmodel.name === 'ScheduleCatalog'
                         ? '        if ((entity.planVersion ?: 0L) >= event.planVersion) return\n' : '';
@@ -3044,7 +3048,7 @@ ${appendOutbox(readModelKey, '            ')}
 ${scopedDataExchangeReadModel ? '        if (!accepts(message)) return\n' : ''}${scoped ? `        tenantExecution.verifyEventTenant(event.medolTenantScope, message)
         tenantExecution.project(
             ${this.model.rootPackage}.shared.application.tenancy.TenantIdentity(event.medolTenantScope, message.metadata()["userId"] ?: "event-projector"), "${packageName}.${name}Projector", message.identifier(), message.metadata()["medol.eventSource"]
-        ) { updater.update(event, message) }` : archiveGuard ? `        archiving.project("${slice.context}", "${readmodel.name}", event) { updater.update(event, message) }` : '        updater.update(event, message)'}
+        ) { updater.update(event, message) }` : managementCapability ? `        management.locked("${managementCapability}") { updater.update(event, message) }` : documentCatalogueGuard ? `        documents.projectCatalogue(${readmodel.name === 'DocumentTemplateCatalog'}, event.${readmodel.name === 'DocumentTemplateCatalog' ? 'templateVersionId' : 'documentId'}) { updater.update(event, message) }` : archiveGuard ? `        archiving.project("${slice.context}", "${readmodel.name}", event) { updater.update(event, message) }` : '        updater.update(event, message)'}
     }`).join('\n\n');
 
         this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${name}Projector.kt`), `package ${packageName}
@@ -3090,7 +3094,7 @@ class ${name}ProjectionUpdaterConfiguration {
 @Namespace("${readModelProcessingGroupFor(this, context, readmodel)}")
 @Component
 class ${name}Projector(
-    private val updater: ${name}ProjectionUpdater${archiveGuard ? `,\n    private val archiving: ${this.model.rootPackage}.archiving.infrastructure.ArchivingService` : ''}${scoped ? `,\n    private val tenantExecution: ${this.model.rootPackage}.shared.application.tenancy.TenantExecution = ${this.model.rootPackage}.shared.application.tenancy.TenantExecution()` : ''}
+    private val updater: ${name}ProjectionUpdater${managementCapability ? `,\n    private val management: ${this.model.rootPackage}.management.infrastructure.ManagementStore` : ''}${documentCatalogueGuard ? `,\n    private val documents: ${this.model.rootPackage}.documentgeneration.infrastructure.DocumentService` : ''}${archiveGuard ? `,\n    private val archiving: ${this.model.rootPackage}.archiving.infrastructure.ArchivingService` : ''}${scoped ? `,\n    private val tenantExecution: ${this.model.rootPackage}.shared.application.tenancy.TenantExecution = ${this.model.rootPackage}.shared.application.tenancy.TenantExecution()` : ''}
 ) {
 ${scopedDataExchangeReadModel ? `    private fun accepts(message: EventMessage): Boolean =
         message.metadata()[MetadataKeys.DEPLOYMENT_NAME]?.toString() == "${deploymentName(this)}"

@@ -177,6 +177,7 @@ const applicationWriterMethods = {
             appPort: runtime.appPort,
             hasInfra,
             embeddedInfra: Boolean(this.model.tenancy) && !hasInfra,
+            documentGeneration: require('./document-generation-writer').localDocuments(this),
             hasSharedKernel: this._usesSharedKernelModule()
         });
         if (this.model.tenancy && !hasInfra) {
@@ -197,6 +198,8 @@ const applicationWriterMethods = {
         require('./numbering-writer').writeNumberingRuntime(this);
         require('./scheduling-writer').writeRuntime(this);
         require('./archiving-writer').writeRuntime(this);
+        require('./document-generation-writer').writeRuntime(this);
+        require('./management-writer').writeRuntime(this);
         this._writeEventProcessorConfiguration();
         writeTenantBootstrap(this);
         writeTenantMigrations(this);

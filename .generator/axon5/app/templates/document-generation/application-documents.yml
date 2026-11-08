@@ -1,0 +1,9 @@
+# Load with SPRING_CONFIG_ADDITIONAL_LOCATION=file:./document-generation/application-documents.yml
+medol:
+  documents:
+    enabled: ${MEDOL_DOCUMENTS_ENABLED:false}
+    storage-path: ${MEDOL_DOCUMENTS_STORAGE_PATH:build/documents}
+    font-path: ${MEDOL_DOCUMENTS_FONT_PATH:}
+    max-pages: 200
+    worker-delay-ms: 1000
+    outbox-delay-ms: 1000

@@ -38,6 +38,15 @@ function buildFrontendModel(source, selectedCommandKeys, options = {}) {
                 itemCommandKeys: workflow.itemCommandKeys(readModel)
             }, readModel, allEvents, workflow)))
         .filter(Boolean)));
+    for (const resource of resources) {
+        if (source.documentGeneration?.context && resource.chapter?.name === source.documentGeneration.context.toLowerCase()) {
+            if (resource.queryRoute === 'generateddocumentcatalog') {
+                resource.artifactDownload = {prefix: '/api/documents/', suffix: '/file', stateField: 'state', state: 'Completed'};
+            } else if (resource.queryRoute === 'documenttemplatecatalog') {
+                resource.artifactDownload = {prefix: '/api/documents/templates/', suffix: '/source'};
+            }
+        }
+    }
     const modules = withModuleResourceRoutes(backendModules, resources);
     const chapters = withChapterI18n(uniqueChapters(resources.map((resource) => resource.chapter).filter(Boolean)));
     const i18n = buildI18nModel(frontendSource, chapters, resources);

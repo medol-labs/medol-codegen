@@ -1,4 +1,7 @@
 // Generated from config.json by the refine generator.
+<% if (resource.artifactDownload) { -%>
+import { DownloadFileButton } from "@/components/download/file-download";
+<% } -%>
 <% const hasDataImport = resource.importCommands?.length > 0; const hasDataOperations = resource.exportable || hasDataImport; -%>
 import { useTable } from "@refinedev/react-table";
 import { <% if (hasDataOperations) { -%>useNotification, <% } -%>useTranslate<% if (resource.exportable) { -%>, type CrudFilter, type CrudSorting<% } -%> } from "@refinedev/core";
@@ -166,6 +169,15 @@ export const <%= resource.component %>List = () => {
         header: t("table.actions", "Actions"),
         cell: ({ row }) => (
           <div className="flex gap-2">
+<% if (resource.artifactDownload) { -%>
+            <DownloadFileButton
+              uri={<%- JSON.stringify(resource.artifactDownload.prefix) %> + encodeURIComponent(String(row.original.<%= resource.idField %>)) + <%- JSON.stringify(resource.artifactDownload.suffix) %>}
+              backendModuleName="<%= resource.moduleName %>"
+<% if (resource.artifactDownload.stateField) { -%>
+              disabled={row.original.<%= resource.artifactDownload.stateField %> !== <%- JSON.stringify(resource.artifactDownload.state) %>}
+<% } -%>
+            />
+<% } -%>
 <% if (resource.deleteCommand) { -%>
             {isCommandVisible(row.original, <%- JSON.stringify(resource.deleteCommand.enabledField ?? '') %>, <%- JSON.stringify(resource.deleteCommand.stateField ?? '') %>, <%- JSON.stringify(resource.deleteCommand.allowedStates ?? []) %>) && (
             <CommandButton

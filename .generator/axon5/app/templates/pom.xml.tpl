@@ -55,6 +55,13 @@
         </dependencies>
     </dependencyManagement>
     <dependencies>
+<% if (typeof documentGeneration !== 'undefined' && documentGeneration) { -%>
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>3.0.8</version>
+        </dependency>
+<% } -%>
 <% if (typeof embeddedInfra !== 'undefined' && embeddedInfra) { -%>
 <% for (const artifact of ['grpc-netty-shaded', 'grpc-protobuf', 'grpc-stub']) { -%>
         <dependency>

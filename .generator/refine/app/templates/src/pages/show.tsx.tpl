@@ -1,4 +1,7 @@
 // Generated from config.json by the refine generator.
+<% if (resource.artifactDownload) { -%>
+import { DownloadFileButton } from "@/components/download/file-download";
+<% } -%>
 import { useShow, useTranslate } from "@refinedev/core";
 
 import { frontendComposition } from "@/app/composition/composition.resolved";
@@ -52,6 +55,15 @@ export const <%= resource.component %>Show = () => {
   return (
     <ShowView>
       <ShowViewHeader />
+<% if (resource.artifactDownload) { -%>
+      {record?.<%= resource.idField %> && <DownloadFileButton
+        uri={<%- JSON.stringify(resource.artifactDownload.prefix) %> + encodeURIComponent(String(record.<%= resource.idField %>)) + <%- JSON.stringify(resource.artifactDownload.suffix) %>}
+        backendModuleName="<%= resource.moduleName %>"
+<% if (resource.artifactDownload.stateField) { -%>
+        disabled={record.<%= resource.artifactDownload.stateField %> !== <%- JSON.stringify(resource.artifactDownload.state) %>}
+<% } -%>
+      />}
+<% } -%>
       <div className="space-y-6">
         <Card>
           <CardHeader>

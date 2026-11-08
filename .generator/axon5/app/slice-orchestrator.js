@@ -107,7 +107,7 @@ const sliceOrchestratorMethods = {
             this._writeDecisionTest(packageName, context, slicePackage, slice, selection, relatedEvents, reservations);
             this._writeSliceIntegrationTest(packageName, context, slicePackage, slice, selection, relatedEvents);
         }
-        if (this.model.numbering && slice.context === this.model.numbering.context && !slice.commands.length) {
+        if ((require('./management-writer').isManagement(this.model,slice.context) || (this.model.numbering && slice.context === this.model.numbering.context) || (this.model.documentGeneration && slice.context === this.model.documentGeneration.context)) && !slice.commands.length) {
             (slice.events ?? []).forEach(event => this._writeEvent(event, slice, {fields: []}));
         }
         slice.readmodels.forEach((readmodel) => this._writeReadModel(packageName, context, slicePackage, slice, readmodel));

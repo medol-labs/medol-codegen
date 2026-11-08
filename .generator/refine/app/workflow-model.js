@@ -263,6 +263,19 @@ function buildWorkflowModel(
             const slice = this.commandSliceFor(command);
             return eligibilityStateControlForCommand(command, readModel, slice) ?? transitionControl;
         },
+        lifecycleSelectionFor(command, select, field) {
+            if (!field?.idAttribute || field.name !== select?.meta?.idField) return null;
+            const transition = transitionsByCommandId.get(commandKey(command));
+            if (!transition || transition.startsLifecycle) return null;
+            const info = readModelInfos.find(info =>
+                info.slice.context === transition.context
+                && axonRoute(info.aggregate.title) === axonRoute(transition.owner?.name ?? transition.owner?.title)
+                && snake(cleanTitle(info.readModel.title)) === select.resource
+                && info.deployment.dataProviderName === select.dataProviderName);
+            if (!info) return null;
+            const control = stateControlForTransition(transition, info.readModel);
+            return control.stateField && control.allowedStates.length ? control : null;
+        },
         selectForField(field) {
             return readModelSelectForFieldSource(field, selectableReadModelsByFieldSource);
         },
@@ -670,7 +683,8 @@ function commandWorkflowFields(command, readModel, allEvents, workflow) {
                 workflow.selectForField(field) ?? workflow.selectableReadModels.get(field.name),
                 command,
                 workflow.commandSliceFor(command),
-                workflow
+                workflow,
+                field
             );
             if (select && (hasExplicitReadModelSource(field) || (!field.idAttribute && isReferenceSelectField(field)))) {
                 selects.set(field.name, select);
@@ -702,13 +716,16 @@ function eligibilityForReadModel(readModel) {
         .filter((eligibility) => eligibility.conditions.length > 0);
 }
 
-function eligibilitySelectForCommand(select, command, slice, workflow) {
-    if (!select?.eligibility?.length) {
+function eligibilitySelectForCommand(select, command, slice, workflow, field) {
+    if (!select) {
         return select;
     }
 
-    const eligibility = eligibilityForCommand(select.eligibility, command, slice);
+    const lifecycle = workflow?.lifecycleSelectionFor?.(command, select, field);
+    const declared = eligibilityForCommand(select.eligibility ?? [], command, slice);
+    const eligibility = lifecycle && !declared?.profile ? null : declared;
     const {filters, unmappedConditions} = eligibilityFiltersForSelect(eligibility, select);
+    if (lifecycle) filters.push({field: lifecycle.stateField, operator: lifecycle.allowedStates.length === 1 ? 'eq' : 'in', value: lifecycle.allowedStates.length === 1 ? lifecycle.allowedStates[0] : lifecycle.allowedStates});
     if (unmappedConditions.length > 0) {
         workflow?.reportEligibilityWarning?.(
             `Projection eligibility for ${select.meta?.label ?? select.resource}${eligibility?.profile ? ` profile ${eligibility.profile}` : ''} cannot be generated for command ${cleanTitle(command?.title ?? command?.name)} selector: unmapped condition(s) ${unmappedConditions.map(eligibilityConditionText).join(', ')}. Materialize these fields on the projection or enforce the rule in command policy.`

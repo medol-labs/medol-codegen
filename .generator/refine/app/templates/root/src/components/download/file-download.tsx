@@ -241,7 +241,13 @@ export function DownloadFileButton({
       disabled={disabled || !canDownload || downloading}
       aria-label={buttonProps["aria-label"] ?? label ?? resolvedTooltip}
       onClick={async () => {
-        const downloadedFilename = await download();
+        let downloadedFilename: string;
+        try {
+          downloadedFilename = await download();
+        } catch {
+          // useFileDownload already displays the failure notification.
+          return;
+        }
         onDownloaded?.(downloadedFilename);
       }}
     >

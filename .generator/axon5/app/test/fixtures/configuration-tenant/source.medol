@@ -1,0 +1,2 @@
+import system-configuration as Settings deploy App
+import tenant-management as Tenants deploy App

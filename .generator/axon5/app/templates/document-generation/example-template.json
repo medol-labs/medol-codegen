@@ -1,0 +1,12 @@
+{
+  "title": "Delivery note {{number}}",
+  "header": "Example organization",
+  "footer": "Business approval is separate from document generation.",
+  "blocks": [
+    {"type": "text", "text": "Customer: {{customer}}"},
+    {"type": "table", "items": "lines", "columns": [
+      {"label": "Product", "field": "name"},
+      {"label": "Quantity", "field": "quantity"}
+    ]}
+  ]
+}

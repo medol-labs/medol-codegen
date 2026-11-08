@@ -1836,3 +1836,20 @@ test('state-preserving workflow guards retain every modeled source state', () =>
     assert.equal(control.targetState, undefined);
     assert.equal(control.stateField, 'state');
 });
+
+test('own lifecycle selectors use preconditions while new references retain default eligibility',()=>{
+ const field={name:'widgetId',type:'UUID',idAttribute:true,source:{kind:'direct',from:['WidgetCatalog.widgetId']}};
+ const activate={id:'activate',name:'ActivateWidget',title:'Activate Widget',concept:'Widget',fields:[field]};
+ const use={id:'use',name:'UseWidget',title:'Use Widget',concept:'Order',fields:[{...field,idAttribute:false}]};
+ const catalog={id:'widgets',title:'Widget Catalog',concept:'Widget',listElement:true,
+  fields:[{name:'widgetId',type:'UUID',idAttribute:true},{name:'state',type:'String'}],
+  eligibility:[{operator:'AND',conditions:[{left:'Widget.state',operator:'==',right:'Active'}]}]};
+ const slices=[{id:'manage',title:'Manage Widget',context:'Widgets',concepts:['Widget'],commands:[activate],readmodels:[catalog]},
+  {id:'use-slice',title:'Use Widget',context:'Orders',concepts:['Order'],commands:[use],readmodels:[]}];
+ const transitions=[{context:'Widgets',command:{id:'activate',name:'ActivateWidget'},owner:{name:'Widget'},fromStates:['Draft','Suspended'],to:'Active'}];
+ const workflow=buildWorkflowModel(slices,[],[],undefined,[],transitions,()=>({name:'app',dataProviderName:'app'}));
+ const own=commandWorkflowFields(activate,catalog,[],workflow).selects.get('widgetId');
+ assert.deepEqual(own.filters,[{field:'state',operator:'in',value:['Draft','Suspended']}]);
+ const referenced=commandWorkflowFields(use,catalog,[],workflow).selects.get('widgetId');
+ assert.deepEqual(referenced.filters,[{field:'state',operator:'eq',value:'Active'}]);
+});

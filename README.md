@@ -1182,3 +1182,23 @@ Built-in context usage and configuration: [overview](../medol/docs/builtin-conte
 Import `archiving` to generate event-backed batch and restore requests, durable execution records, a separate JDBC archive store, authenticated history APIs, and replay guards for registered business projections. Implement `ArchiveTargetAdapter` in a handwritten infrastructure package to enforce business eligibility, retention, freezing, manifest export, cleanup, and restore. The runtime never infers business eligibility from table names and never deletes Axon events. Configure the generated `archiving/application-archiving.yml`; processing is disabled until explicitly enabled. Tenant models are rejected in this first version.
 
 See the [archiving guide](../medol/docs/builtin-contexts/archiving.md). Runtime verification: `node .generator/axon5/app/test/run-archiving-runtime-smoke.mjs`.
+
+### Built-in document generation (Axon 5)
+
+Import `document-generation` for versioned template management and asynchronous PDF generation. Register a handwritten `DocumentDataProvider` for typed schema, consistent business snapshots and object-level authorization. Published templates are immutable; retries reuse pinned inputs and existing artifacts. JDBC state and a durable outbox drive modeled catalog and audit events. The PDFBox layout adapter supports text, tables, pagination and configured Unicode TTF fonts. Rendering and artifact storage have replaceable interfaces. Enable the generated `document-generation/application-documents.yml` explicitly. This version rejects tenant models.
+
+See the [template and document guide](../medol/docs/builtin-contexts/document-generation.md). Runtime verification: `node .generator/axon5/app/test/run-document-generation-runtime-smoke.mjs --postgres`. Set `DOCUMENTS_TEST_FONT_PATH` to a Unicode TTF to include the Chinese pagination test.
+
+### Built-in organization and system configuration (Axon 5)
+
+Import `organization-management` for administrative organization trees, reusable positions, organization positions, members and interval-based appointments. Transactional checks prevent cycles, overlapping primary appointments and deactivation with active dependencies. Transfers update both appointments atomically. No automatic IAM grants or tenant organization isolation is implied.
+
+Import `system-configuration` and register `ConfigurationDefinitionProvider` beans to declare typed configuration groups. Generated commands create scope overrides, apply atomic patches, clear overrides and roll back through current validators. Effective snapshots layer defaults, application values and verified tenant overrides. Reads use authoritative transactions rather than an asynchronously refreshed value cache. Consumers explicitly pin snapshots for long-running tasks.
+
+Both use authoritative JDBC records/history and a durable outbox to publish modeled Axon events for catalog projections and operation audit. See the [organization guide](../medol/docs/builtin-contexts/organization-management.md) and [configuration guide](../medol/docs/builtin-contexts/system-configuration.md). Run `node .generator/axon5/app/test/run-management-runtime-smoke.mjs --postgres`; add `--tenant` for the configuration tenancy fixture.
+
+### Built-in business calendar (Axon 5)
+
+Import `business-calendar` for versioned weekly working hours, holiday/makeup-date overrides, workday offsets and elapsed working-time calculations. Active calendars must be suspended before revision; new references require Active state, while pinned historical Active revisions support existing tasks. Dates outside maintained coverage and ambiguous/nonexistent DST endpoints fail explicitly. No national holidays or scheduler bindings are assumed. The runtime shares management transactions/history/outbox and adds an append-only migration for its lock. Tenant combination is currently rejected.
+
+See the [business calendar guide](../medol/docs/builtin-contexts/business-calendar.md). Verify generated backend behavior with `node .generator/axon5/app/test/run-management-runtime-smoke.mjs --calendar --postgres`.

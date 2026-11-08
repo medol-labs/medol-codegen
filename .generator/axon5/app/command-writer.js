@@ -508,6 +508,8 @@ ${reservationSelections ? `\n${reservationSelections}` : ''}
     },
 
     _writeCommandHandlers(packageName, context, slicePackage, slice, selection, events, reservations = []) {
+        if (require('./management-writer').writeHandler(this, packageName, context, slicePackage, slice)) return;
+        if (require('./document-generation-writer').writeHandler(this, packageName, context, slicePackage, slice)) return;
         if (require('./archiving-writer').writeHandler(this, packageName, context, slicePackage, slice)) return;
         if (require('./scheduling-writer').writeHandler(this, packageName, context, slicePackage, slice)) return;
         if (require('./numbering-writer').writeManagementHandler(this, packageName, context, slicePackage, slice)) return;

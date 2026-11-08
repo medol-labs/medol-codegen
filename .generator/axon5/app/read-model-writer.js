@@ -2885,7 +2885,7 @@ class ${resourceName}(
     _writeReadModelProjector(packageName, context, slicePackage, slice, readmodel, name, idFields) {
         const scoped = tenantScoped(this.model, slice.context);
         const archiveGuard = require('./archiving-writer').localArchiving(this) && slice.context !== this.model.archiving.context;
-        const managementCapability = this.model.organizationManagement?.context === slice.context ? 'organization' : this.model.systemConfiguration?.context === slice.context ? 'configuration' : this.model.businessCalendar?.context === slice.context ? 'calendar' : null;
+        const managementCapability = this.model.reporting?.context === slice.context ? 'reporting' : this.model.organizationManagement?.context === slice.context ? 'organization' : this.model.systemConfiguration?.context === slice.context ? 'configuration' : this.model.businessCalendar?.context === slice.context ? 'calendar' : null;
         const documentCatalogueGuard = this.model.documentGeneration?.context === slice.context && ['DocumentTemplateCatalog','GeneratedDocumentCatalog'].includes(readmodel.name);
         if (readmodel.name === 'SystemNotificationSummary') {
             this._writeSystemNotificationSummaryProjector(packageName, context, slicePackage, readmodel, name);

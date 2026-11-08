@@ -452,6 +452,10 @@ const RefineGenerator = class extends Generator {
     _writeFrameworkComponents() {
         this._writeTenantRuntime();
         this.fs.copy(
+            this.templatePath('root/src/components/reporting/report-panel.tsx'),
+            this.destinationPath('./src/components/reporting/report-panel.tsx')
+        );
+        this.fs.copy(
             this.templatePath('root/src/components/refine-ui/fields/copyable-text.tsx'),
             this.destinationPath('./src/components/refine-ui/fields/copyable-text.tsx')
         );

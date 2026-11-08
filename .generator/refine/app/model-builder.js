@@ -39,6 +39,7 @@ function buildFrontendModel(source, selectedCommandKeys, options = {}) {
             }, readModel, allEvents, workflow)))
         .filter(Boolean)));
     for (const resource of resources) {
+        if (source.reporting?.context && resource.chapter?.name === source.reporting.context.toLowerCase() && resource.queryRoute === 'reportdefinitioncatalog') resource.reporting = true;
         if (source.documentGeneration?.context && resource.chapter?.name === source.documentGeneration.context.toLowerCase()) {
             if (resource.queryRoute === 'generateddocumentcatalog') {
                 resource.artifactDownload = {prefix: '/api/documents/', suffix: '/file', stateField: 'state', state: 'Completed'};

@@ -35,3 +35,15 @@ test('calendar runtime is independently scoped and adds a migration without chan
  assert(g.writes.has('src/main/resources/db/migration/V2026110805__business_calendar.sql'));
  g.model.tenancy={};assert.throws(()=>writeRuntime(g),/does not support tenancy/);
 });
+test('reporting runtime is opt-in, owns its migration and cleans adapters without deleting durable records',()=>{
+ const g=writer({reporting:{context:'Reporting'}});writeRuntime(g);
+ assert(g.writes.has('management/infrastructure/ReportingService.kt'));
+ assert(g.writes.has('management/infrastructure/ReportingWorker.kt'));
+ assert(g.writes.has('src/main/resources/db/migration/V2026110806__reporting.sql'));
+ assert.match(g.writes.get('management/infrastructure/ManagementOutboxPublisher.kt'),/capability in \('reporting'\)/);
+ assert(!g.writes.has('management/infrastructure/OrganizationService.kt'));
+ g.model.tenancy={};assert.throws(()=>writeRuntime(g),/does not support tenancy/);delete g.model.tenancy;
+ g.model.reporting=undefined;g.model.slices=[];writeRuntime(g);
+ assert(!g.writes.has('management/infrastructure/ReportingService.kt'));
+ assert(g.writes.has('src/main/resources/db/migration/V2026110806__reporting.sql'));
+});

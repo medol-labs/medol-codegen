@@ -3,14 +3,14 @@ import {mkdtempSync, mkdirSync, readFileSync, writeFileSync, copyFileSync} from 
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-if(process.argv.includes('--calendar') && process.argv.includes('--tenant')) throw new Error('Calendar and tenant fixtures are separate');
+if(['--calendar','--tenant','--reporting'].filter(f=>process.argv.includes(f)).length>1) throw new Error('Calendar and tenant fixtures are separate');
 const here=path.dirname(fileURLToPath(import.meta.url));
 const repo=path.resolve(here,'../../../..');
 const medol=process.env.MEDOL_SOURCE_ROOT ?? path.resolve(repo,'../medol');
 const workspace=mkdtempSync(path.join(tmpdir(),'medol-management-'));
 if(process.argv.includes('--isolated') && (!process.argv.includes('--postgres') || !process.argv.includes('--tenant'))) throw new Error('--isolated requires --tenant --postgres');
-const fixture=process.argv.includes('--calendar')?'business-calendar':process.argv.includes('--tenant')?'configuration-tenant':'management';
-const testClass=process.argv.includes('--calendar')?'BusinessCalendarRuntimeTest':process.argv.includes('--tenant')?'ConfigurationTenantRuntimeTest':'ManagementRuntimeTest';
+const fixture=process.argv.includes('--reporting')?'reporting':process.argv.includes('--calendar')?'business-calendar':process.argv.includes('--tenant')?'configuration-tenant':'management';
+const testClass=process.argv.includes('--reporting')?'ReportingRuntimeTest':process.argv.includes('--calendar')?'BusinessCalendarRuntimeTest':process.argv.includes('--tenant')?'ConfigurationTenantRuntimeTest':'ManagementRuntimeTest';
 const source=path.join(workspace,'source.medol');
 copyFileSync(path.join(here,`fixtures/${fixture}/source.medol`),source);
 const json=execFileSync(process.execPath,['--import',path.join(medol,'node_modules/tsx/dist/loader.mjs'),path.join(medol,'src/lib/dslToCodegenModelCli.ts'),source],{encoding:'utf8'});

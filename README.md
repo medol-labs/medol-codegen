@@ -1202,3 +1202,7 @@ Both use authoritative JDBC records/history and a durable outbox to publish mode
 Import `business-calendar` for versioned weekly working hours, holiday/makeup-date overrides, workday offsets and elapsed working-time calculations. Active calendars must be suspended before revision; new references require Active state, while pinned historical Active revisions support existing tasks. Dates outside maintained coverage and ambiguous/nonexistent DST endpoints fail explicitly. No national holidays or scheduler bindings are assumed. The runtime shares management transactions/history/outbox and adds an append-only migration for its lock. Tenant combination is currently rejected.
 
 See the [business calendar guide](../medol/docs/builtin-contexts/business-calendar.md). Verify generated backend behavior with `node .generator/axon5/app/test/run-management-runtime-smoke.mjs --calendar --postgres`.
+
+### Reporting
+
+The opt-in `reporting` capability generates versioned report definitions, a typed `ReportProvider` interface, bounded queries, owner-scoped execution APIs and asynchronous CSV exports. Business joins, permission scopes, projection freshness and archive access remain provider responsibilities. Definitions and execution journals publish metadata through the transactional management outbox. Generated frontend definition details include query/export controls. See the generated `reporting/README.md` for configuration, permissions, consistency and retry semantics. Tenant combinations are currently rejected.

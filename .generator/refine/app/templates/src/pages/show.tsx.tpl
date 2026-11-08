@@ -2,6 +2,9 @@
 <% if (resource.artifactDownload) { -%>
 import { DownloadFileButton } from "@/components/download/file-download";
 <% } -%>
+<% if (resource.reporting) { -%>
+import { ReportPanel } from "@/components/reporting/report-panel";
+<% } -%>
 import { useShow, useTranslate } from "@refinedev/core";
 
 import { frontendComposition } from "@/app/composition/composition.resolved";
@@ -55,6 +58,9 @@ export const <%= resource.component %>Show = () => {
   return (
     <ShowView>
       <ShowViewHeader />
+<% if (resource.reporting) { -%>
+      {record?.<%= resource.idField %> && <ReportPanel key={String(record.<%= resource.idField %>)} reportVersionId={String(record.<%= resource.idField %>)} backendModuleName="<%= resource.moduleName %>" />}
+<% } -%>
 <% if (resource.artifactDownload) { -%>
       {record?.<%= resource.idField %> && <DownloadFileButton
         uri={<%- JSON.stringify(resource.artifactDownload.prefix) %> + encodeURIComponent(String(record.<%= resource.idField %>)) + <%- JSON.stringify(resource.artifactDownload.suffix) %>}

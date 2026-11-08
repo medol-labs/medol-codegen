@@ -1,0 +1,11 @@
+spring:
+  application:
+    name: medol-scheduling-worker
+snail-job:
+  enabled: true
+  namespace: ${SNAIL_JOB_NAMESPACE}
+  group: ${SNAIL_JOB_GROUP}
+  token: ${SNAIL_JOB_TOKEN}
+  server:
+    host: ${SNAIL_JOB_SERVER_HOST}
+    port: ${SNAIL_JOB_SERVER_PORT:17888}

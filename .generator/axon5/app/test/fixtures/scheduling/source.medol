@@ -1,0 +1,12 @@
+import scheduling as Schedules deploy App
+context Reports {
+ slice RunReport {
+  startsLifecycle
+  command RunReport { runId: UUID id requestedAt: DateTime reportCode: String }
+  event ReportRequested { runId: UUID id requestedAt: DateTime reportCode: String }
+  state Requested
+ }
+ concept ReportRun { state Requested slice RunReport }
+}
+extend Schedules { provider scheduledCommand from Reports.RunReport { occurrenceId runId scheduledAt requestedAt } }
+deployment App { includes Reports }

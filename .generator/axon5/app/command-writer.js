@@ -508,6 +508,7 @@ ${reservationSelections ? `\n${reservationSelections}` : ''}
     },
 
     _writeCommandHandlers(packageName, context, slicePackage, slice, selection, events, reservations = []) {
+        if (require('./scheduling-writer').writeHandler(this, packageName, context, slicePackage, slice)) return;
         if (require('./numbering-writer').writeManagementHandler(this, packageName, context, slicePackage, slice)) return;
         const usesNumbering = slice.commands.some(c => (c.fields ?? []).some(f => f.numbering));
         const scoped = tenantScoped(this.model, slice.context);

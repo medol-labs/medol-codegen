@@ -259,6 +259,7 @@ function stateEventsForSlice(model, slice, events) {
 
 const testWriterMethods = {
     _writeDecisionTest(packageName, context, slicePackage, slice, selection, events, reservations = []) {
+        if (this.model.scheduling?.context === slice.context) return;
         const stateTarget = stateTargetFor(this.model, slice);
         const stateName = stateTarget.name;
         const decisionName = `${pascal(slice.name)}Decision`;
@@ -338,6 +339,7 @@ ${tests.map((test) => tenantScoped(this.model, slice.context)
     },
 
     _writeSliceIntegrationTest(packageName, context, slicePackage, slice, selection, events) {
+        if (this.model.scheduling?.context === slice.context) return;
         const tests = this._sliceIntegrationTests(slice, selection, events);
         const testName = `${pascal(slice.name)}IntegrationTest`;
         if (tests.length === 0) {

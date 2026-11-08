@@ -235,10 +235,10 @@ ${properties}${scoped ? `,\n    @EventTag(key = "__medol_tenant")\n    val medol
             const transition = childTransitionByEventId.get(event.id);
             const stateTransition = transitionByEventId.get(event.id);
             const assignments = [
-                ...(hasConceptState && stateTransition && stateTransition.from !== stateTransition.to && !transition && conceptHasState(this.model, slice.context, concept, stateTransition.to) ? [`        currentState = ${stateEnumName}.${stateEnumEntry(stateTransition.to)}`] : []),
+                ...(hasConceptState && stateTransition && (stateTransition.from !== stateTransition.to || this.model.scheduling?.context === slice.context) && !transition && conceptHasState(this.model, slice.context, concept, stateTransition.to) ? [`        currentState = ${stateEnumName}.${stateEnumEntry(stateTransition.to)}`] : []),
                 ...event.fields
                     .filter((field) => !(transition?.keyField && field.name === transition.keyField))
-                    .map((field) => `        ${field.name} = event.${field.name}`),
+                    .map((field) => require('./scheduling-writer').stateAssignment(this, slice, event, field) ?? `        ${field.name} = event.${field.name}`),
                 ...(transition?.keyField ? [`        members[event.${transition.keyField}.toString()] = "${escapeKotlin(transition.to)}"`] : [])
             ].join('\n');
             return `    @EventSourcingHandler\n    fun evolve(event: ${_eventTitle(event.title)}): ${stateName} = apply {\n${assignments}\n    }`;
@@ -288,6 +288,7 @@ ${sourcingHandlers}
     },
 
     _writeDecision(packageName, context, slicePackage, slice, selection, events, reservations = []) {
+        if (this.model.scheduling?.context === slice.context) return;
         const stateTarget = stateTargetFor(this.model, slice);
         const stateName = stateTarget.name;
         const decisionName = `${pascal(slice.name)}Decision`;
@@ -430,7 +431,7 @@ ${interfaceMethods}
 `);
 
         const domainPackage = `${this.model.rootPackage}.domain.${context}.${slicePackage}`;
-        if (this.model.numbering?.context !== slice.context) this._writeCreateOnly(this._rootKotlinPath(`domain/${context}/${slicePackage}/${decisionComponentName}.kt`), `package ${domainPackage}
+        if (this.model.scheduling?.context !== slice.context && this.model.numbering?.context !== slice.context) this._writeCreateOnly(this._rootKotlinPath(`domain/${context}/${slicePackage}/${decisionComponentName}.kt`), `package ${domainPackage}
 
 import org.springframework.stereotype.Component
 import ${packageName}.${decisionName}

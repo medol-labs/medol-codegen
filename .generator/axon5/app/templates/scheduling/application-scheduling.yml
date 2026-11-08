@@ -1,0 +1,18 @@
+# Load with SPRING_CONFIG_ADDITIONAL_LOCATION=file:./scheduling/application-scheduling.yml
+medol:
+  scheduling:
+    enabled: ${MEDOL_SCHEDULING_ENABLED:false}
+    callback-base-url: ${MEDOL_SCHEDULING_CALLBACK_URL:}
+    providers:
+      snail-primary:
+        kind: snail-job
+        base-url: ${SNAIL_JOB_OPENAPI_URL:}
+        namespace: ${SNAIL_JOB_NAMESPACE:}
+        group: ${SNAIL_JOB_GROUP:}
+        token: ${SNAIL_JOB_TOKEN:}
+        server-time-zone: UTC
+    # Remote target keys must use bracket notation to preserve dots:
+    # targets:
+    #   "[Reports.RunReport]":
+    #     base-url: ${REPORTS_BASE_URL}
+    #     token: ${REPORTS_INTERNAL_TOKEN}

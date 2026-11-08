@@ -2285,6 +2285,7 @@ ${assignments}
     },
 
     _writeReadModelJpaRepository(readModelPackageName, context, slicePackage, slice, readmodel, name, idFields, hasJsonJpaFields = false) {
+        const schedulingProjection = this.model.scheduling?.context === slice.context && readmodel.name === 'ScheduleCatalog';
         const numberingRuleProjection = this.model.numbering?.context === slice.context && readmodel.name === 'NumberingRuleCatalog';
         const scoped = tenantScoped(this.model, slice.context);
         const tenantField = readModelMetadataFields(readmodel).find((field) => field.key === 'TENANT_ID').name;
@@ -2371,6 +2372,9 @@ ${imports}
 ${idFields.length > 1 ? `import ${readModelPackageName}.${name}Key\n` : ''}
 interface ${springDataRepositoryName} : JpaRepository<${entityName}, ${scoped ? `${name}TenantKey` : idType}>, JpaSpecificationExecutor<${entityName}> {
 ${partialLookupMethods}
+${schedulingProjection ? `    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("select e from ${entityName} e where e.${idFields[0].name} = :id")
+    fun findScheduleForUpdate(@org.springframework.data.repository.query.Param("id") id: ${idType}): java.util.Optional<${entityName}>` : ''}
 ${numberingRuleProjection ? `    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
     @org.springframework.data.jpa.repository.Query("select r from NumberingRuleRow r where r.id = :id")
     fun lockRuleForProjection(@org.springframework.data.repository.query.Param("id") id: ${idType}): java.util.Optional<${this.model.rootPackage}.numbering.infrastructure.NumberingRuleRow>` : ''}
@@ -2413,7 +2417,7 @@ ${criteriaImplementation}
         check(jpaRepository.lockRuleForProjection(id).isPresent) { "Authoritative numbering rule is missing; restore numbering data before replay." }
         return jpaRepository.findById(id).map { it.toProjection() }.orElse(null)
     }` : `=
-        ${scoped ? 'jpaRepository.findOne(idSpecification(id).and(tenantSpecification()))' : 'jpaRepository.findById(id)'}.map { it.toProjection() }.orElse(null)`}
+        ${schedulingProjection ? 'jpaRepository.findScheduleForUpdate(id)' : scoped ? 'jpaRepository.findOne(idSpecification(id).and(tenantSpecification()))' : 'jpaRepository.findById(id)'}.map { it.toProjection() }.orElse(null)`}
 
 ${projectionLookupMethods ? `${projectionLookupMethods}\n\n` : ''}    override fun save(projection: ${name}Projection) {
 ${scoped ? `        val tenant = ${this.model.rootPackage}.shared.application.tenancy.TenantScope.requireTenant()
@@ -2977,7 +2981,8 @@ ${indent})`
                     .join('\n');
                 const numberingVersionGuard = this.model.numbering?.context === slice.context && readmodel.name === 'NumberingRuleCatalog'
                     ? '        if ((entity.ruleVersion ?: 0L) >= event.ruleVersion) return\n'
-                    : '';
+                    : this.model.scheduling?.context === slice.context && readmodel.name === 'ScheduleCatalog'
+                        ? '        if ((entity.planVersion ?: 0L) >= event.planVersion) return\n' : '';
                 return `    @Transactional
     open override fun update(
         event: ${_eventTitle(event.title)},

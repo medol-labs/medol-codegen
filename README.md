@@ -1157,7 +1157,7 @@ and an atomic event outbox. Single and batch requests share one counter algorith
 may leave gaps; allocated numbers are never recycled. Caller retries must preserve the business ID.
 Outbox delivery is at least once with a stable event ID and requires a durable Axon event store.
 The authoritative counter/receipt/occupancy tables must be backed up, not rebuilt from query projections.
-See `../medol/docs/builtin-capabilities.md` for formats, lifecycle, scope and deployment boundaries.
+See the [numbering guide](../medol/docs/builtin-contexts/numbering.md) for formats, lifecycle, scope and deployment boundaries.
 
 Repeatable Spring/H2/Axon runtime verification (JDK/Maven and adjacent MEDOL checkout required):
 
@@ -1170,3 +1170,9 @@ Use `MEDOL_SOURCE_ROOT` and `MAVEN_BIN` to override the adjacent checkout and Ma
 The fixture checks concurrent batches, idempotent retries across midnight/config changes,
 state/version guards, overflow rollback, tenant scopes, outer transaction rollback, JSON override
 protection, and actual command/outbox-to-projection delivery. It creates a temporary project.
+
+### Built-in scheduling (Axon 5)
+
+Import MEDOL `scheduling` and bind targets with `provider scheduledCommand from Context.Command`. The generator emits Axon event-sourced schedule lifecycle handlers, a typed command whitelist, durable reconciliation/delivery records, a SnailJob 2.0.2 OpenAPI adapter, and a standalone worker. See the generated `scheduling/README.md` and `scheduling/application-scheduling.yml`. Provider instances are selected per plan; `SchedulingProvider` supports adding PowerJob without changing business plans. A PowerJob adapter is not shipped. Redis is not required. Runtime verification: `node .generator/axon5/app/test/run-scheduling-runtime-smoke.mjs` (MEDOL source and Maven required).
+
+Built-in context usage and configuration: [overview](../medol/docs/builtin-contexts/README.md), [scheduling](../medol/docs/builtin-contexts/scheduling.md), [operation audit](../medol/docs/builtin-contexts/operation-audit.md), [tenant management](../medol/docs/builtin-contexts/tenant-management.md).

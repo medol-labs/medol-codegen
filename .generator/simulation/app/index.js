@@ -22,7 +22,7 @@ module.exports = class extends Generator {
         this.argument('appname', { type: String, required: false });
 
         this.workspace = loadMedolWorkspace(this.env.cwd, this.opts);
-        const outputRoot = this.opts.outputRoot ?? this.opts.output ?? generatorOutputRoot(this.workspace, 'simulation', '.');
+        const outputRoot = this.opts.outputRoot ?? this.opts.output ?? this.opts.root ?? generatorOutputRoot(this.workspace, 'simulation');
         if (outputRoot && outputRoot !== '.') {
             this.destinationRoot(this.destinationPath(outputRoot));
         }
@@ -58,7 +58,7 @@ module.exports = class extends Generator {
         const simulationModel = buildSimulationModel(this.codegenModel, this.simulationConfig);
         const files = generateSimulationFiles(simulationModel, {
             target: this.answers.target,
-            root: this.opts.outputRoot ?? this.opts.root ?? '.'
+            root: '.'
         });
 
         Object.entries(files).forEach(([file, content]) => {

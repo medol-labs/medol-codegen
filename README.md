@@ -629,12 +629,12 @@ The generated files use placeholder environment references only. Real passwords,
 
 The `simulation` generator reads the same `codegen-model.json` and derives a renderer-neutral `SimulationModel` before writing an executable service. The service calls a running business system through its public command APIs and executes DSL-derived business flows in order.
 
-Create a simulation service directory yourself, put `codegen-model.json` there, then run the generator from that directory. Files are generated directly into the current directory.
+Run from the project workspace containing the model. Simulation defaults to a dedicated
+`simulation/` directory, protecting the project's root package and README. Configure
+`generators.simulation.output` or pass `--output-root` to override it; an explicit
+`.` still opts into root generation.
 
 ```bash
-mkdir -p generated/simulation-service
-cp /path/to/codegen-model.json generated/simulation-service/codegen-model.json
-cd generated/simulation-service
 gen /opt/codegen/.generator/app/ --generator simulation --generator-type all
 ```
 
@@ -646,7 +646,7 @@ Supported simulation targets are:
 - `runtime`: compatibility alias for `service`
 - `scenarios`: one JSON file per discovered scenario
 
-Generated files are written under the current directory:
+Generated files are written under `simulation/` by default:
 
 ```text
 package.json
@@ -669,9 +669,10 @@ src/
 
 Pass `--output-root <relative-path>` when you explicitly want this structure rendered into a subdirectory.
 
-Start the service and point it at the business system:
+Start the service from the generated Simulation directory and point it at the business system:
 
 ```bash
+cd simulation
 BUSINESS_BASE_URL=http://localhost:8080 npm start
 ```
 
@@ -735,39 +736,45 @@ The first phase records specification `given` state as unsupported preparation m
 
 ## Delivery Pipelines And Data Preparation
 
-Operations now emits `operations/scripts/pipeline.mjs` and
-`delivery/generated/services.json`. The catalog distinguishes generated applications
+Simulation emits `src/pipeline.mjs`; Operations emits deployment configuration and
+`operations/model/services.json`, not the pipeline executor. The catalog distinguishes generated applications
 from external infrastructure images. Project-specific services belong in the
-hand-maintained `services` array in `delivery/pipeline.json`; duplicate names fail
+hand-maintained `services` array in `simulation/pipelines/pipeline.json`; duplicate names fail
 validation rather than overriding generated entries. No business-specific service
 is built into this mechanism.
 
-Start from `delivery/pipeline.json-example`. Only the example and generated catalog
+Start from `simulation/pipelines/pipeline.json-example`. Only the example and generated catalog
 are overwritten; the actual pipeline, environment files and custom scripts remain
 project-owned. The example contains image build/publish steps, not a complete
 validated deployment. Add the project's test, deployment and verification commands.
 
 ```bash
-node operations/scripts/pipeline.mjs plan delivery/pipeline.json
-node operations/scripts/pipeline.mjs run delivery/pipeline.json
+node simulation/src/pipeline.mjs plan simulation/pipelines/pipeline.json
+node simulation/src/pipeline.mjs run simulation/pipelines/pipeline.json
 ```
+
+Run these commands from the project root; replace `simulation` with the configured
+Simulation output directory. The working directory is the explicit project root for
+catalog lookup, step working directories and reports. Previously generated
+`operations/scripts/pipeline.mjs` is obsolete and should no longer be invoked.
 
 Steps execute sequentially in phase order:
 `validate`, `test`, `build`, `publish`, `deploy`, `ready`, `seed`, `verify`.
 Each step has a unique `id`, `phase`, argv-array `command`, optional project-relative
 `cwd`, `timeoutMs`, and service reference. Commands inherit environment credentials;
 do not put tokens into argv or committed configuration. Nonzero exits stop the run.
-Reports are written to ignored `delivery/reports/<run-id>/report.json`.
+Reports are written to ignored `simulation/reports/<run-id>/report.json`.
 The same CLI can be called by CI without a separate orchestration implementation.
 Pipeline configuration is trusted executable project configuration; review AI-created
 plans before executing them. There is no production approval or automatic rollback.
 
 `hosts` and `placements` describe environment topology independently of simulation
 population size. A placement references a service and host. Currently these references
-are validated, not translated into remote deployment commands. Local commands may call
-project Operations wrappers for SSH/k3d/kubectl. Direct remote-host execution fails
-explicitly. Cluster creation, networking, mounts, reachable endpoints and readiness
-remain Operations responsibilities; Simulation does not implement Kubernetes logic.
+are validated, not translated into remote deployment commands. Simulation executes
+project deployment wrappers for SSH/k3d/kubectl using Operations configuration.
+Direct remote-host execution fails explicitly until a remote executor is implemented.
+Operations describes networking, mounts and service configuration; Simulation owns
+cluster creation, deployment execution and readiness orchestration.
 Image digest promotion, remote resource tracking and resume require further work.
 
 Simulation now also emits `src/data-plan.mjs`, independently of the existing discovered

@@ -36,7 +36,7 @@ export function runPipeline(catalog, config, options = {}) {
   if (!steps.length) throw new Error('No pipeline steps configured.');
   const root = resolve(options.root || '.');
   const runId = randomUUID();
-  const reportDir = resolve(root, 'delivery/reports', runId);
+  const reportDir = resolve(options.reportRoot || resolve(root, 'simulation/reports'), runId);
   mkdirSync(reportDir, { recursive: true });
   const report = { runId, status: 'running', startedAt: new Date().toISOString(), steps: [] };
   const save = () => writeFileSync(resolve(reportDir, 'report.json'), JSON.stringify(report, null, 2));
@@ -45,7 +45,7 @@ export function runPipeline(catalog, config, options = {}) {
     const host = step.host ? config.hosts[step.host] : undefined;
     if (host && host.transport !== 'local') {
       report.status = 'failed';
-      report.steps.push({ id: step.id, error: 'Remote execution must use an Operations command (for example an SSH wrapper).' });
+      report.steps.push({ id: step.id, error: 'Remote execution requires a project deployment command (for example an SSH wrapper).' });
       break;
     }
     const result = spawnSync(step.command[0], step.command.slice(1), {
@@ -66,11 +66,12 @@ export function runPipeline(catalog, config, options = {}) {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const [action, configPath] = process.argv.slice(2);
-    if (!['plan', 'run'].includes(action) || !configPath) throw new Error('Usage: node operations/scripts/pipeline.mjs plan|run delivery/pipeline.json');
-    const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-    const catalog = JSON.parse(readFileSync(resolve(root, 'delivery/generated/services.json'), 'utf8'));
+    if (!['plan', 'run'].includes(action) || !configPath) throw new Error('Run from the project root: node simulation/src/pipeline.mjs plan|run simulation/pipelines/pipeline.json');
+    const root = process.cwd();
+    const catalog = JSON.parse(readFileSync(resolve(root, 'operations/model/services.json'), 'utf8'));
     const config = JSON.parse(readFileSync(resolve(configPath), 'utf8'));
-    const result = runPipeline(catalog, config, { root, plan: action === 'plan' });
+    const reportRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../reports');
+    const result = runPipeline(catalog, config, { root, reportRoot, plan: action === 'plan' });
     console.log(JSON.stringify(result, null, 2));
     if (result.status === 'failed') process.exitCode = 1;
   } catch (error) { console.error(error.message); process.exitCode = 1; }

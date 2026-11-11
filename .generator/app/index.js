@@ -47,7 +47,7 @@ module.exports = class extends Generator {
         const outputRoot = explicitOutputRoot
             ?? (this.answers.generator === 'refine'
                 ? undefined
-                : generatorOutputRoot(this.workspace, this.answers.generator, '.'));
+                : generatorOutputRoot(this.workspace, this.answers.generator));
 
         await this.composeWith({
             Generator: GeneratorClass.default ?? GeneratorClass,

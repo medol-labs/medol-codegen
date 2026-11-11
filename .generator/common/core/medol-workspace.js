@@ -79,7 +79,7 @@ function generatorConfig(workspace, generatorName) {
         ?? {};
 }
 
-function generatorOutputRoot(workspace, generatorName, fallback = '.') {
+function generatorOutputRoot(workspace, generatorName, fallback = generatorName === 'simulation' ? 'simulation' : '.') {
     const config = generatorConfig(workspace, generatorName);
     return config.output
         ?? config.outputRoot

@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { seedData } from '../data-plan-runtime.mjs';
-import { planPipeline, runPipeline } from '../../../operations/app/templates/pipeline.mjs';
+import { planPipeline, runPipeline } from '../pipeline-runtime.mjs';
 
 test('custom services merge, collisions and unknown placements fail', () => {
   const catalog = { services: [{ name: 'api' }] };

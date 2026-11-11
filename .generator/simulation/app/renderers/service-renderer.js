@@ -30,6 +30,15 @@ function simulationFiles(model, options = {}) {
 
 function serviceFiles(root, model) {
     return {
+        [outputPath(root, '.gitignore')]: 'reports/\n*.private.json\n',
+        [outputPath(root, 'pipelines/pipeline.json-example')]: JSON.stringify({
+            services: [], hosts: { local: { transport: 'local' } }, placements: [],
+            steps: [
+                { id: 'build-images', phase: 'build', command: ['node', 'operations/images/images.mjs', 'build'] },
+                { id: 'publish-images', phase: 'publish', command: ['node', 'operations/images/images.mjs', 'push'] }
+            ]
+        }, null, 2) + '\n',
+        [outputPath(root, 'src/pipeline.mjs')]: readFileSync(path.join(__dirname, '../pipeline-runtime.mjs'), 'utf8'),
         [outputPath(root, 'src/data-plan.mjs')]: readFileSync(path.join(__dirname, '../data-plan-runtime.mjs'), 'utf8'),
         [outputPath(root, 'package.json')]: renderPackageJson(model),
         [outputPath(root, '.env-example')]: renderEnvExample(),

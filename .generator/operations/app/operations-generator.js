@@ -12,6 +12,7 @@ const { resolveOperationsModel } = require('./environment-resolver');
 const { renderNetworkTopology } = require('./renderers/network-topology-renderer');
 const {readFileSync} = require('node:fs');
 const path = require('node:path');
+const { deliveryFiles } = require('./renderers/delivery-renderer');
 
 const targets = ['all', 'model', 'apisix', 'docker-compose', 'kubernetes', 'k3s', 'harbor', 'zot'];
 
@@ -26,6 +27,7 @@ function generateOperationsFiles(model, options = {}) {
     const imagesRoot = 'operations/images';
     const baseModel = portableOperationsModel(model);
     const files = {
+        ...deliveryFiles(baseModel),
         [`${modelRoot}/.gitignore`]: 'operations-model.private.json\noperations-model.local.json\n',
         'operations/.gitignore': '# Generated delivery packages and packaging scratch directories\n/bundles/\n',
         [`${modelRoot}/operations-model.json`]: `${JSON.stringify(baseModel, null, 2)}\n`,

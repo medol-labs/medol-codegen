@@ -4,6 +4,8 @@
  */
 
 const { kebab } = require('../../../axon5/app/model-helpers');
+const { readFileSync } = require('node:fs');
+const path = require('node:path');
 
 function simulationFiles(model, options = {}) {
     const root = trimRoot(options.root ?? '.');
@@ -28,6 +30,7 @@ function simulationFiles(model, options = {}) {
 
 function serviceFiles(root, model) {
     return {
+        [outputPath(root, 'src/data-plan.mjs')]: readFileSync(path.join(__dirname, '../data-plan-runtime.mjs'), 'utf8'),
         [outputPath(root, 'package.json')]: renderPackageJson(model),
         [outputPath(root, '.env-example')]: renderEnvExample(),
         [outputPath(root, 'Dockerfile')]: renderDockerfile(),
@@ -60,6 +63,7 @@ function renderPackageJson(model) {
         scripts: {
             start: 'node src/server.js',
             simulate: 'node src/cli.js',
+            seed: 'node src/data-plan.mjs',
             check: 'node --check src/server.js && node --check src/cli.js && node --check src/runtime/business-client.js && node --check src/runtime/context.js && node --check src/runtime/data-generator.js && node --check src/runtime/event-observer.js && node --check src/runtime/model-loader.js && node --check src/runtime/runner.js'
         },
         engines: {

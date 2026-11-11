@@ -733,6 +733,80 @@ Scenario discovery starts from lifecycle-starting commands and walks the graph f
 
 The first phase records specification `given` state as unsupported preparation metadata. It does not insert historical events, seed databases, run Playwright, or call an LLM.
 
+## Delivery Pipelines And Data Preparation
+
+Operations now emits `operations/scripts/pipeline.mjs` and
+`delivery/generated/services.json`. The catalog distinguishes generated applications
+from external infrastructure images. Project-specific services belong in the
+hand-maintained `services` array in `delivery/pipeline.json`; duplicate names fail
+validation rather than overriding generated entries. No business-specific service
+is built into this mechanism.
+
+Start from `delivery/pipeline.json-example`. Only the example and generated catalog
+are overwritten; the actual pipeline, environment files and custom scripts remain
+project-owned. The example contains image build/publish steps, not a complete
+validated deployment. Add the project's test, deployment and verification commands.
+
+```bash
+node operations/scripts/pipeline.mjs plan delivery/pipeline.json
+node operations/scripts/pipeline.mjs run delivery/pipeline.json
+```
+
+Steps execute sequentially in phase order:
+`validate`, `test`, `build`, `publish`, `deploy`, `ready`, `seed`, `verify`.
+Each step has a unique `id`, `phase`, argv-array `command`, optional project-relative
+`cwd`, `timeoutMs`, and service reference. Commands inherit environment credentials;
+do not put tokens into argv or committed configuration. Nonzero exits stop the run.
+Reports are written to ignored `delivery/reports/<run-id>/report.json`.
+The same CLI can be called by CI without a separate orchestration implementation.
+Pipeline configuration is trusted executable project configuration; review AI-created
+plans before executing them. There is no production approval or automatic rollback.
+
+`hosts` and `placements` describe environment topology independently of simulation
+population size. A placement references a service and host. Currently these references
+are validated, not translated into remote deployment commands. Local commands may call
+project Operations wrappers for SSH/k3d/kubectl. Direct remote-host execution fails
+explicitly. Cluster creation, networking, mounts, reachable endpoints and readiness
+remain Operations responsibilities; Simulation does not implement Kubernetes logic.
+Image digest promotion, remote resource tracking and resume require further work.
+
+Simulation now also emits `src/data-plan.mjs`, independently of the existing discovered
+flow scenarios. Keep custom data plans outside generated `scenarios/<discovered-id>.json`,
+for example under `fixtures/`. Invoke it with `npm run seed -- fixtures/seed.json environments/test.json`.
+
+Example data plan (replace example endpoints with actual business APIs):
+
+```json
+{
+  "seed": 1001,
+  "count": 20,
+  "steps": [
+    {
+      "id": "create", "kind": "command", "endpoint": "api", "path": "/entity/create",
+      "body": { "entityId": { "$uuid": "entity" }, "name": "Test entity" }
+    },
+    {
+      "id": "ready", "kind": "wait", "endpoint": "api", "path": "/entity/status",
+      "expect": { "path": "ready", "equals": true }, "timeoutMs": 30000
+    }
+  ]
+}
+```
+
+Environment: `{"endpoints":{"api":"http://localhost:8080"}}`.
+`{"$ref":"steps.create.request.entityId"}` references prior request data;
+`steps.create.response` references the response. `index`, `seed`, and `variables`
+are also available through `$ref`. `$uuid` is deterministic for seed/index/key.
+This does not imply idempotent business commands: repeated runs can still conflict.
+Commands are never automatically retried. Wait steps poll GET responses and check an
+explicit JSON field path for equality; HTTP failures fail the run. Configure query
+paths explicitly; this is not a generic model-derived query planner.
+`BUSINESS_HEADERS` provides JSON authentication headers. Plans and fixtures can be
+authored by humans or AI, but execution does not require an AI service.
+
+This increment provides local execution and extension points, not a preconfigured
+multi-machine training scenario, CI-provider workflow, or production release system.
+
 ## Configuration
 
 The preferred generator input is the `CodegenModel` exported by Event Modeling Toolkit:

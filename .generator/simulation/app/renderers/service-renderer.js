@@ -30,6 +30,8 @@ function simulationFiles(model, options = {}) {
 
 function serviceFiles(root, model) {
     return {
+        [outputPath(root, 'src/run.mjs')]: readFileSync(path.join(__dirname, '../environment-runner.mjs'), 'utf8'),
+        [outputPath(root, 'src/runtime/stages.mjs')]: readFileSync(path.join(__dirname, '../stage-runtime.mjs'), 'utf8'),
         [outputPath(root, '.gitignore')]: 'reports/\n*.private.json\n',
         [outputPath(root, 'pipelines/pipeline.json-example')]: JSON.stringify({
             services: [], hosts: { local: { transport: 'local' } }, placements: [],

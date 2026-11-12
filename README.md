@@ -736,6 +736,15 @@ The first phase records specification `given` state as unsupported preparation m
 
 ## Delivery Pipelines And Data Preparation
 
+Simulation also emits a location-aware launcher. From the project root run
+`node simulation/src/run.mjs --mode local|remote [--plan] [--pipeline path]`.
+Local mode selects `simulation/pipelines/pipeline.json` and rejects declared SSH
+steps. Remote mode selects `simulation/pipelines/remote.json` and requires an SSH
+step; hostless build steps remain local. These actual pipeline configs are
+project-owned and must be supplied, not inferred by the generator. Execution mode
+is independent of the selected Operations environment. Commands are trusted code;
+mode validation is not a sandbox for arbitrary shell scripts.
+
 Simulation emits `src/pipeline.mjs`; Operations emits deployment configuration and
 `operations/model/services.json`, not the pipeline executor. The catalog distinguishes generated applications
 from external infrastructure images. Project-specific services belong in the
@@ -772,7 +781,11 @@ plans before executing them. There is no production approval or automatic rollba
 population size. A placement references a service and host. Currently these references
 are validated, not translated into remote deployment commands. Simulation executes
 project deployment wrappers for SSH/k3d/kubectl using Operations configuration.
-Direct remote-host execution fails explicitly until a remote executor is implemented.
+SSH hosts are supported using `{"transport":"ssh","target":"ssh-config-alias","workDir":"/absolute/remote/path"}`.
+Steps bound to such a host execute remotely with batch authentication and shell-quoted
+arguments. Other steps remain local. Provision remote files and credentials separately;
+local environment variables are not forwarded, except the pipeline run ID. SSH timeout
+does not guarantee remote process termination. No remote retry or cleanup is automatic.
 Operations describes networking, mounts and service configuration; Simulation owns
 cluster creation, deployment execution and readiness orchestration.
 Image digest promotion, remote resource tracking and resume require further work.

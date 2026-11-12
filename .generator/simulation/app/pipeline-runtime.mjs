@@ -6,6 +6,19 @@ import { randomUUID } from 'node:crypto';
 
 export const phases = ['validate', 'test', 'build', 'publish', 'deploy', 'ready', 'seed', 'verify'];
 
+const quote = value => "'" + String(value).replaceAll("'", "'\\''") + "'";
+
+export function executionCommand(step, host, runId) {
+  if (!host || host.transport === 'local') return step.command;
+  if (host.transport !== 'ssh') throw new Error('Unsupported host transport');
+  if (!/^[a-zA-Z0-9_.@-]+$/.test(host.target || '') || host.target.startsWith('-')) throw new Error('Invalid SSH target; use an SSH config alias');
+  if (!host.workDir?.startsWith('/')) throw new Error('SSH workDir must be an absolute remote path');
+  if (step.cwd?.startsWith('/') || step.cwd?.split('/').includes('..')) throw new Error('Remote step cwd must stay within workDir');
+  const cwd = host.workDir + (step.cwd ? '/' + step.cwd : '');
+  return ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', host.target,
+    `cd ${quote(cwd)} && exec env MEDOL_PIPELINE_RUN_ID=${quote(runId)} ${step.command.map(quote).join(' ')}`];
+}
+
 export function planPipeline(catalog, config) {
   const services = new Map();
   for (const service of [...catalog.services, ...(config.services || [])]) {
@@ -24,6 +37,7 @@ export function planPipeline(catalog, config) {
     if (!phases.includes(step.phase)) throw new Error(`Unknown phase: ${step.phase}`);
     if (!Array.isArray(step.command) || !step.command.length || step.command.some(v => typeof v !== 'string')) throw new Error(`command must be an argv array: ${step.id}`);
     if (step.host && !config.hosts?.[step.host]) throw new Error(`Unknown host: ${step.host}`);
+    executionCommand(step, step.host ? config.hosts[step.host] : undefined, 'plan');
     if (step.service && !services.has(step.service)) throw new Error(`Unknown service: ${step.service}`);
     if (step.timeoutMs !== undefined && (!Number.isFinite(step.timeoutMs) || step.timeoutMs <= 0)) throw new Error(`Invalid timeout: ${step.id}`);
   }
@@ -43,13 +57,9 @@ export function runPipeline(catalog, config, options = {}) {
   save();
   for (const step of steps) {
     const host = step.host ? config.hosts[step.host] : undefined;
-    if (host && host.transport !== 'local') {
-      report.status = 'failed';
-      report.steps.push({ id: step.id, error: 'Remote execution requires a project deployment command (for example an SSH wrapper).' });
-      break;
-    }
-    const result = spawnSync(step.command[0], step.command.slice(1), {
-      cwd: resolve(root, step.cwd || '.'), stdio: 'inherit',
+    const command = executionCommand(step, host, runId);
+    const result = spawnSync(command[0], command.slice(1), {
+      cwd: host?.transport === 'ssh' ? root : resolve(root, step.cwd || '.'), stdio: 'inherit',
       env: { ...process.env, MEDOL_PIPELINE_RUN_ID: runId },
       timeout: step.timeoutMs || 1800000
     });

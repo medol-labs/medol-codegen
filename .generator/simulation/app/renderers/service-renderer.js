@@ -32,6 +32,18 @@ function serviceFiles(root, model) {
     return {
         [outputPath(root, 'src/run.mjs')]: readFileSync(path.join(__dirname, '../environment-runner.mjs'), 'utf8'),
         [outputPath(root, 'src/runtime/stages.mjs')]: readFileSync(path.join(__dirname, '../stage-runtime.mjs'), 'utf8'),
+        [outputPath(root, 'src/runtime/deployment.mjs')]: readFileSync(path.join(__dirname, '../deployment-runtime.mjs'), 'utf8'),
+        [outputPath(root, 'src/deploy.mjs')]: readFileSync(path.join(__dirname, '../deployment-entry.mjs'), 'utf8'),
+        [outputPath(root, 'src/prepare-environment.mjs')]: readFileSync(path.join(__dirname, '../environment-preparation.mjs'), 'utf8'),
+        [outputPath(root, 'pipelines/environment.json-example')]: JSON.stringify({
+            environment: 'test', target: 'kubernetes', provisioner: 'existing',
+            kubeconfigFile: '/path/to/test-kubeconfig', timeoutMs: 300000
+        }, null, 2) + '\n',
+        [outputPath(root, 'DEPLOYMENT.md')]: readFileSync(path.join(__dirname, '../deployment-guide.md'), 'utf8'),
+        [outputPath(root, 'pipelines/deployment-config.json-example')]: JSON.stringify({
+            target: 'kubernetes', environment: 'local', platform: 'linux/arm64',
+            adapter: 'simulation/extensions/adapters/deployment.mjs', instances: [], externalServices: []
+        }, null, 2) + '\n',
         [outputPath(root, '.gitignore')]: 'reports/\n*.private.json\n',
         [outputPath(root, 'pipelines/pipeline.json-example')]: JSON.stringify({
             services: [], hosts: { local: { transport: 'local' } }, placements: [],

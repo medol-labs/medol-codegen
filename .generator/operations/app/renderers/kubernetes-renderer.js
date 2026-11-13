@@ -1378,6 +1378,10 @@ resources:
 components:
   - "$(kustomize_path "\${EXTRA_COMPONENT}")"
 YAML
+        if [[ -n "\${SIMULATION_PATCHES_FILE:-}" ]]; then
+            printf '\\npatches: ' >> "\${combined}/kustomization.yaml"
+            cat "\${SIMULATION_PATCHES_FILE}" >> "\${combined}/kustomization.yaml"
+        fi
         echo "[k3d-dev] kubectl apply --validate=\${KUBECTL_APPLY_VALIDATE} -k \${combined}"
         kubectl_apply -k "\${combined}"
         return

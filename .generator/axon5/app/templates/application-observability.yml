@@ -1,0 +1,41 @@
+# OTLP HTTP/protobuf. Keep credentials in private Spring configuration or Secrets.
+medol:
+  observability:
+    enabled: ${MEDOL_OBSERVABILITY_ENABLED:false}
+    # Use a Pod UID or another unique ID in multi-host deployments.
+    instance-id: ${OTEL_SERVICE_INSTANCE_ID:${HOSTNAME:local}-${spring.application.name}-${server.port:8080}}
+management:
+  tracing:
+    enabled: ${MEDOL_OBSERVABILITY_ENABLED:false}
+    sampling:
+      probability: ${MEDOL_TRACING_SAMPLE_PROBABILITY:0.1}
+  opentelemetry:
+    resource-attributes:
+      "service.name": ${spring.application.name}
+      "service.instance.id": ${medol.observability.instance-id}
+      "service.version": ${IMAGE_VERSION:development}
+      "deployment.environment.name": ${MEDOL_OBSERVABILITY_ENVIRONMENT:local}
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/traces
+      export:
+        enabled: ${MEDOL_OBSERVABILITY_ENABLED:false}
+      timeout: 2s
+      connect-timeout: 1s
+    logging:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/logs
+      export:
+        enabled: ${MEDOL_OBSERVABILITY_ENABLED:false}
+      timeout: 2s
+      connect-timeout: 1s
+    metrics:
+      export:
+        enabled: ${MEDOL_OBSERVABILITY_ENABLED:false}
+        url: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/metrics
+        step: ${MEDOL_METRICS_EXPORT_STEP:30s}
+        connect-timeout: 1s
+        read-timeout: 2s
+  metrics:
+    tags:
+      application: ${spring.application.name}
+      environment: ${MEDOL_OBSERVABILITY_ENVIRONMENT:local}

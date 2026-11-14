@@ -4,6 +4,7 @@
  */
 
 const {resolveTenantStorage, validateTenantEnvironment} = require('./tenant-deployment');
+const {resolveObservability, applicationObservability} = require('./observability');
 
 function resolveOperationsModel(model, environmentName = 'dev') {
     const environment = model.environments.find((candidate) => candidate.name === environmentName)
@@ -12,10 +13,17 @@ function resolveOperationsModel(model, environmentName = 'dev') {
 
     const tenancy = model.applications.some((application) => application.kind === 'backend' && application.tenantIsolation)
         ? resolveTenantStorage(model.tenancy, environment.tenancy) : undefined;
+    const observability = resolveObservability({...model.observability, ...environment.observability}, environment.name);
     return {
         ...model,
         environment,
-        applications: model.applications.map((application) => resolveApplication(application, environment, model.imageTag, tenancy)),
+        observability,
+        applications: model.applications.map((application) => {
+            const resolved = resolveApplication(application, environment, model.imageTag, tenancy);
+            if (model.observability || environment.observability) resolved.environmentVariables = mergeEnvironmentVariables(
+                applicationObservability(resolved, observability, environment.name), resolved.environmentVariables);
+            return resolved;
+        }),
         infrastructure: model.infrastructure.map((component) => resolveInfrastructure(component, environment)),
         ...(model.gateway ? { gateway: resolveGateway(model.gateway, environment) } : {})
     };

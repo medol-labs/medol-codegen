@@ -235,6 +235,7 @@ const applicationWriterMethods = {
         this.fs.copyTpl(this.templatePath('logback-spring.xml.tpl'), this._destPath('src/main/resources/logback-spring.xml'), {
             rootPackage: this.model.rootPackage
         });
+        this.fs.copy(this.templatePath('application-observability.yml'), this._destPath('src/main/resources/application-observability.yml'));
         this.fs.copyTpl(this.templatePath('docker-compose.yml'), this._destPath('docker-compose.yml'), runtime);
         this.fs.copy(this.templatePath('V1__baseline.sql'), this._destPath('src/main/resources/db/migration/V1__baseline.sql'));
         if (this._shouldWriteIamIntoCurrentModule()) {
@@ -364,6 +365,13 @@ ${beanMethods}
         this.fs.copyTpl(this.templatePath('AxonFlowLoggingConfiguration.kt.tpl'), this._sharedKernelKotlinPath('shared/application/axon/AxonFlowLoggingConfiguration.kt'), {
             rootPackage: this.model.rootPackage
         });
+        this.fs.copyTpl(this.templatePath('ObservabilityLoggingConfiguration.kt.tpl'), this._sharedKernelKotlinPath('shared/application/logging/ObservabilityLoggingConfiguration.kt'), {
+            rootPackage: this.model.rootPackage
+        });
+        this.fs.copyTpl(this.templatePath('ObservabilityLoggingConfigurationTest.java.tpl'), this.destinationPath(`${SHARED_KERNEL_MODULE}/src/test/java/${this.model.rootPackage.replace(/\./g, '/')}/shared/application/logging/ObservabilityLoggingConfigurationTest.java`), {
+            rootPackage: this.model.rootPackage
+        });
+        this.fs.copy(this.templatePath('application-observability.yml'), this.destinationPath(`${SHARED_KERNEL_MODULE}/src/test/resources/observability-test.yml`));
         this.fs.copyTpl(this.templatePath('SuppressScheduledHibernateSqlLogFilter.kt.tpl'), this._sharedKernelKotlinPath('shared/application/logging/SuppressScheduledHibernateSqlLogFilter.kt'), {
             rootPackage: this.model.rootPackage
         });

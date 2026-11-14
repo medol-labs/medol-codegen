@@ -20,6 +20,12 @@ const config = {target: 'k3d', environment: 'test', platform: 'linux/arm64', com
     instances: [{service: 'worker', replicas: 20}]};
 const catalog = {services: [{name: 'worker'}]};
 
+test('environment-scoped infrastructure can be selected only where configured', () => {
+    const scoped = {services: [{name: 'worker', environments: ['test']}]};
+    assert.equal(planDeployment(config, scoped).instances.length, 1);
+    assert.throws(() => planDeployment({...config, environment: 'prod'}, scoped), /not configured/);
+});
+
 test('node count is independent of replicas and services are validated', () => {
     assert.equal(planDeployment(config, catalog).instances[0].replicas, 20);
     assert.throws(() => planDeployment(config), /Unknown service/);

@@ -15,6 +15,7 @@ const {
 } = require('./apisix-renderer');
 const { renderPostgresInitSql } = require('./docker-compose-renderer');
 const {tenantStorageYaml, tenantStorageChecksum, tenantDeploymentNotes} = require('../tenant-deployment');
+const {observabilityKubernetes} = require('../observability');
 
 function kubernetesFiles(model, options = {}) {
     const environmentName = options.environmentName ?? 'dev';
@@ -70,7 +71,8 @@ function kubernetesLikeFiles(model, options) {
     files[`${options.root}/environments/${options.environmentName}/kustomization.yaml`] = renderYaml({
         resources: [
             '../../base',
-            'configmap.yaml'
+            'configmap.yaml',
+            ...(environmentResolved.observability.mode === 'managed' ? ['observability.yaml'] : [])
         ],
         namespace: baseResolved.name,
         labels: [{
@@ -87,6 +89,7 @@ function kubernetesLikeFiles(model, options) {
         ]
     });
     files[`${options.root}/environments/${options.environmentName}/configmap.yaml`] = renderDocuments(environmentConfigMaps(environmentResolved, options));
+    if (environmentResolved.observability.mode === 'managed') files[`${options.root}/environments/${options.environmentName}/observability.yaml`] = renderDocuments(observabilityKubernetes(environmentResolved.observability));
     files[`${options.root}/environments/${options.environmentName}/secrets.example.yaml`] = renderDocuments(environmentSecretExamples(environmentResolved, options.environmentName));
     environmentPatches(environmentResolved).forEach((patch) => {
         files[`${options.root}/environments/${options.environmentName}/${patch.file}`] = renderYaml(patch.document);
@@ -153,6 +156,7 @@ function deploymentSiteFiles(environmentModel, options) {
             'infrastructure.yaml',
             'applications.yaml',
             'configmap.yaml',
+            ...(model.observability.mode === 'managed' ? ['observability.yaml'] : []),
             ...(model.gateway?.enabled ? ['apisix-config.yaml', 'apisix.yaml'] : [])
         ];
         const entries = [
@@ -180,6 +184,7 @@ function deploymentSiteFiles(environmentModel, options) {
             [`${root}/configmap.yaml`, renderDocuments(environmentConfigMaps(model, options))],
             [`${root}/secrets.example.yaml`, renderDocuments(environmentSecretExamples(model, options.environmentName))]
         ];
+        if (model.observability.mode === 'managed') entries.push([`${root}/observability.yaml`, renderDocuments(observabilityKubernetes(model.observability))]);
         if (model.gateway?.enabled) {
             entries.push(
                 [`${root}/apisix-config.yaml`, renderApisixConfigMap(model)],

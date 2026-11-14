@@ -6,6 +6,7 @@
 const { resolveOperationsModel } = require('../environment-resolver');
 const { renderYaml } = require('./yaml');
 const {tenantStorageYaml, tenantDeploymentNotes} = require('../tenant-deployment');
+const {observabilityCompose} = require('../observability');
 
 function renderDockerCompose(model, environmentName = 'dev') {
     const resolved = resolveOperationsModel(model, environmentName);
@@ -13,7 +14,7 @@ function renderDockerCompose(model, environmentName = 'dev') {
 }
 
 function renderResolvedCompose(resolved, environmentName, gatewayRoot = `../../apisix/${environmentName}`) {
-    const services = {};
+    const services = observabilityCompose(resolved.observability);
 
     if (resolved.gateway?.enabled) {
         services[resolved.gateway.name] = gatewayService(resolved, gatewayRoot);
@@ -277,7 +278,7 @@ function httpHealthcheck(healthCheck, port) {
 }
 
 function composeVolumes(model) {
-    const volumes = {};
+    const volumes = model.observability?.mode === 'managed' ? {medol_observability_data: {}} : {};
     model.infrastructure.forEach((component) => {
         if (component.volumeName) volumes[component.volumeName] = {};
         (component.volumeNames ?? []).forEach((volumeName) => {

@@ -6,9 +6,14 @@ function localDevelopmentFiles(model) {
     const original = dockerComposeFiles(model, 'local', {root, combined: true});
     const compose = YAML.parse(original[`${root}/docker-compose.yml`]);
     const infrastructure = new Set(model.infrastructure.map((component) => component.name));
+    if (compose.services['medol-observability']) infrastructure.add('medol-observability');
     compose.name = `${model.name}-host-local`;
     compose.services = Object.fromEntries(Object.entries(compose.services).filter(([name]) => infrastructure.has(name)));
-    for (const service of Object.values(compose.services)) {
+    for (const [name, service] of Object.entries(compose.services)) {
+        if (name === 'medol-observability') {
+            service.ports.push('127.0.0.1:${MEDOL_OTLP_PORT:-4318}:4318');
+            continue;
+        }
         service.ports = service.ports?.map((port) => `127.0.0.1:${port}`);
     }
     const files = {
@@ -20,6 +25,7 @@ function localDevelopmentFiles(model) {
             'MEDOL_SECURITY_ADMIN_BOOTSTRAP_ENABLED=true',
             'MEDOL_SECURITY_ADMIN_BOOTSTRAP_SETUP_TOKEN=local-admin-setup',
             'MEDOL_SECURITY_INTERNAL_TOKEN=local-dev-internal-token',
+            ...(compose.services['medol-observability'] ? ['MEDOL_OBSERVABILITY_ENABLED=true', 'OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318', 'MEDOL_OBSERVABILITY_ENVIRONMENT=local'] : []),
             ''
         ].join('\n'),
         [`${root}/.gitignore`]: '.env\n*.local.env\n.work/\n',

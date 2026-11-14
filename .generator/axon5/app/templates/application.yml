@@ -4,6 +4,7 @@ server:
 spring:
   config:
     import:
+      - optional:classpath:application-observability.yml
       - optional:classpath:application-infrastructure.yml
       - optional:file:./config/application-infrastructure.yml
       - optional:file:<%= envFile %>[.properties]

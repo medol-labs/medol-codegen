@@ -319,6 +319,61 @@ gen /opt/codegen/.generator/app/ --generator refine --generator-type all
 
 ## Generate operations artifacts
 
+### Observability
+
+Operations owns observability deployment configuration, not application business logic
+or deployment execution. Axon5 applications export OTLP HTTP/protobuf through
+Micrometer/OpenTelemetry; no SkyWalking/Elastic-specific SDK is generated.
+
+Configure an environment in `operations/config/local.yml`, then regenerate both
+Axon5 and operations (and rebuild application images):
+
+```yaml
+environments:
+  local:
+    observability:
+      mode: managed
+      samplingProbability: 0.1
+      storageSize: 10Gi
+```
+
+- `disabled` (default): no managed backend and no application export.
+- `managed`: pinned `grafana/otel-lgtm:0.41.0`, limited to local/dev/test. Includes
+  Collector, metrics, logs, traces and Grafana. Compose binds Grafana to loopback;
+  Kubernetes uses ClusterIP/PVC. This reference image is not production HA.
+- `external`: set `observability.endpoint` to an existing OTLP HTTP base URL.
+  Use this for production or centralized collection across deployment sites.
+
+Generated instructions live in `operations/observability/<environment>/README.md`.
+An independent component reference is also generated under
+`operations/observability/<environment>/reference/`: a Compose stack with pinned
+Collector, Prometheus, Loki, Tempo and Grafana images, explicit signal pipelines,
+persistent volumes, provisioned data sources, an ingestion dashboard and a scrape
+failure alert rule. It does not use Mimir. Set a private Grafana password using
+`.env-example`; its default host ports are 13000 (Grafana) and 14318 (OTLP HTTP),
+both loopback-only. Follow its README for startup and application connectivity.
+To use it instead of managed LGTM, configure `external` with a Collector address
+reachable from the application. This standalone reference is opt-in and is not
+included in managed image packaging or simulation service selection. Its
+`images.json` lists the images needed for separate/offline deployment.
+
+The backend is part of generated deployment manifests, so existing deployment
+tools can apply it. Simulation service allowlists must include `medol-observability`
+when managed mode is used. It is not an application startup dependency.
+Operations image delivery includes the managed image as a dependency.
+
+For native JVM development export `MEDOL_OBSERVABILITY_ENABLED=true` and
+`OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318`; Compose service DNS only works
+inside its network. Host process environment is not populated by Compose `.env`.
+Never expose the reference stack's unauthenticated OTLP port publicly.
+Provide external collector authentication through private Spring OTLP header
+configuration or Secrets, not endpoint URLs. Payload/metadata dumps are disabled
+unless `MEDOL_AXON_LOG_PAYLOAD_ENABLED=true`; diagnostic opt-in can expose secrets.
+
+This baseline does not implement Axon token-lag metrics, full asynchronous Axon
+trace propagation, a model execution UI, Python/browser instrumentation or alert
+delivery. Those are separate extensions, not capabilities implied by installing LGTM.
+
 When `networkTopology.sites` is configured, Compose also follows those deployment
 boundaries: `operations/docker-compose/<environment>/sites/<site>/` contains one
 self-contained project, local gateway configuration and site-specific database

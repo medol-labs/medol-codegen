@@ -13,13 +13,16 @@ import org.slf4j.LoggerFactory
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.beans.factory.annotation.Value
 import java.lang.reflect.Method
 import java.time.Duration
 import java.time.Instant
 
 @Configuration
 @ConditionalOnProperty(prefix = "medol.axon.flow-logging", name = ["enabled"], havingValue = "true", matchIfMissing = true)
-class AxonFlowLoggingConfiguration {
+class AxonFlowLoggingConfiguration(
+    @Value("\${medol.axon.log-payload-enabled:false}") private val logPayload: Boolean,
+) {
     private val logger = LoggerFactory.getLogger("<%= rootPackage %>.shared.application.axon")
 
     @Bean
@@ -124,6 +127,10 @@ class AxonFlowLoggingConfiguration {
     }
 
     private fun describe(message: Message): String {
+        val base = "messageId=${message.identifier()} type=${message.type()} payloadType=${message.payloadType().name}"
+        if (!logPayload) return base + " metadata=" + message.metadata().filterKeys {
+            it in setOf("traceId", "correlationId", "causationId")
+        }
         val payload = runCatching { message.payload() }.getOrNull()
         val payloadText = payload?.toString()?.replace(Regex("\\s+"), " ")?.take(2000)
         return "messageId=${message.identifier()} type=${message.type()} payloadType=${message.payloadType().name} payload=$payloadText metadata=${message.metadata()}"

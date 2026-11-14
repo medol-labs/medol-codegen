@@ -24,13 +24,18 @@ export function planDeployment(config, catalog = {services: []}) {
         throw new Error('computeNodes must be a positive integer');
     }
     const known = new Set();
+    const allowedEnvironments = new Map();
     for (const service of [...catalog.services, ...(config.externalServices || [])]) {
         if (!service.name || known.has(service.name)) throw new Error('Duplicate or missing service name');
         known.add(service.name);
+        if (service.environments) allowedEnvironments.set(service.name, service.environments);
     }
     const seen = new Set();
     for (const instance of config.instances || []) {
         if (!known.has(instance.service)) throw new Error(`Unknown service: ${instance.service}`);
+        if (allowedEnvironments.has(instance.service) && !allowedEnvironments.get(instance.service).includes(config.environment)) {
+            throw new Error(`Service ${instance.service} is not configured for environment ${config.environment}`);
+        }
         if (seen.has(instance.service)) throw new Error(`Duplicate instance configuration: ${instance.service}`);
         seen.add(instance.service);
         if (!Number.isInteger(instance.replicas) || instance.replicas < 0) throw new Error('replicas must be a nonnegative integer');

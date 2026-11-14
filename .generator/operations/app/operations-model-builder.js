@@ -45,6 +45,7 @@ function buildOperationsModel(source = {}, config = {}) {
         title: cleanTitle(source.domain ?? source.title ?? domainName),
         imagePrefix,
         imageTag,
+        ...(operationsConfig.observability ? {observability: operationsConfig.observability} : {}),
         ...(source.tenancy ? {tenancy: operationsConfig.tenancy ?? {}} : {}),
         ...(registry ? { registry } : {}),
         applications,

@@ -13,6 +13,7 @@ const { renderNetworkTopology } = require('./renderers/network-topology-renderer
 const {readFileSync} = require('node:fs');
 const path = require('node:path');
 const { serviceCatalogFiles } = require('./renderers/service-catalog-renderer');
+const {observabilityFiles} = require('./observability');
 
 const targets = ['all', 'model', 'apisix', 'docker-compose', 'kubernetes', 'k3s', 'harbor', 'zot'];
 
@@ -42,7 +43,8 @@ function generateOperationsFiles(model, options = {}) {
         'operations/scripts/prepare-registry.sh': renderRegistryPreparationScript(baseModel),
         'operations/scripts/package-offline.mjs': readFileSync(path.join(__dirname, 'templates/package-offline.mjs'), 'utf8'),
         'operations/scripts/package-compose.mjs': readFileSync(path.join(__dirname, 'templates/package-compose.mjs'), 'utf8'),
-        ...documentSupportFiles(baseModel, environment)
+        ...documentSupportFiles(baseModel, environment),
+        ...observabilityFiles(baseModel, environment)
     };
 
     if (target === 'model') return files;
@@ -846,11 +848,15 @@ function serviceFilterValues(...keys) {
 }
 
 function infrastructureImages() {
+    const modelFile = join(imagesDir, '..', 'model', environment, 'operations-model.json');
+    const runtimeModel = JSON.parse(readFileSync(modelFile, 'utf8'));
+    const observability = {...runtimeModel.observability, ...runtimeModel.environments?.find(item => item.name === environment)?.observability};
     const selectedInfrastructure = selectedSite
         ? infrastructureComponents.filter((component) => selectedSite.infrastructure.includes(component.name))
         : infrastructureComponents;
     return unique([
         ...selectedInfrastructure.map((component) => component.image),
+        ...(observability.mode === 'managed' ? [observability.image ?? 'grafana/otel-lgtm:0.41.0'] : []),
         ...(!selectedSite || selectedSite.gateway ? [gatewayImage] : []),
         ...systemImages,
         ...extraDependencyImages()

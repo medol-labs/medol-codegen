@@ -3,16 +3,21 @@
 import {existsSync, readdirSync, readFileSync} from 'node:fs';
 import {join, resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
+import {createPlatformCache, normalizePlatform} from './image-platform-runtime.mjs';
 
 const args = parseArgs(process.argv.slice(2));
 const command = args._[0] ?? 'help';
 const root = resolve(process.cwd(), args.root ?? '.');
-const platform = String(args.platform ?? process.env.DOCKER_DEFAULT_PLATFORM ?? 'linux/amd64');
+const cache = createPlatformCache({dryRun: Boolean(args['dry-run'])});
+const platform = normalizePlatform(args.platform || process.env.DOCKER_DEFAULT_PLATFORM || (['list', 'pull', 'export', 'all', 'select'].includes(command) ? cache.nativePlatform() : 'linux/amd64'));
 const tarFile = resolve(root, args.output ?? args.file ?? process.env.DEPENDENCY_IMAGE_TAR ?? 'dependency-images.tar');
 const dryRun = Boolean(args['dry-run']);
 const includeApps = Boolean(args['include-apps']);
 
 switch (command) {
+    case 'select':
+        cache.activate(dependencyImages(), platform);
+        break;
     case 'list':
         printPlan();
         break;
@@ -43,7 +48,7 @@ function printPlan() {
 
 function pullImages() {
     for (const image of dependencyImages()) {
-        run('docker', ['pull', '--platform', platform, image]);
+        cache.ensure(image, platform, {refresh: Boolean(args.refresh)});
     }
 }
 
@@ -52,7 +57,7 @@ function exportImages() {
     if (images.length === 0) {
         fail('No dependency images were found.');
     }
-    run('docker', ['save', ...images, '-o', tarFile]);
+    cache.withImages(images, platform, () => run('docker', ['save', ...images, '-o', tarFile]));
 }
 
 function dependencyImages() {
@@ -132,7 +137,7 @@ function run(commandName, commandArgs) {
         shell: process.platform === 'win32'
     });
     if (result.status !== 0) {
-        process.exit(result.status ?? 1);
+        throw new Error(`Command failed: ${commandName} (exit ${result.status ?? 1})`);
     }
 }
 
@@ -170,13 +175,15 @@ function printUsage() {
   node scripts/dependency-images.mjs pull [options]
   node scripts/dependency-images.mjs export [options]
   node scripts/dependency-images.mjs all [options]
+  node scripts/dependency-images.mjs select [options]
 
 Wrappers:
   node scripts/pull-dependency-images.mjs
   node scripts/export-dependency-images.mjs
 
 Options:
-  --platform <os/arch>       Target CPU architecture. Defaults to DOCKER_DEFAULT_PLATFORM or linux/amd64.
+  --platform <os/arch>       Target CPU architecture. Defaults to DOCKER_DEFAULT_PLATFORM or Docker Engine architecture.
+  --refresh                 Check the registry even when the platform is cached.
   --output <file>            Docker archive path. Defaults to DEPENDENCY_IMAGE_TAR or dependency-images.tar.
   --compose <file[,file]>    Limit discovery to one or more compose files.
   --image <image[,image]>    Use explicit images instead of compose discovery.

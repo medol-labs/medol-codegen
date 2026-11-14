@@ -5,6 +5,7 @@ import {resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {writeArchiveManifest, verifyArchiveManifest, verifyLoadedImages} from './image-archive-runtime.mjs';
 import {prepareRelease, defaultImageVersion} from './release-runtime.mjs';
+import {createPlatformCache} from './image-platform-runtime.mjs';
 
 const defaultImageName = '<%= imageName %>';
 const defaultTar = '<%= imageTarName %>';
@@ -18,11 +19,15 @@ const imageName = String(args.image ?? process.env.IMAGE_NAME ?? defaultImageNam
 const fullImageName = `${imagePrefix}/${imageName}:${imageVersion}`;
 const tarFile = resolve(root, args.output ?? args.file ?? process.env.IMAGE_TAR ?? defaultTar);
 const dryRun = Boolean(args['dry-run']);
-const platform = String(args.platform ?? process.env.DOCKER_DEFAULT_PLATFORM ?? '').trim();
+const platformCache = createPlatformCache({dryRun});
+const platform = String(args.platform || process.env.DOCKER_DEFAULT_PLATFORM || (['build', 'export', 'push', 'all', 'list', 'select'].includes(command) ? platformCache.nativePlatform() : 'linux/amd64'));
 const release = ['build', 'export', 'push', 'all'].includes(command)
     ? prepareRelease({root, version: imageVersion, target: 'refine', operation: command === 'all' ? 'build' : command, buildOptions: {platform, buildArgs: valuesOf(args['build-arg'])}, dryRun}) : undefined;
 
 switch (command) {
+    case 'select':
+        platformCache.activate([fullImageName], platform);
+        break;
     case 'build':
         buildImage();
         break;
@@ -50,6 +55,7 @@ switch (command) {
 function buildImage() {
     ensureDockerfile();
     release.embed(['public/medol-build.json']);
+    platformCache.pin(fullImageName);
     run('docker', [
         'build',
         ...release.dockerArgs,
@@ -60,23 +66,29 @@ function buildImage() {
         fullImageName,
         '.'
     ], {env: {...process.env, DOCKER_BUILDKIT: process.env.DOCKER_BUILDKIT ?? '1'}});
+    platformCache.pin(fullImageName);
     release.writeManifest('.medol/build-manifest.json', [fullImageName]);
 }
 
 async function exportImage() {
+    return platformCache.withImages([fullImageName], platform, async () => {
     release.verifyImages([fullImageName]);
     run('docker', ['save', fullImageName, '-o', tarFile]);
     const manifest = release.writeManifest('.medol/build-manifest.json', [fullImageName]);
     await writeArchiveManifest({archiveFile: tarFile, manifest, labels: release.labels, root, dryRun});
+    });
 }
 
 async function importImage() {
     const manifest = await verifyArchiveManifest({archiveFile: tarFile, imageVersion: args.version === undefined ? undefined : String(args.version), dryRun});
+    for (const image of manifest?.images ?? []) platformCache.pin(image.name);
     run('docker', ['load', '-i', tarFile]);
     verifyLoadedImages({manifest, root});
+    for (const image of manifest?.images ?? []) platformCache.pin(image.name);
 }
 
 function pushImage() {
+    return platformCache.withImages([fullImageName], platform, () => {
     release.claim();
     release.verifyImages([fullImageName]);
     const prefix = String(args['push-prefix'] ?? process.env.DOCKER_PUSH_IMAGE_PREFIX ?? imagePrefix).replace(/\/+$/, '');
@@ -84,6 +96,7 @@ function pushImage() {
     if (target !== fullImageName) run('docker', ['tag', fullImageName, target]);
     run('docker', ['push', target]);
     release.writeManifest('.medol/release-manifest.json', [target], {requireRepoDigests: true});
+    });
 }
 
 function printPlan() {
@@ -133,7 +146,7 @@ function run(commandName, commandArgs, options = {}) {
         shell: process.platform === 'win32'
     });
     if (result.status !== 0) {
-        process.exit(result.status ?? 1);
+        throw new Error(`Command failed: ${commandName} (exit ${result.status ?? 1})`);
     }
 }
 
@@ -206,6 +219,7 @@ function printUsage() {
   node scripts/image-bundle.mjs push [options]
   node scripts/image-bundle.mjs all [options]
   node scripts/image-bundle.mjs list [options]
+  node scripts/image-bundle.mjs select [options]
 
 Wrappers:
   node scripts/build-images.mjs

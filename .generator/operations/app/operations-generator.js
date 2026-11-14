@@ -38,6 +38,7 @@ function generateOperationsFiles(model, options = {}) {
         [`${imagesRoot}/image-config.mjs`]: readFileSync(path.join(__dirname, 'image-config-runtime.mjs'), 'utf8'),
         [`${imagesRoot}/release-runtime.mjs`]: readFileSync(path.join(__dirname, '../../common/release-runtime.mjs'), 'utf8'),
         [`${imagesRoot}/image-archive-runtime.mjs`]: readFileSync(path.join(__dirname, '../../common/image-archive-runtime.mjs'), 'utf8'),
+        [`${imagesRoot}/image-platform-runtime.mjs`]: readFileSync(path.join(__dirname, '../../common/image-platform-runtime.mjs'), 'utf8'),
         'operations/scripts/prepare-registry.sh': renderRegistryPreparationScript(baseModel),
         'operations/scripts/package-offline.mjs': readFileSync(path.join(__dirname, 'templates/package-offline.mjs'), 'utf8'),
         'operations/scripts/package-compose.mjs': readFileSync(path.join(__dirname, 'templates/package-compose.mjs'), 'utf8'),
@@ -251,6 +252,7 @@ import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
 import {resolveImageConfig} from './image-config.mjs';
 import {prepareRelease} from './release-runtime.mjs';
+import {createPlatformCache} from './image-platform-runtime.mjs';
 import {verifyArchiveManifest, verifyLoadedImages} from './image-archive-runtime.mjs';
 
 const imagesDir = dirname(fileURLToPath(import.meta.url));
@@ -470,7 +472,7 @@ function pushImages() {
 
 function pullDependencyImages() {
     if (skipDependencies || !projectRoots.backend) return;
-    runNode(projectRoots.backend, ['scripts/dependency-images.mjs', 'pull', '--platform', dependencyPlatform, '--image', infrastructureImages().join(',')]);
+    runNode(projectRoots.backend, ['scripts/dependency-images.mjs', 'pull', '--platform', dependencyPlatform, '--image', infrastructureImages().join(','), ...(args.refresh ? ['--refresh'] : [])]);
 }
 
 function exportDependencyImages() {
@@ -483,16 +485,21 @@ function importDependencyImages() {
     if (!dryRun && !existsSync(dependencyArchive)) {
         fail(\`Dependency image archive was not found: \${dependencyArchive}\`);
     }
+    const cache = createPlatformCache({dryRun});
+    for (const image of infrastructureImages()) cache.pin(image);
     run('docker', ['load', '-i', dependencyArchive], monorepoRoot);
+    for (const image of infrastructureImages()) cache.pin(image);
 }
 
 function pushDependencyImages() {
     if (skipDependencies) return;
+    return createPlatformCache({dryRun}).withImages(infrastructureImages(), dependencyPlatform, () => {
     for (const image of infrastructureImages()) {
         const target = dependencyRegistryImage(image);
         run('docker', ['tag', image, target], monorepoRoot);
         run('docker', ['push', target], monorepoRoot);
     }
+    });
 }
 
 function collectComposeFiles() {
@@ -897,11 +904,8 @@ function valuesOf(value) {
 }
 
 function hostDockerPlatform() {
-    if (process.platform === 'darwin' || process.platform === 'linux') {
-        if (process.arch === 'arm64') return 'linux/arm64';
-        if (process.arch === 'x64') return 'linux/amd64';
-    }
-    return '';
+    if (['help', '--help', '-h'].includes(command)) return '';
+    return createPlatformCache({dryRun: Boolean(args['dry-run'])}).nativePlatform();
 }
 
 function flagEnabled(argValue, envValue) {
@@ -927,7 +931,7 @@ function run(commandName, commandArgs, cwd) {
         shell: process.platform === 'win32'
     });
     if (result.status !== 0) {
-        process.exit(result.status ?? 1);
+        throw new Error('Command failed: ' + commandName + ' (exit ' + (result.status ?? 1) + ')');
     }
 }
 

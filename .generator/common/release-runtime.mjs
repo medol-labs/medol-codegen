@@ -83,12 +83,16 @@ export function prepareRelease({root, version, target = 'axon5', generationRoot 
     const versionInfo = validateDeliveryVersion(String(version), generation?.model?.metadata);
     if (!['build', 'export', 'push'].includes(operation)) throw new Error('Invalid release operation.');
     const isDelivery = deliveryPattern.test(String(version));
+    const targetPlatform = typeof buildOptions.platform === 'string' ? buildOptions.platform
+        : buildOptions.platform ? `${buildOptions.platform.os}/${buildOptions.platform.architecture}` : '';
+    const platformManifest = targetPlatform && /^[a-z0-9/_-]+$/.test(targetPlatform)
+        ? `.medol/build-manifest.${targetPlatform.replaceAll('/', '-')}${variant ? '.' + variant : ''}.json` : undefined;
     const canonicalVersion = 'v' + String(version).replace(/^v/, '') + (variant ? `--${variant}` : '');
     const claimFile = resolve(root, '.medol/releases', `${canonicalVersion}.identity.json`);
     const releaseFile = resolve(root, '.medol/releases', `${canonicalVersion}.json`);
     let recordedBuild;
     if (operation !== 'build') {
-        const buildFile = isDelivery ? claimFile : resolve(root, '.medol/build-manifest.json');
+        const buildFile = isDelivery ? claimFile : resolve(root, platformManifest && existsSync(resolve(root, platformManifest)) ? platformManifest : '.medol/build-manifest.json');
         recordedBuild = existsSync(buildFile) ? JSON.parse(readFileSync(buildFile, 'utf8')) : undefined;
         if (recordedBuild?.imageVersion !== String(version) || (recordedBuild?.variant ?? '') !== variant) recordedBuild = undefined;
         if (isDelivery && !recordedBuild && !dryRun && target !== 'operations') throw new Error('No matching build record; build this delivery before export or push.');
@@ -246,6 +250,7 @@ export function prepareRelease({root, version, target = 'axon5', generationRoot 
                 if (!existsSync(releaseFile)) writeFileSync(releaseFile, JSON.stringify(completed, null, 2) + '\n', {flag: 'wx'});
             }
             write(resolve(root, file), manifest);
+            if (file === '.medol/build-manifest.json' && platformManifest) write(resolve(root, platformManifest), manifest);
             return manifest;
         }
     };

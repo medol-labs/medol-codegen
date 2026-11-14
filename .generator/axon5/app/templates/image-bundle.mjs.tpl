@@ -5,6 +5,7 @@ import {resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {writeArchiveManifest, verifyArchiveManifest, verifyLoadedImages} from './image-archive-runtime.mjs';
 import {prepareRelease, defaultImageVersion} from './release-runtime.mjs';
+import {createPlatformCache} from './image-platform-runtime.mjs';
 
 const defaultModules = <%- JSON.stringify(imageModules, null, 4) %>;
 const defaultTar = '<%= imageTarName %>';
@@ -18,13 +19,18 @@ const imageVersion = String(args.version ?? process.env.IMAGE_VERSION ?? default
 const tarFile = resolve(root, args.output ?? args.file ?? process.env.IMAGE_TAR ?? defaultTar);
 const dryRun = Boolean(args['dry-run']);
 const jibGoal = 'com.google.cloud.tools:jib-maven-plugin:3.4.5:dockerBuild';
-const platform = parsePlatform(args.platform ?? process.env.DOCKER_DEFAULT_PLATFORM ?? 'linux/amd64');
+const platformCache = createPlatformCache({dryRun});
+const platform = parsePlatform(args.platform || process.env.DOCKER_DEFAULT_PLATFORM || (['build', 'export', 'push', 'all', 'list', 'select'].includes(command) ? platformCache.nativePlatform() : 'linux/amd64'));
+const platformName = `${platform.os}/${platform.architecture}`;
 const skipInstall = flagEnabled(args['skip-install'], process.env.FAST_IMAGE_BUILD);
 const offline = flagEnabled(args.offline, process.env.MAVEN_OFFLINE);
 const release = ['build', 'export', 'push', 'all'].includes(command)
     ? prepareRelease({root, version: imageVersion, target: 'axon5', operation: command === 'all' ? 'build' : command, buildOptions: {platform}, dryRun}) : undefined;
 
 switch (command) {
+    case 'select':
+        platformCache.activate(imageNames(), platformName);
+        break;
     case 'build':
         buildImages();
         break;
@@ -62,6 +68,7 @@ function buildImages() {
         console.log('[images] skipping Maven install; using already-built local reactor artifacts');
     }
     for (const moduleName of modules) {
+        platformCache.pin(imageName(moduleName));
         run('./mvnw', [
             ...mavenGlobalArgs(),
             '-pl', moduleName,
@@ -72,25 +79,31 @@ function buildImages() {
             ...release.jibArgs,
             jibGoal
         ]);
+        platformCache.pin(imageName(moduleName));
     }
     release.writeManifest('.medol/build-manifest.json', imageNames());
 }
 
 async function exportImages() {
+    return platformCache.withImages(imageNames(), platformName, async () => {
     ensureModules();
     release.verifyImages(imageNames());
     run('docker', ['save', ...imageNames(), '-o', tarFile]);
     const manifest = release.writeManifest('.medol/build-manifest.json', imageNames());
     await writeArchiveManifest({archiveFile: tarFile, manifest, labels: release.labels, root, dryRun});
+    });
 }
 
 async function importImages() {
     const manifest = await verifyArchiveManifest({archiveFile: tarFile, imageVersion: args.version === undefined ? undefined : String(args.version), dryRun});
+    for (const image of manifest?.images ?? []) platformCache.pin(image.name);
     run('docker', ['load', '-i', tarFile]);
     verifyLoadedImages({manifest, root});
+    for (const image of manifest?.images ?? []) platformCache.pin(image.name);
 }
 
 function pushImages() {
+    return platformCache.withImages(imageNames(), platformName, () => {
     ensureModules();
     release.claim();
     release.verifyImages(imageNames());
@@ -102,6 +115,7 @@ function pushImages() {
         return target;
     });
     release.writeManifest('.medol/release-manifest.json', targets, {requireRepoDigests: true});
+    });
 }
 
 function printPlan() {
@@ -128,7 +142,7 @@ function run(commandName, commandArgs) {
         shell: process.platform === 'win32'
     });
     if (result.status !== 0) {
-        process.exit(result.status ?? 1);
+        throw new Error(`Command failed: ${commandName} (exit ${result.status ?? 1})`);
     }
 }
 
@@ -241,6 +255,7 @@ function printUsage() {
   node scripts/image-bundle.mjs push [options]
   node scripts/image-bundle.mjs all [options]
   node scripts/image-bundle.mjs list [options]
+  node scripts/image-bundle.mjs select [options]
 
 Wrappers:
   node scripts/build-images.mjs
@@ -252,7 +267,7 @@ Options:
   --module <name[,name]>   Limit to one or more generated deployment modules.
   --prefix <name>          Docker image prefix. Defaults to DOCKER_IMAGE_PREFIX or medol.
   --version <tag>          Image tag. Defaults to IMAGE_VERSION or 0.0.1-SNAPSHOT.
-  --platform <os/arch>     Target CPU architecture. Defaults to DOCKER_DEFAULT_PLATFORM or linux/amd64.
+  --platform <os/arch>     Target CPU architecture. Defaults to DOCKER_DEFAULT_PLATFORM or Docker Engine architecture.
   --skip-install           Skip the preliminary reactor install. Also enabled by FAST_IMAGE_BUILD=true.
   --offline                Run Maven with -o. Also enabled by MAVEN_OFFLINE=true.
   --output <file>          Image archive path. Defaults to IMAGE_TAR or ${defaultTar}.

@@ -60,6 +60,22 @@ test('draft and metadata-free legacy defaults remain compatible', async (t) => {
     assert.equal(validateDeliveryVersion('latest').imageVersion, 'latest');
 });
 
+test('development build records isolate architecture and plugin variant', async (t) => {
+    const {root, target} = fixture(t, {stable: false});
+    const {prepareRelease} = await runtime;
+    for (const variant of ['vision', 'tabular']) {
+        for (const platform of ['linux/amd64', 'linux/arm64']) {
+            const options = {root, target, version: '0.0.1-SNAPSHOT', variant, buildOptions: {platform}};
+            const built = prepareRelease(options).writeManifest();
+            const file = path.join(root, `.medol/build-manifest.${platform.replaceAll('/', '-')}.${variant}.json`);
+            assert.equal(JSON.parse(fs.readFileSync(file)).buildIdentity, built.buildIdentity);
+        }
+    }
+    const first = JSON.parse(fs.readFileSync(path.join(root, '.medol/build-manifest.linux-amd64.vision.json')));
+    const exported = prepareRelease({root, target, version: '0.0.1-SNAPSHOT', variant: 'vision', buildOptions: {platform: 'linux/amd64'}, operation: 'export'});
+    assert.equal(exported.manifest.buildIdentity, first.buildIdentity);
+});
+
 test('application generation identities are environment-independent while operations retain environment', (t) => {
     const {root} = fixture(t);
     for (const target of ['axon5', 'refine']) {
@@ -223,8 +239,8 @@ test('real backend/frontend/operations generation smoke links baseline packages 
         assert.equal(JSON.parse(fs.readFileSync(path.join(root, `.medol/generation/${target}.json`))).model.metadata.source.release.label, 'v1.2.3');
         if (target === 'refine') assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'package.json'))).version, '1.2.3');
         if (target === 'axon5') assert.match(fs.readFileSync(path.join(root, 'pom.xml'), 'utf8'), /<version>1.2.3<\/version>/);
-        const script = target === 'operations' ? 'operations/dev/images.mjs' : 'scripts/image-bundle.mjs';
-        const dryArgs = target === 'operations' ? ['--skip-backend', '--skip-console'] : [];
+        const script = target === 'operations' ? 'operations/images/images.mjs' : 'scripts/image-bundle.mjs';
+        const dryArgs = target === 'operations' ? ['--environment', 'dev', '--skip-backend', '--skip-console'] : [];
         const listed = spawnSync(process.execPath, [script, 'list', '--dry-run', ...dryArgs], {cwd: root, encoding: 'utf8'});
         assert.equal(listed.status, 0, listed.stderr);
         assert.match(listed.stdout, /v1.2.3.0/);

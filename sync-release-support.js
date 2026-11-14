@@ -15,6 +15,8 @@ function syncReleaseSupport({cwd = process.cwd(), root, target, model, modules, 
     const runtime = fs.readFileSync(path.join(__dirname, '.generator/common/release-runtime.mjs'), 'utf8');
     files.set('scripts/release-runtime.mjs', runtime);
     files.set('scripts/image-archive-runtime.mjs', fs.readFileSync(path.join(__dirname, '.generator/common/image-archive-runtime.mjs'), 'utf8'));
+    files.set('scripts/image-platform-runtime.mjs', fs.readFileSync(path.join(__dirname, '.generator/common/image-platform-runtime.mjs'), 'utf8'));
+    files.set('scripts/IMAGE-PLATFORMS.md', fs.readFileSync(path.join(__dirname, '.generator/common/IMAGE-PLATFORMS.md'), 'utf8'));
     if (target === 'axon5' || target === 'refine') {
         if (target === 'axon5' && (!modules?.length || modules.some((name) => !/^[\w-]+$/.test(name)))) {
             throw new Error('Pass --modules with the existing deployable backend modules (comma separated).');
@@ -37,7 +39,7 @@ function syncReleaseSupport({cwd = process.cwd(), root, target, model, modules, 
         const workspace = loadMedolWorkspace(cwd, options);
         const generated = generateOperationsFiles(buildOperationsModel(loaded.codegenModel, loadOperationsConfig(cwd, workspace, options.environment)), {target: 'model', environment: options.environment});
         for (const [file, text] of Object.entries(generated)) {
-            if (/\/(images|image-config|release-runtime|image-archive-runtime)\.mjs$/.test(file)) files.set(file, text);
+            if (/\/(images|image-config|release-runtime|image-archive-runtime|image-platform-runtime)\.mjs$/.test(file)) files.set(file, text);
         }
     }
     files.set(`.medol/generation/${target}.json`, JSON.stringify(record, null, 2) + '\n');

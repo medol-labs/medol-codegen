@@ -35,7 +35,7 @@ function fixture(t) {
     const logFile = path.join(root, 'docker-calls.jsonl');
     const bin = path.join(root, 'bin');
     fs.mkdirSync(bin);
-    fs.writeFileSync(path.join(bin, 'docker'), `#!${process.execPath}\nconst fs=require('node:fs');const args=process.argv.slice(2);fs.appendFileSync(${JSON.stringify(logFile)},JSON.stringify(args)+'\\n');if(args[0]==='image')process.stdout.write(fs.readFileSync(${JSON.stringify(imageFile)}));else if(args[0]==='save')fs.copyFileSync(${JSON.stringify(archiveFile)},args[args.indexOf('-o')+1]);else if(args[0]!=='load')process.exit(1);\n`, {mode: 0o755});
+    fs.writeFileSync(path.join(bin, 'docker'), `#!${process.execPath}\nconst fs=require('node:fs');const args=process.argv.slice(2);fs.appendFileSync(${JSON.stringify(logFile)},JSON.stringify(args)+'\\n');if(args[0]==='image'){const image=JSON.parse(fs.readFileSync(${JSON.stringify(imageFile)}));process.stdout.write(args.includes('--format')?JSON.stringify(image):JSON.stringify([{...image,Os:'linux',Architecture:'amd64'}]));}else if(args[0]==='save')fs.copyFileSync(${JSON.stringify(archiveFile)},args[args.indexOf('-o')+1]);else if(!['load','tag'].includes(args[0]))process.exit(1);\n`, {mode: 0o755});
     const oldPath = process.env.PATH;
     process.env.PATH = bin + path.delimiter + oldPath;
     t.after(() => { process.env.PATH = oldPath; });
@@ -117,6 +117,7 @@ for (const target of ['axon5', 'refine', 'engine']) {
         const scriptRoot = path.join(f.root, 'offline');
         fs.mkdirSync(path.join(scriptRoot, 'scripts'), {recursive: true});
         fs.copyFileSync(helperFile, path.join(scriptRoot, 'scripts/image-archive-runtime.mjs'));
+        fs.copyFileSync(path.join(generatorRoot, '.generator/common/image-platform-runtime.mjs'), path.join(scriptRoot, 'scripts/image-platform-runtime.mjs'));
         fs.copyFileSync(path.join(generatorRoot, '.generator/common/release-runtime.mjs'), path.join(scriptRoot, 'scripts/release-runtime.mjs'));
         const template = target === 'engine'
             ? path.resolve(generatorRoot, '../federation-learning/federation-learning-runtime-engine/scripts/image-bundle.mjs')
@@ -126,6 +127,11 @@ for (const target of ['axon5', 'refine', 'engine']) {
         let result = run();
         assert.equal(result.status, 0, result.stderr);
         assert.equal(f.calls().filter((args) => args[0] === 'load').length, 1);
+        const importCalls = f.calls();
+        const loadIndex = importCalls.findIndex((args) => args[0] === 'load');
+        const isCachePin = (args) => args[0] === 'tag' && args[2].startsWith('medol-platform-cache/');
+        assert.ok(importCalls.slice(0, loadIndex).some(isCachePin), 'preserve existing architecture before load');
+        assert.ok(importCalls.slice(loadIndex + 1).some(isCachePin), 'cache verified imported architecture');
         fs.writeFileSync(f.imageFile, JSON.stringify({Id: 'sha256:' + 'c'.repeat(64), Config: {Labels: f.labels}}));
         result = run();
         assert.notEqual(result.status, 0);
@@ -163,7 +169,7 @@ for (const target of ['axon5', 'refine', 'engine']) {
             });
         `);
         const exported = path.join(f.root, `${target}-export.tar`);
-        result = spawnSync(process.execPath, ['scripts/image-bundle.mjs', 'export', '--output', exported], {cwd: scriptRoot, encoding: 'utf8'});
+        result = spawnSync(process.execPath, ['scripts/image-bundle.mjs', 'export', '--platform', 'linux/amd64', '--output', exported], {cwd: scriptRoot, encoding: 'utf8'});
         assert.equal(result.status, 0, result.stderr);
         const {verifyArchiveManifest} = await runtime;
         const exportedManifest = await verifyArchiveManifest({archiveFile: exported});

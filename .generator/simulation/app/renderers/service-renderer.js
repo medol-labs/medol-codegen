@@ -31,6 +31,9 @@ function simulationFiles(model, options = {}) {
 function serviceFiles(root, model) {
     return {
         [outputPath(root, 'src/run.mjs')]: readFileSync(path.join(__dirname, '../environment-runner.mjs'), 'utf8'),
+        [outputPath(root, 'src/cases.mjs')]: readFileSync(path.join(__dirname, '../case-design.mjs'), 'utf8'),
+        [outputPath(root, 'src/execute-cases.mjs')]: readFileSync(path.join(__dirname, '../case-executor.mjs'), 'utf8').replace("'./case-design.mjs'", "'./cases.mjs'"),
+        [outputPath(root, 'WORKFLOW.md')]: readFileSync(path.join(__dirname, '../workflow-guide.md'), 'utf8'),
         [outputPath(root, 'src/runtime/stages.mjs')]: readFileSync(path.join(__dirname, '../stage-runtime.mjs'), 'utf8'),
         [outputPath(root, 'src/runtime/deployment.mjs')]: readFileSync(path.join(__dirname, '../deployment-runtime.mjs'), 'utf8'),
         [outputPath(root, 'src/deploy.mjs')]: readFileSync(path.join(__dirname, '../deployment-entry.mjs'), 'utf8'),
@@ -53,7 +56,7 @@ function serviceFiles(root, model) {
             ]
         }, null, 2) + '\n',
         [outputPath(root, 'src/pipeline.mjs')]: readFileSync(path.join(__dirname, '../pipeline-runtime.mjs'), 'utf8'),
-        [outputPath(root, 'src/data-plan.mjs')]: readFileSync(path.join(__dirname, '../data-plan-runtime.mjs'), 'utf8'),
+        [outputPath(root, 'src/data-plan.mjs')]: readFileSync(path.join(__dirname, '../data-plan-runtime.mjs'), 'utf8').replace("'./case-design.mjs'", "'./cases.mjs'"),
         [outputPath(root, 'package.json')]: renderPackageJson(model),
         [outputPath(root, '.env-example')]: renderEnvExample(),
         [outputPath(root, 'Dockerfile')]: renderDockerfile(),
@@ -640,8 +643,7 @@ export function createEventObserver(options = {}) {
       if (strict) {
         throw new Error(message);
       }
-      log('EVENT observation skipped ' + event.name + ' (set STRICT_EVENTS=true or POST /events to enforce)');
-      return undefined;
+      throw new Error(message + ' (event verification is required; configure an observer)');
     }
   };
 }
@@ -894,6 +896,10 @@ function renderReadme(model) {
     return `# Medol Simulation Service
 
 Generated service for executing business flows against a running business system.
+
+See [WORKFLOW.md](WORKFLOW.md) for the five independent stages: environment,
+deployment, case design, data preparation, and test execution. The existing
+scenario service below is not a substitute for reviewing candidate test cases.
 
 ## Start
 

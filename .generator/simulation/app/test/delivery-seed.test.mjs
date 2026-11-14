@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { seedData } from '../data-plan-runtime.mjs';
+import { seedData, validateDataPlan } from '../data-plan-runtime.mjs';
+import { draftCases } from '../case-design.mjs';
 import { planPipeline, runPipeline } from '../pipeline-runtime.mjs';
 
 test('custom services merge, collisions and unknown placements fail', () => {
@@ -49,4 +50,27 @@ test('command failure is not retried', async () => {
     { endpoints: { api: 'http://example.test' } },
     { fetch: async () => { calls++; return new Response('', { status: 400 }); } }), /HTTP 400/);
   assert.equal(calls, 1);
+});
+
+test('baseline data is independent and exports a minimal prepared manifest', async () => {
+  const result = await seedData({steps: [{id: 'create', kind: 'command', endpoint: 'api', path: '/create', body: {id: 'entity'}}],
+    exports: {id: {$ref: 'steps.create.request.id'}}}, {environment: 'dev', deploymentId: 'one', endpoints: {api: 'http://example.test'}},
+    {fetch: async () => new Response(JSON.stringify({secret: 'not-exported'}))});
+  assert.equal(result.manifest.mode, 'baseline');
+  assert.equal(result.manifest.status, 'prepared');
+  assert.deepEqual(result.manifest.records, [{id: 'entity'}]);
+  assert.ok(!JSON.stringify(result.manifest).includes('not-exported'));
+});
+
+test('case data requires approved cases and explicit requirement mappings', () => {
+  const casePlan = draftCases({scenarios: [{id: 'sample', steps: [{command: 'Create', expectedEvents: ['Created']}]}]});
+  const plan = {mode: 'case', caseIds: ['sample'], steps: [{id: 'prepare'}]};
+  assert.throws(() => validateDataPlan(plan), /Unknown data case/);
+  assert.throws(() => validateDataPlan(plan, {casePlan}), /approval/);
+  Object.assign(casePlan.cases[0], {status: 'approved', reviewIssues: [], dataRequirements: [{id: 'entities'}]});
+  assert.throws(() => validateDataPlan(plan, {casePlan}), /Unmapped/);
+  plan.fulfillments = {sample: {entities: ['missing']}};
+  assert.throws(() => validateDataPlan(plan, {casePlan}), /step IDs/);
+  plan.fulfillments.sample.entities = ['prepare'];
+  assert.equal(validateDataPlan(plan, {casePlan}), 'case');
 });

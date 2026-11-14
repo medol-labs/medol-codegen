@@ -13,13 +13,17 @@ export function validateMode(mode, config) {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
     try {
         const args = process.argv.slice(2);
-        let mode, pipeline;
+        let mode, pipeline, stage;
         let plan = false;
         while (args.length) {
             const arg = args.shift();
             if (arg === '--mode') mode = args.shift();
             else if (arg === '--pipeline') pipeline = args.shift();
             else if (arg === '--plan') plan = true;
+            else if (arg === '--stage') {
+                stage = args.shift();
+                if (!stage || stage.startsWith('--')) throw new Error('--stage requires a stage name');
+            }
             else throw new Error(`Unknown option: ${arg}`);
         }
         if (!mode) throw new Error('Usage from project root: node simulation/src/run.mjs --mode local|remote [--plan] [--pipeline path]');
@@ -31,7 +35,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
         const catalog = JSON.parse(readFileSync(resolve(root, 'operations/model/services.json'), 'utf8'));
         planPipeline(catalog, config);
         console.log(`[simulation] mode=${mode}, pipeline=${file}`);
-        const result = runPipeline(catalog, config, {root, plan, reportRoot: resolve(simulationRoot, 'reports')});
+        const result = runPipeline(catalog, config, {root, plan, stage, reportRoot: resolve(simulationRoot, 'reports')});
         console.log(JSON.stringify(result, null, 2));
         if (result.status === 'failed') process.exitCode = 1;
     } catch (error) { console.error(error.message); process.exitCode = 1; }

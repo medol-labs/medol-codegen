@@ -13,12 +13,16 @@ export function validateMode(mode, config) {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
     try {
         const args = process.argv.slice(2);
-        let mode, pipeline, stage;
+        let mode, pipeline, stage, runId;
         let plan = false;
         while (args.length) {
             const arg = args.shift();
             if (arg === '--mode') mode = args.shift();
             else if (arg === '--pipeline') pipeline = args.shift();
+            else if (arg === '--run') {
+                runId = args.shift();
+                if (!runId || runId.startsWith('--')) throw new Error('--run requires a registered run ID');
+            }
             else if (arg === '--plan') plan = true;
             else if (arg === '--stage') {
                 stage = args.shift();
@@ -35,7 +39,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
         const catalog = JSON.parse(readFileSync(resolve(root, 'operations/model/services.json'), 'utf8'));
         planPipeline(catalog, config);
         console.log(`[simulation] mode=${mode}, pipeline=${file}`);
-        const result = runPipeline(catalog, config, {root, plan, stage, reportRoot: resolve(simulationRoot, 'reports')});
+        const result = runPipeline(catalog, config, {root, plan, stage, runId, reportRoot: resolve(simulationRoot, 'reports')});
         console.log(JSON.stringify(result, null, 2));
         if (result.status === 'failed') process.exitCode = 1;
     } catch (error) { console.error(error.message); process.exitCode = 1; }

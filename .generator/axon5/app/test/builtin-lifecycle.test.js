@@ -22,6 +22,17 @@ for (const kind of ['Import', 'Export']) {
 const {stateWriterMethods} = require('../state-writer');
 const {transitionForCommand} = require('../model-helpers');
 
+test('partial generation retains all event handlers of the selected concept', () => {
+    const slice = (name, context = 'Jobs') => ({name, title: name, context, concepts: ['Work'],
+        commands: [{name, fields: [], dependencies: []}], events: [{id: context + name, name: name + 'Done', fields: []}], tags: []});
+    const first = slice('Start'), second = slice('Finish'), other = slice('Elsewhere', 'Other');
+    const observed = [];
+    const writer = {...stateWriterMethods, model: {rootPackage: 'example', slices: [first, second, other], concepts: []},
+        _writeState: (_package, _context, _concept, _slice, _selection, events) => observed.push(events.map(e => e.name))};
+    writer._writeConceptEntityStates([second]);
+    assert.deepEqual(observed, [['StartDone', 'FinishDone']]);
+});
+
 test('event sourcing changes lifecycle only for an explicitly modeled outcome', () => {
     const events = [
         {id: 'started', name: 'WorkStarted', title: 'Work Started', fields: []},

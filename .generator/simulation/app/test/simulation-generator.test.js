@@ -351,6 +351,14 @@ test('generates simulation service, model, runtime, and scenario files', () => {
     assert(files['EXTENSIONS.md']);
     assert.match(files['src/worker.mjs'], /from '\.\/task\.mjs'/);
     assert(!files['src/task.mjs'].includes('federation-learning'));
+    assert(files['src/instance-registry.mjs']);
+    assert(files['ENVIRONMENTS.md']);
+    assert(files['environments/kubernetes.json-example']);
+    assert(files['environments/compose.json-example']);
+    assert(files['deployments/instance.json-example']);
+    assert.match(files['src/task.mjs'], /instance-registry\.mjs/);
+    assert(!files['src/instance-registry.mjs'].includes('federation-learning'));
+    assert.match(files['.gitignore'], /instances\/environments/);
     assert(!files['src/worker.mjs'].includes('fl-test'));
     assert(files['cases/README.md']);
     for (const directory of ['generated', 'manual', 'ai', 'approved']) {

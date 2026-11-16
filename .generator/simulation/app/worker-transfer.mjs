@@ -6,7 +6,7 @@ import {runDirectory} from './task-entry.mjs';
 
 const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
 const artifactName = value => typeof value === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value) && value !== '..';
-const defaults = ['.env', '.env.*', '*.private.*', 'secrets.*', '.work/', 'reports/', 'node_modules/', '.git/', '*.tar', '*.tar.gz', 'registries.yaml'];
+const defaults = ['.env', '.env.*', '*.private.*', 'secrets.*', '.work/', 'reports/', '**/instances/environments/***', '**/instances/deployments/***', 'node_modules/', '.git/', '*.tar', '*.tar.gz', 'registries.yaml'];
 function execute(command, args, options = {}) {
     const result = spawnSync(command, args, {encoding: 'utf8', timeout: 600000, ...options});
     if (result.error || result.status !== 0) throw new Error(`${command} failed`);
@@ -48,7 +48,7 @@ export function syncWorker(config, options = {}) {
 
 export function collectEvidence(config, options = {}) {
     const host = validateTransfer(config, options.root || '.'), run = options.execute || execute;
-    const runId = options.runId || process.env.MEDOL_PIPELINE_RUN_ID;
+    const runId = options.runId || process.env.MEDOL_SIMULATION_RUN_ID || process.env.MEDOL_PIPELINE_RUN_ID;
     const directory = runDirectory(options.root || '.', runId);
     const artifacts = config.artifacts;
     if (!Array.isArray(artifacts) || !artifacts.length || artifacts.some(x => !artifactName(x)) || new Set(artifacts).size !== artifacts.length) throw new Error('Explicit unique artifact filenames required');

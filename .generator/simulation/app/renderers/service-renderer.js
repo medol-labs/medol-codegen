@@ -32,6 +32,9 @@ function serviceFiles(root, model) {
     return {
         [outputPath(root, 'src/run.mjs')]: readFileSync(path.join(__dirname, '../environment-runner.mjs'), 'utf8'),
         [outputPath(root, 'src/task.mjs')]: readFileSync(path.join(__dirname, '../task-entry.mjs'), 'utf8'),
+        [outputPath(root, 'src/instance-registry.mjs')]: readFileSync(path.join(__dirname, '../instance-registry.mjs'), 'utf8'),
+        [outputPath(root, 'src/runtime/compose-deployment.mjs')]: readFileSync(path.join(__dirname, '../compose-deployment.mjs'), 'utf8'),
+        [outputPath(root, 'ENVIRONMENTS.md')]: readFileSync(path.join(__dirname, '../instance-guide.md'), 'utf8'),
         [outputPath(root, 'src/runtime/readiness.mjs')]: readFileSync(path.join(__dirname, '../readiness-runtime.mjs'), 'utf8'),
         [outputPath(root, 'src/runtime/fixtures.mjs')]: readFileSync(path.join(__dirname, '../fixture-runtime.mjs'), 'utf8'),
         [outputPath(root, 'src/runtime/test-credentials.mjs')]: readFileSync(path.join(__dirname, '../test-credentials-runtime.mjs'), 'utf8'),
@@ -58,7 +61,10 @@ function serviceFiles(root, model) {
             target: 'kubernetes', environment: 'local', platform: 'linux/arm64',
             adapter: 'simulation/extensions/adapters/deployment.mjs', instances: [], externalServices: []
         }, null, 2) + '\n',
-        [outputPath(root, '.gitignore')]: 'reports/\n*.private.json\n',
+        [outputPath(root, '.gitignore')]: 'reports/\ninstances/environments/\ninstances/deployments/\n*.private.json\n',
+        [outputPath(root, 'environments/kubernetes.json-example')]: JSON.stringify({id: 'shared-test-cluster', mode: 'existing', environment: 'test', target: 'kubernetes', provisioner: 'existing', kubeconfigFile: '/path/to/dedicated-kubeconfig', output: 'simulation/reports/environment-shared.json'}, null, 2) + '\n',
+        [outputPath(root, 'environments/compose.json-example')]: JSON.stringify({id: 'desktop-docker', mode: 'existing', environment: 'local', target: 'docker-compose', provisioner: 'existing', dockerContext: 'default', output: 'simulation/reports/environment-docker.json'}, null, 2) + '\n',
+        [outputPath(root, 'deployments/instance.json-example')]: JSON.stringify({id: 'test-instance-01', environmentId: 'shared-test-cluster', namespace: 'test-instance-01', configFile: 'simulation/pipelines/deployment-config.json'}, null, 2) + '\n',
         [outputPath(root, 'pipelines/pipeline.json-example')]: JSON.stringify({
             services: [], hosts: { local: { transport: 'local' } }, placements: [],
             steps: [

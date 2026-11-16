@@ -97,6 +97,10 @@ export async function executeDeployment(config, factory, options = {}) {
         const snapshot = await adapter.deploymentSnapshot();
         return {schemaVersion: 1, deploymentId: randomUUID(), status: 'ready', verifiedAt: new Date().toISOString(),
             ...plan, clusterName: snapshot.clusterName, namespace: snapshot.namespace,
+            environmentId: config.environmentId, instanceId: config.instanceId,
+            infrastructureId: config.infrastructureId,
+            dockerContext: snapshot.dockerContext || config.dockerContext,
+            composeProject: snapshot.composeProject || config.composeProject,
             kubeconfigFile: snapshot.kubeconfigFile, endpoints: snapshot.endpoints,
             credentialRefs: snapshot.credentialRefs,
             images: snapshot.images?.map(({source, reference, id}) => ({source, reference, id})),

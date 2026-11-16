@@ -4,8 +4,15 @@ import {pathToFileURL} from 'node:url';
 import {execFileSync} from 'node:child_process';
 
 export function planEnvironment(config) {
+    if (config.kubeContext) throw new Error('Use a dedicated kubeconfig with the intended current context');
     if (!['existing', 'k3d'].includes(config.provisioner)) throw new Error('provisioner must be existing or k3d');
-    if (config.target !== 'kubernetes') throw new Error('Only Kubernetes environment preparation is implemented');
+    if (!['kubernetes', 'docker-compose'].includes(config.target)) throw new Error('Unsupported environment target');
+    if (config.mode && !['managed', 'existing'].includes(config.mode)) throw new Error('Invalid environment mode');
+    if (config.mode === 'existing' && config.provisioner !== 'existing') throw new Error('Existing mode cannot create infrastructure');
+    if (config.target === 'docker-compose') {
+        if (config.provisioner !== 'existing' || config.mode === 'managed' || !config.environment || !config.dockerContext) throw new Error('Compose requires an explicit existing Docker context');
+        return {environment: config.environment, target: config.target, provisioner: config.provisioner, steps: ['checkDockerConnection', 'checkCompose']};
+    }
     if (!config.environment || !config.kubeconfigFile) throw new Error('environment and kubeconfigFile are required');
     if (config.provisioner === 'k3d' && (!/^[a-z][a-z0-9-]*$/.test(config.clusterName || '') || !config.clusterConfig)) {
         throw new Error('k3d requires clusterName and an Operations clusterConfig file');
@@ -22,6 +29,14 @@ export async function prepareEnvironment(config, options = {}) {
         encoding: 'utf8', env: {...process.env, ...env}, timeout: config.timeoutMs || 300000,
         stdio: ['ignore', 'pipe', 'pipe']
     }));
+    if (config.target === 'docker-compose') {
+        const info = JSON.parse(execute('docker', ['--context', config.dockerContext, 'info', '--format', '{{json .}}']));
+        execute('docker', ['--context', config.dockerContext, 'compose', 'version']);
+        if (!info.ID) throw new Error('Docker daemon identity is missing');
+        return {schemaVersion: 1, status: 'ready', environment: config.environment, target: config.target,
+            provisioner: 'existing', dockerContext: config.dockerContext, infrastructureId: info.ID,
+            architecture: info.Architecture, verifiedAt: new Date().toISOString()};
+    }
     const kubeconfigFile = resolve(config.kubeconfigFile);
     if (config.provisioner === 'k3d') {
         // The checked-in Operations cluster asset remains unchanged.
@@ -37,12 +52,13 @@ export async function prepareEnvironment(config, options = {}) {
         writeFileSync(kubeconfigFile, contents, {mode: 0o600});
     }
     const env = {KUBECONFIG: kubeconfigFile};
+    const kubectl = args => execute('kubectl', [...(config.kubeContext ? ['--context', config.kubeContext] : []), ...args], env);
     const deadline = Date.now() + (config.timeoutMs || 300000);
     let nodes;
     while (Date.now() < deadline) {
         try {
-            execute('kubectl', ['get', '--raw=/readyz', '--request-timeout=10s'], env);
-            nodes = JSON.parse(execute('kubectl', ['get', 'nodes', '-o', 'json', '--request-timeout=10s'], env)).items;
+            kubectl(['get', '--raw=/readyz', '--request-timeout=10s']);
+            nodes = JSON.parse(kubectl(['get', 'nodes', '-o', 'json', '--request-timeout=10s'])).items;
             if (nodes.length && nodes.every(node => node.status?.conditions?.some(c => c.type === 'Ready' && c.status === 'True'))) break;
             nodes = null;
         } catch { nodes = null; }
@@ -51,7 +67,10 @@ export async function prepareEnvironment(config, options = {}) {
     if (!nodes) throw new Error('Environment readiness timed out; check connectivity and node health');
     const workers = nodes.filter(node => !Object.hasOwn(node.metadata.labels || {}, 'node-role.kubernetes.io/control-plane') && !Object.hasOwn(node.metadata.labels || {}, 'node-role.kubernetes.io/master'));
     if (config.workerNodes !== undefined && workers.length < config.workerNodes) throw new Error('Insufficient worker nodes; resize explicitly, no automatic recreation');
+    const infrastructureId = JSON.parse(kubectl(['get', 'namespace', 'kube-system', '-o', 'json', '--request-timeout=10s'])).metadata?.uid;
+    if (!infrastructureId) throw new Error('Cluster identity is missing');
     return {schemaVersion: 1, status: 'ready', environment: config.environment, target: config.target,
+        infrastructureId, kubeContext: config.kubeContext,
         provisioner: config.provisioner, clusterName: config.clusterName, kubeconfigFile,
         verifiedAt: new Date().toISOString(), nodes: nodes.map(node => ({name: node.metadata.name, architecture: node.status.nodeInfo.architecture}))};
 }

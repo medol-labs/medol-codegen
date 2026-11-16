@@ -13,7 +13,7 @@ export function stageOf(step) {
 
 const quote = value => "'" + String(value).replaceAll("'", "'\\''") + "'";
 
-export function executionCommand(step, host, runId, environmentRef) {
+export function executionCommand(step, host, runId, environmentRef, boundRun = false) {
   if (!host || host.transport === 'local') return step.command;
   if (host.transport !== 'ssh') throw new Error('Unsupported host transport');
   if (!/^[a-zA-Z0-9_.@-]+$/.test(host.target || '') || host.target.startsWith('-')) throw new Error('Invalid SSH target; use an SSH config alias');
@@ -21,7 +21,7 @@ export function executionCommand(step, host, runId, environmentRef) {
   if (step.cwd?.startsWith('/') || step.cwd?.split('/').includes('..')) throw new Error('Remote step cwd must stay within workDir');
   const cwd = host.workDir + (step.cwd ? '/' + step.cwd : '');
   return ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', host.target,
-    `cd ${quote(cwd)} && exec env MEDOL_PIPELINE_RUN_ID=${quote(runId)} ${environmentRef ? `MEDOL_ENVIRONMENT_MANIFEST=${quote(environmentRef)} ` : ''}${step.command.map(quote).join(' ')}`];
+    `cd ${quote(cwd)} && exec env MEDOL_PIPELINE_RUN_ID=${quote(runId)} ${boundRun ? `MEDOL_SIMULATION_RUN_ID=${quote(runId)} ` : ''}${environmentRef ? `MEDOL_ENVIRONMENT_MANIFEST=${quote(environmentRef)} ` : ''}${step.command.map(quote).join(' ')}`];
 }
 
 export function loadExistingEnvironment(config, root) {
@@ -86,7 +86,10 @@ export function planPipeline(catalog, config) {
 }
 
 export function runPipeline(catalog, config, options = {}) {
+  if (options.runId && (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(options.runId) || options.runId === '..')) throw new Error('Invalid run identifier');
+  if (options.runId && config.existingEnvironment) throw new Error('A bound run replaces existingEnvironment; use an execution-only pipeline');
   const planned = planPipeline(catalog, config);
+  if (options.runId && planned.some(step => !['case-design', 'data-preparation', 'test-execution', 'reporting'].includes(stageOf(step)))) throw new Error('Bound run pipelines cannot prepare infrastructure, build or deploy');
   const root = resolve(options.root || '.');
   const existing = loadExistingEnvironment(config, root);
   const byId = new Map(planned.map(step => [step.id, step]));
@@ -116,8 +119,8 @@ export function runPipeline(catalog, config, options = {}) {
   if (!steps.length) throw new Error('No pipeline steps configured for the requested stage.');
   if (options.plan) return { status: 'planned', steps };
   if (!steps.length) throw new Error('No pipeline steps configured.');
-  const runId = randomUUID();
-  const reportDir = resolve(options.reportRoot || resolve(root, 'simulation/reports'), runId);
+  const runId = options.runId || randomUUID();
+  const reportDir = resolve(options.reportRoot || resolve(root, 'simulation/reports'), runId, ...(options.runId ? [randomUUID()] : []));
   mkdirSync(reportDir, { recursive: true });
   const report = { runId, status: 'running', startedAt: new Date().toISOString(), steps: [],
     ...(existing ? {existingEnvironment: {manifest: existing.path, deploymentId: existing.data.deploymentId, environment: existing.data.environment}} : {}) };
@@ -131,10 +134,10 @@ export function runPipeline(catalog, config, options = {}) {
     }
     const host = step.host ? config.hosts[step.host] : undefined;
     const environmentRef = existing && (host?.transport === 'ssh' ? existing.remoteManifestPaths[step.host] : existing.path);
-    const command = executionCommand(step, host, runId, environmentRef);
+    const command = executionCommand(step, host, runId, environmentRef, Boolean(options.runId));
     const result = spawnSync(command[0], command.slice(1), {
       cwd: host?.transport === 'ssh' ? root : resolve(root, step.cwd || '.'), stdio: 'inherit',
-      env: { ...process.env, MEDOL_PIPELINE_RUN_ID: runId, ...(environmentRef ? {MEDOL_ENVIRONMENT_MANIFEST: environmentRef} : {}) },
+      env: { ...process.env, MEDOL_PIPELINE_RUN_ID: runId, ...(options.runId ? {MEDOL_SIMULATION_RUN_ID: runId} : {}), ...(environmentRef ? {MEDOL_ENVIRONMENT_MANIFEST: environmentRef} : {}) },
       timeout: step.timeoutMs || 1800000
     });
     report.steps.push({ id: step.id, phase: step.phase, stage: stageOf(step), status: result.status === 0 && !result.error ? 'passed' : 'failed', exitCode: result.status, signal: result.signal, error: result.error?.message });

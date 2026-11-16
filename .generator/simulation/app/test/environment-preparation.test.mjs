@@ -12,7 +12,7 @@ test('existing infrastructure performs read-only Kubernetes checks without k3d',
     const result = await prepareEnvironment(base, {execute: (cmd, args, env) => {
         calls.push([cmd, args]);
         assert.equal(env.KUBECONFIG, base.kubeconfigFile);
-        return args.includes('nodes') ? JSON.stringify(nodes) : 'ok';
+        return args.includes('nodes') ? JSON.stringify(nodes) : args.includes('namespace') ? JSON.stringify({metadata: {uid: 'cluster-1'}}) : 'ok';
     }});
     assert.equal(result.status, 'ready');
     assert.ok(calls.every(([cmd, args]) => cmd === 'kubectl' && args[0] === 'get'));
@@ -27,7 +27,7 @@ test('k3d creates only a missing cluster and keeps worker count explicit', async
                     calls.push([cmd, args]);
                     if (cmd === 'k3d' && args[1] === 'list') return JSON.stringify(exists ? [{name: 'test'}] : []);
                     if (cmd === 'k3d' && args[0] === 'kubeconfig') return 'kubeconfig';
-                    return args.includes('nodes') ? JSON.stringify(nodes) : 'ok';
+                    return args.includes('nodes') ? JSON.stringify(nodes) : args.includes('namespace') ? JSON.stringify({metadata: {uid: 'cluster-1'}}) : 'ok';
                 }
             });
             assert.equal(calls.some(([, args]) => args[1] === 'create'), !exists);

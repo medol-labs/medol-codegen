@@ -442,7 +442,11 @@ class ${decisionComponentName} : ${decisionName}
     },
 
     _writeConceptEntityStates(slices) {
-        const groups = groupByMap(slices.filter((slice) => primaryConcept(slice) && slice.commands.length > 0), (slice) => primaryConcept(slice));
+        const key = slice => JSON.stringify([slice.context, primaryConcept(slice)]);
+        const selected = new Set(slices.filter(slice => primaryConcept(slice) && slice.commands.length > 0).map(key));
+        // A slice selection must not truncate the shared event-sourced entity.
+        const members = this.model.slices.filter(slice => selected.has(key(slice)) && slice.commands.length > 0);
+        const groups = groupByMap(members, key);
         for (const [, conceptSlices] of groups.entries()) {
             const first = conceptSlices[0];
             const selection = selectionFor(first, this.model);

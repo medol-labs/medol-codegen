@@ -321,6 +321,26 @@ gen /opt/codegen/.generator/app/ --generator refine --generator-type all
 
 ### Observability
 
+### Browser Origins
+
+Declare actual browser-facing origins in `operations/config/<environment>.yml`:
+
+```yaml
+environments:
+  local:
+    browserOrigins:
+      - https://console.example.com
+```
+
+Operations injects `MEDOL_SECURITY_ALLOWED_ORIGINS` into backend Compose/Kubernetes/K3s
+configuration. Explicit per-application values take precedence. Origins include
+the external scheme, hostname and port, not internal service URLs or API paths.
+Changing a host-mapped port requires updating these origins and rolling out the
+backend configuration. Wildcards and credentials are rejected here. CORS does not
+replace authentication, and request Origin headers are never trusted automatically.
+
+### Telemetry Configuration
+
 Operations owns observability deployment configuration, not application business logic
 or deployment execution. Axon5 applications export OTLP HTTP/protobuf through
 Micrometer/OpenTelemetry; no SkyWalking/Elastic-specific SDK is generated.
@@ -682,6 +702,45 @@ The generated files use placeholder environment references only. Real passwords,
 
 ## Generate Simulation Service
 
+### Seven-Step Workflow
+
+Simulation orchestrates the complete validation lifecycle, not only business-flow replay:
+
+| Step | Responsibility |
+| --- | --- |
+| 1. Environment preparation | Create or connect infrastructure; verify architecture, network and storage |
+| 2. Build and publish | Compile, test, build images and push to a registry; retain image manifests and digests |
+| 3. Service deployment | Deploy from verified image information and check service readiness |
+| 4. Case design | Generate, supplement, review and approve cases |
+| 5. Data preparation | Create baseline business data and case-specific fixtures |
+| 6. Test execution | Execute actions and verify assertions |
+| 7. Result collection | Collect reports, logs, artifacts and failure evidence |
+
+Step 2 has two selectable CLI stages, `build` and `publish`, so seven workflow steps
+map to eight stage names. Baseline data preparation depends on a ready deployment;
+case-specific data also depends on reviewed cases. Test execution requires both data
+and approved cases. Case design may happen offline. Data preparation and test execution
+can reuse existing deployments and do not require rebuilding infrastructure.
+
+Operations supplies configuration/assets; Simulation runs configured commands and adapters.
+Infrastructure-specific execution, external service builds and business rules remain extension
+responsibilities. Generated candidates are not automatically complete test cases. Logs and
+artifacts require explicit collectors; unsupported checks must not be reported as successful.
+
+Detailed responsibilities, prerequisites, reuse rules and safety precautions are maintained
+in [the workflow template](.generator/simulation/app/workflow-guide.md), emitted as
+`simulation/WORKFLOW.md` in generated projects. The workflow is infrastructure-neutral and
+contains no application-specific registration or scheduling policy.
+
+Data preparation is independently executable as baseline initialization and case-specific
+fixtures. Baseline plans need only a ready deployment. Case plans consume reviewed cases
+and may require a ready baseline manifest using `requiresBaseline: true`. They can reference
+its exported IDs without rerunning initialization. The generated data-plan CLI accepts a
+baseline manifest as its fifth argument (or `MEDOL_BASELINE_DATA_MANIFEST`), validates
+deployment identity, and records the baseline fingerprint in case-data evidence.
+
+### Generate And Run
+
 The `simulation` generator reads the same `codegen-model.json` and derives a renderer-neutral `SimulationModel` before writing an executable service. The service calls a running business system through its public command APIs and executes DSL-derived business flows in order.
 
 Run from the project workspace containing the model. Simulation defaults to a dedicated
@@ -845,7 +904,32 @@ Operations describes networking, mounts and service configuration; Simulation ow
 cluster creation, deployment execution and readiness orchestration.
 Image digest promotion, remote resource tracking and resume require further work.
 
-Simulation now also emits `src/data-plan.mjs`, independently of the existing discovered
+Simulation also emits generic `src/task.mjs` and `src/worker.mjs` entries. Project
+tasks declare trusted extension exports, JSON inputs (including existing-manifest
+environment overrides) and create-only outputs in a project-owned tasks.json.
+Worker configuration declares SSH location, sync inputs and evidence filenames.
+Sync never deletes remote state; repeated collection preserves existing evidence.
+See generated `EXTENSIONS.md` for the contracts. Keep domain registration, node
+label policy, authentication policy and business assertions in project extensions.
+
+```sh
+node simulation/src/worker.mjs sync simulation/pipelines/worker.json
+MEDOL_PIPELINE_RUN_ID=run-001 node simulation/src/task.mjs simulation/pipelines/tasks.json initialize
+MEDOL_PIPELINE_RUN_ID=run-001 node simulation/src/worker.mjs collect simulation/pipelines/worker.json
+```
+
+The task names and configuration files above are project-authored, not inferred
+business behavior. Local execution calls task.mjs directly without worker transfer.
+
+Simulation emits a generic `src/prepare-data.mjs` entry with independent `baseline`
+and `case` modes (`npm run data:baseline -- ...` / `npm run data:case -- ...`).
+It validates deployment and baseline manifests, case approval fingerprints, explicit
+requirement mappings and readiness waits. Plans declare HTTP commands/queries or
+named operations from a trusted project adapter. Business fixtures, credentials and
+project-specific orchestration stay outside the generator. See generated
+`DATA-PREPARATION.md` and `pipelines/data-preparation.json-example`.
+
+Simulation also emits the lower-level `src/data-plan.mjs`, independently of the existing discovered
 flow scenarios. Keep custom data plans outside generated `scenarios/<discovered-id>.json`,
 for example under `fixtures/`. Invoke it with `npm run seed -- fixtures/seed.json environments/test.json`.
 

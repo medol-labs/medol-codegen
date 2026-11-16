@@ -4,8 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 
-export const stages = ['environment', 'deployment', 'case-design', 'data-preparation', 'test-execution'];
-export const phases = ['validate', 'test', 'build', 'publish', 'environment', 'deploy', 'ready', 'deployment', 'case-design', 'seed', 'data-preparation', 'verify', 'test-execution'];
+export const stages = ['environment', 'build', 'publish', 'deployment', 'case-design', 'data-preparation', 'test-execution', 'reporting'];
+export const phases = ['validate', 'test', 'environment', 'build', 'publish', 'deploy', 'ready', 'deployment', 'case-design', 'seed', 'data-preparation', 'verify', 'test-execution', 'reporting'];
 export function stageOf(step) {
   return step.stage || ({deploy: 'deployment', ready: 'deployment', seed: 'data-preparation', verify: 'test-execution'}[step.phase])
     || (stages.includes(step.phase) ? step.phase : undefined);
@@ -77,6 +77,11 @@ export function planPipeline(catalog, config) {
     result.push({...step, ...(stageOf(step) ? {stage: stageOf(step)} : {})});
   }
   ordered.forEach(visit);
+  for (const step of result) {
+    if (stageOf(step) !== 'reporting' && (step.dependsOn || []).some(id => stageOf(byId.get(id)) === 'reporting')) {
+      throw new Error(`Reporting must be terminal: ${step.id}`);
+    }
+  }
   return result;
 }
 
@@ -119,6 +124,11 @@ export function runPipeline(catalog, config, options = {}) {
   const save = () => writeFileSync(resolve(reportDir, 'report.json'), JSON.stringify(report, null, 2));
   save();
   for (const step of steps) {
+    if (report.status === 'failed' && stageOf(step) !== 'reporting') {
+      report.steps.push({id: step.id, phase: step.phase, stage: stageOf(step), status: 'skipped', reason: 'Earlier step failed'});
+      save();
+      continue;
+    }
     const host = step.host ? config.hosts[step.host] : undefined;
     const environmentRef = existing && (host?.transport === 'ssh' ? existing.remoteManifestPaths[step.host] : existing.path);
     const command = executionCommand(step, host, runId, environmentRef);
@@ -127,9 +137,9 @@ export function runPipeline(catalog, config, options = {}) {
       env: { ...process.env, MEDOL_PIPELINE_RUN_ID: runId, ...(environmentRef ? {MEDOL_ENVIRONMENT_MANIFEST: environmentRef} : {}) },
       timeout: step.timeoutMs || 1800000
     });
-    report.steps.push({ id: step.id, phase: step.phase, stage: stageOf(step), exitCode: result.status, signal: result.signal, error: result.error?.message });
+    report.steps.push({ id: step.id, phase: step.phase, stage: stageOf(step), status: result.status === 0 && !result.error ? 'passed' : 'failed', exitCode: result.status, signal: result.signal, error: result.error?.message });
     save();
-    if (result.status !== 0 || result.error) { report.status = 'failed'; break; }
+    if (result.status !== 0 || result.error) report.status = 'failed';
   }
   if (report.status === 'running') report.status = 'passed';
   report.finishedAt = new Date().toISOString();

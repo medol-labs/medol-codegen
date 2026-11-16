@@ -527,7 +527,7 @@ function postgresResources(component, model) {
             metadata: namedMetadata(component.name, 'infrastructure'),
             spec: {
                 replicas: 1,
-                ...(component.additional ? {strategy: {type: 'Recreate'}} : {}),
+                strategy: {type: 'Recreate'},
                 selector: selector(component.name),
                 template: podTemplate(component, [{
                     name: component.name,
@@ -575,7 +575,7 @@ function statefulInfrastructure(component, mountPath) {
             metadata: namedMetadata(component.name, 'infrastructure'),
             spec: {
                 replicas: 1,
-                ...(component.additional ? {strategy: {type: 'Recreate'}} : {}),
+                strategy: {type: 'Recreate'},
                 selector: selector(component.name),
                 template: podTemplate(component, [{
                     name: component.name,

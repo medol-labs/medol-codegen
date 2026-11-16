@@ -9,6 +9,22 @@ const { previewValue } = require('../deterministic-data');
 const { generateSimulationFiles } = require('../simulation-generator');
 const { buildSimulationModel } = require('../simulation-model-builder');
 
+test('unmodeled fields remain unresolved, not inferred by field names', () => {
+    const source = structuredClone(sampleModel);
+    for (const slice of source.slices) for (const command of slice.commands || []) {
+        for (const field of command.fields || []) {
+            delete field.source;
+            delete field.mappings;
+            delete field.generated;
+        }
+    }
+    const model = buildSimulationModel(source);
+    const inputs = model.scenarios.filter(s => s.kind !== 'SPECIFICATION').flatMap(s => s.steps.flatMap(step => step.inputs || []));
+    assert(inputs.length > 0);
+    assert(inputs.some(input => input.name.endsWith('Id') && input.source.kind === 'Unresolved'));
+    assert(!inputs.some(input => input.source.kind === 'PreviousEvent'));
+});
+
 const sampleModel = {
     rootPackage: 'tech.medo',
     domain: 'Organization Platform',
@@ -328,6 +344,28 @@ test('generates simulation service, model, runtime, and scenario files', () => {
     assert(files['Dockerfile']);
     assert(files['src/server.js']);
     assert(files['src/cli.js']);
+    assert(files['src/task.mjs']);
+    assert(files['src/runtime/readiness.mjs']);
+    assert.match(files['src/runtime/kubernetes-access.mjs'], /from '\.\/readiness\.mjs'/);
+    assert(files['src/worker.mjs']);
+    assert(files['EXTENSIONS.md']);
+    assert.match(files['src/worker.mjs'], /from '\.\/task\.mjs'/);
+    assert(!files['src/task.mjs'].includes('federation-learning'));
+    assert(!files['src/worker.mjs'].includes('fl-test'));
+    assert(files['cases/README.md']);
+    for (const directory of ['generated', 'manual', 'ai', 'approved']) {
+        assert(Object.hasOwn(files, `cases/${directory}/.gitkeep`));
+    }
+    assert(!Object.keys(files).some(name => /^cases\/(manual|ai|approved)\/.*\.json$/.test(name)));
+    assert.equal(JSON.parse(files['package.json']).scripts['cases:draft'], 'node src/cases.mjs draft simulation-model.json');
+    assert(files['DATA-PREPARATION.md']);
+    assert(files['data/baseline.plan.json-example']);
+    assert(files['data/case.plan.json-example']);
+    assert(files['pipelines/data-preparation.json-example']);
+    assert.match(files['src/prepare-data.mjs'], /from '\.\/data-plan\.mjs'/);
+    assert.match(files['src/prepare-data.mjs'], /from '\.\/cases\.mjs'/);
+    assert.equal(JSON.parse(files['package.json']).scripts['data:baseline'], 'node src/prepare-data.mjs baseline');
+    assert.equal(JSON.parse(files['package.json']).scripts['data:case'], 'node src/prepare-data.mjs case');
     assert(files['src/runtime/runner.js']);
     assert(files['src/runtime/business-client.js']);
     assert(files['src/runtime/event-observer.js']);

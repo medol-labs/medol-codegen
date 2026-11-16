@@ -1,9 +1,40 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {mkdtempSync, rmSync, readFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {planPipeline, runPipeline} from '../pipeline-runtime.mjs';
 import {draftCases, checkCases, importCases, compareCases, aiContext, newCase} from '../case-design.mjs';
 
 const catalog = {services: []};
+test('build and publish are independently selectable stages', () => {
+  const config = {steps: [step('build', 'build'), step('publish', 'publish', ['build'])]};
+  assert.equal(runPipeline(catalog, config, {plan: true, stage: 'build'}).steps[0].id, 'build');
+  assert.throws(() => runPipeline(catalog, config, {plan: true, stage: 'publish'}), /requires build/);
+  assert.equal(runPipeline(catalog, {...config, reuseCompletedSteps: ['build']}, {plan: true, stage: 'publish'}).steps[0].id, 'publish');
+});
+
+test('failure skips business steps but still collects results without masking failure', () => {
+  const root = mkdtempSync(join(tmpdir(), 'pipeline-report-'));
+  try {
+    const result = runPipeline(catalog, {steps: [
+      {id: 'build', phase: 'build', command: [process.execPath, '-e', 'process.exit(1)']},
+      {id: 'deploy', phase: 'deployment', dependsOn: ['build'], command: [process.execPath, '-e', 'process.exit(0)']},
+      {id: 'report', phase: 'reporting', dependsOn: ['deploy'], command: [process.execPath, '-e', 'process.exit(0)']}
+    ]}, {root});
+    assert.equal(result.status, 'failed');
+    assert.deepEqual(result.steps.map(s => s.status), ['failed', 'skipped', 'passed']);
+    assert.equal(JSON.parse(readFileSync(join(root, 'simulation/reports', result.runId, 'report.json'))).status, 'failed');
+  } finally { rmSync(root, {recursive: true, force: true}); }
+});
+
+test('report collection failure fails pipeline and cannot be a business prerequisite', () => {
+  assert.throws(() => planPipeline(catalog, {steps: [step('report', 'reporting'), step('deploy', 'deployment', ['report'])]}), /terminal/);
+  const root = mkdtempSync(join(tmpdir(), 'pipeline-report-'));
+  try {
+    assert.equal(runPipeline(catalog, {steps: [{id: 'report', phase: 'reporting', command: [process.execPath, '-e', 'process.exit(1)']}]}, {root}).status, 'failed');
+  } finally { rmSync(root, {recursive: true, force: true}); }
+});
 const step = (id, phase, dependsOn = []) => ({id, phase, dependsOn, command: ['node', '--version']});
 const config = {steps: [step('execute', 'test-execution', ['data']), step('data', 'data-preparation', ['deploy', 'cases']),
   step('cases', 'case-design'), step('deploy', 'deployment', ['environment']), step('environment', 'environment')]};

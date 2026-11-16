@@ -328,16 +328,13 @@ function inputSourceForField(field, source, options) {
     const explicitSource = explicitPreviousEventSource(field, options.availableEvents, source);
     if (explicitSource) return explicitSource;
 
-    const priorEventSource = previousEventSourceByFieldName(field, options.availableEvents);
-    if (priorEventSource) return priorEventSource;
-
     const example = field.example ?? field.default ?? field.value;
     if (example !== undefined) {
         return constantSource(example, field.example !== undefined ? 'example' : 'default');
     }
 
     return {
-        kind: 'Generated',
+        kind: field.generated ? 'Generated' : 'Unresolved',
         previewValue: previewValue(field, options.seed, `${options.stepId}.${field.name}`)
     };
 }
@@ -356,22 +353,6 @@ function explicitPreviousEventSource(field, availableEvents, source) {
         event: eventNode?.name ?? parsed.event,
         eventTitle: eventNode?.title ?? parsed.event,
         field: parsed.field
-    };
-}
-
-function previousEventSourceByFieldName(field, availableEvents) {
-    if (!field.name || availableEvents.length === 0) return undefined;
-    const shouldReuse = field.idAttribute || /id$/i.test(field.name);
-    if (!shouldReuse) return undefined;
-    const sourceEvent = [...availableEvents].reverse().find((eventNode) =>
-        (eventNode.event?.fields ?? []).some((candidate) => candidate.name === field.name)
-    );
-    if (!sourceEvent) return undefined;
-    return {
-        kind: 'PreviousEvent',
-        event: sourceEvent.name,
-        eventTitle: sourceEvent.title,
-        field: field.name
     };
 }
 

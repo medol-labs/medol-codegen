@@ -14,12 +14,15 @@ function resolveOperationsModel(model, environmentName = 'dev') {
     const tenancy = model.applications.some((application) => application.kind === 'backend' && application.tenantIsolation)
         ? resolveTenantStorage(model.tenancy, environment.tenancy) : undefined;
     const observability = resolveObservability({...model.observability, ...environment.observability}, environment.name);
+    const browserOrigins = resolveBrowserOrigins(environment.browserOrigins);
     return {
         ...model,
         environment,
         observability,
         applications: model.applications.map((application) => {
             const resolved = resolveApplication(application, environment, model.imageTag, tenancy);
+            if (browserOrigins && resolved.kind === 'backend') resolved.environmentVariables = mergeEnvironmentVariables(
+                [{name: 'MEDOL_SECURITY_ALLOWED_ORIGINS', value: browserOrigins.join(',')}], resolved.environmentVariables);
             if (model.observability || environment.observability) resolved.environmentVariables = mergeEnvironmentVariables(
                 applicationObservability(resolved, observability, environment.name), resolved.environmentVariables);
             return resolved;
@@ -27,6 +30,20 @@ function resolveOperationsModel(model, environmentName = 'dev') {
         infrastructure: model.infrastructure.map((component) => resolveInfrastructure(component, environment)),
         ...(model.gateway ? { gateway: resolveGateway(model.gateway, environment) } : {})
     };
+}
+
+function resolveBrowserOrigins(origins) {
+    if (origins === undefined) return undefined;
+    if (!Array.isArray(origins) || !origins.length) throw new Error('browserOrigins must be a nonempty array of exact HTTP(S) origins');
+    return [...new Set(origins.map(origin => {
+        let url;
+        try { url = new URL(origin); } catch { throw new Error(`Invalid browser origin: ${origin}`); }
+        if (typeof origin !== 'string' || !['http:', 'https:'].includes(url.protocol) || url.username || url.password
+            || url.search || url.hash || url.pathname !== '/' || origin.includes('*')) {
+            throw new Error('browserOrigins requires exact HTTP(S) origins without credentials, paths or wildcards');
+        }
+        return url.origin;
+    }))];
 }
 
 function resolveApplication(application, environment, defaultImageTag, tenancy) {

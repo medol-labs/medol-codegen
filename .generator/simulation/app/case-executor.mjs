@@ -2,7 +2,7 @@ import {readFileSync, mkdirSync, writeFileSync} from 'node:fs';
 import {resolve, dirname} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {isDeepStrictEqual} from 'node:util';
-import {randomUUID} from 'node:crypto';
+import {randomUUID, createHash} from 'node:crypto';
 import {checkCases, checkApproval} from './case-design.mjs';
 
 const at = (value, path) => path.split('.').filter(Boolean).reduce((v, key) => v?.[key], value);
@@ -26,12 +26,15 @@ export function validateDataManifest(data, environment) {
 }
 
 export async function executeCases(plan, environment, data, adapter, options = {}) {
-  const report = {runId: randomUUID(), status: 'running', cases: []};
+  const report = {runId: randomUUID(), status: 'running', cases: [],
+    planFingerprint: createHash('sha256').update(JSON.stringify(plan)).digest('hex'),
+    caseFingerprints: Object.fromEntries((plan.cases || []).map(c => [c.id, createHash('sha256').update(JSON.stringify(c)).digest('hex')]))};
   const save = () => options.record?.(structuredClone(report));
   try {
     if (!adapter.capabilities) throw new Error('Executor must declare capabilities');
     checkCases(plan, {model: options.model, capabilities: adapter.capabilities});
     checkApproval(plan);
+    if (plan.execution && data.casePlanFingerprint !== report.planFingerprint) throw new Error('Case data must match the selected execution plan');
     validateDataManifest(data, environment);
     if (typeof adapter.validateEnvironment !== 'function' || typeof adapter.validateData !== 'function') throw new Error('Executor requires live environment and data validators');
     if (typeof adapter.execute !== 'function') throw new Error('Executor requires execute');

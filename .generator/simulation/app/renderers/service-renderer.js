@@ -31,7 +31,18 @@ function simulationFiles(model, options = {}) {
 function serviceFiles(root, model) {
     return {
         [outputPath(root, 'src/run.mjs')]: readFileSync(path.join(__dirname, '../environment-runner.mjs'), 'utf8'),
+        [outputPath(root, 'src/task.mjs')]: readFileSync(path.join(__dirname, '../task-entry.mjs'), 'utf8'),
+        [outputPath(root, 'src/runtime/readiness.mjs')]: readFileSync(path.join(__dirname, '../readiness-runtime.mjs'), 'utf8'),
+        [outputPath(root, 'src/runtime/fixtures.mjs')]: readFileSync(path.join(__dirname, '../fixture-runtime.mjs'), 'utf8'),
+        [outputPath(root, 'src/runtime/test-credentials.mjs')]: readFileSync(path.join(__dirname, '../test-credentials-runtime.mjs'), 'utf8'),
+        [outputPath(root, 'src/runtime/kubernetes-instances.mjs')]: readFileSync(path.join(__dirname, '../kubernetes-instances.mjs'), 'utf8'),
+        [outputPath(root, 'src/runtime/kubernetes-deployment.mjs')]: readFileSync(path.join(__dirname, '../kubernetes-deployment.mjs'), 'utf8').replace("'./deployment-runtime.mjs'", "'./deployment.mjs'").replace("'./readiness-runtime.mjs'", "'./readiness.mjs'"),
+        [outputPath(root, 'src/runtime/kubernetes-access.mjs')]: readFileSync(path.join(__dirname, '../kubernetes-access.mjs'), 'utf8').replace("'./readiness-runtime.mjs'", "'./readiness.mjs'"),
+        [outputPath(root, 'src/worker.mjs')]: readFileSync(path.join(__dirname, '../worker-transfer.mjs'), 'utf8').replace("'./task-entry.mjs'", "'./task.mjs'"),
+        [outputPath(root, 'EXTENSIONS.md')]: readFileSync(path.join(__dirname, '../extension-guide.md'), 'utf8'),
         [outputPath(root, 'src/cases.mjs')]: readFileSync(path.join(__dirname, '../case-design.mjs'), 'utf8'),
+        [outputPath(root, 'cases/README.md')]: readFileSync(path.join(__dirname, '../case-guide.md'), 'utf8'),
+        ...Object.fromEntries(['generated', 'manual', 'ai', 'approved'].map(name => [outputPath(root, `cases/${name}/.gitkeep`), ''])),
         [outputPath(root, 'src/execute-cases.mjs')]: readFileSync(path.join(__dirname, '../case-executor.mjs'), 'utf8').replace("'./case-design.mjs'", "'./cases.mjs'"),
         [outputPath(root, 'WORKFLOW.md')]: readFileSync(path.join(__dirname, '../workflow-guide.md'), 'utf8'),
         [outputPath(root, 'src/runtime/stages.mjs')]: readFileSync(path.join(__dirname, '../stage-runtime.mjs'), 'utf8'),
@@ -57,6 +68,19 @@ function serviceFiles(root, model) {
         }, null, 2) + '\n',
         [outputPath(root, 'src/pipeline.mjs')]: readFileSync(path.join(__dirname, '../pipeline-runtime.mjs'), 'utf8'),
         [outputPath(root, 'src/data-plan.mjs')]: readFileSync(path.join(__dirname, '../data-plan-runtime.mjs'), 'utf8').replace("'./case-design.mjs'", "'./cases.mjs'"),
+        [outputPath(root, 'src/prepare-data.mjs')]: readFileSync(path.join(__dirname, '../prepare-data-entry.mjs'), 'utf8')
+            .replace("'./data-plan-runtime.mjs'", "'./data-plan.mjs'").replace("'./case-design.mjs'", "'./cases.mjs'"),
+        [outputPath(root, 'DATA-PREPARATION.md')]: readFileSync(path.join(__dirname, '../data-preparation-guide.md'), 'utf8'),
+        [outputPath(root, 'data/baseline.plan.json-example')]: JSON.stringify({mode: 'baseline', seed: 1001, steps: [], exports: {}}, null, 2) + '\n',
+        [outputPath(root, 'data/case.plan.json-example')]: JSON.stringify({mode: 'case', requiresBaseline: true, seed: 1001, caseIds: [], fulfillments: {}, steps: [], exports: {}}, null, 2) + '\n',
+        [outputPath(root, 'pipelines/data-preparation.json-example')]: JSON.stringify({
+            steps: [
+                {id: 'prepare-baseline', phase: 'data-preparation', command: ['node', 'simulation/src/prepare-data.mjs', 'baseline', '--plan', 'simulation/data/baseline.plan.json', '--environment', 'simulation/instances/deployment.json', '--output', 'simulation/data/results/baseline.json']},
+                {id: 'review-cases', phase: 'case-design', command: ['node', 'simulation/src/cases.mjs', 'select', 'simulation/cases/approved/cases.json', 'simulation/cases/runs/selected.json', 'simulation/pipelines/case-selection.json']},
+                {id: 'prepare-case', phase: 'data-preparation', dependsOn: ['prepare-baseline', 'review-cases'], command: ['node', 'simulation/src/prepare-data.mjs', 'case', '--plan', 'simulation/data/case.plan.json', '--environment', 'simulation/instances/deployment.json', '--baseline', 'simulation/data/results/baseline.json', '--cases', 'simulation/cases/runs/selected.json', '--output', 'simulation/data/results/case.json']}
+            ]
+        }, null, 2) + '\n',
+        [outputPath(root, 'pipelines/case-selection.json-example')]: JSON.stringify({tags: ['smoke']}, null, 2) + '\n',
         [outputPath(root, 'package.json')]: renderPackageJson(model),
         [outputPath(root, '.env-example')]: renderEnvExample(),
         [outputPath(root, 'Dockerfile')]: renderDockerfile(),
@@ -89,7 +113,10 @@ function renderPackageJson(model) {
         scripts: {
             start: 'node src/server.js',
             simulate: 'node src/cli.js',
+            'cases:draft': 'node src/cases.mjs draft simulation-model.json',
             seed: 'node src/data-plan.mjs',
+            'data:baseline': 'node src/prepare-data.mjs baseline',
+            'data:case': 'node src/prepare-data.mjs case',
             check: 'node --check src/server.js && node --check src/cli.js && node --check src/runtime/business-client.js && node --check src/runtime/context.js && node --check src/runtime/data-generator.js && node --check src/runtime/event-observer.js && node --check src/runtime/model-loader.js && node --check src/runtime/runner.js'
         },
         engines: {
@@ -107,7 +134,7 @@ WAIT_FOR_EVENTS=false
 EVENT_TIMEOUT_MS=5000
 
 # Optional. Use JSON when different contexts are served by different backend services.
-# CONTEXT_BASE_URLS={"OrganizationManagement":"http://localhost:8081","TrainingOrchestration":"http://localhost:8082"}
+# CONTEXT_BASE_URLS={"ExampleContext":"http://localhost:8081"}
 
 # Optional. If the business system exposes or forwards events through another observer service.
 # EVENT_OBSERVER_URL=http://localhost:3199
@@ -741,13 +768,17 @@ export async function runScenario(model, options = {}) {
       };
     }
 
+    for (const step of scenario.steps.filter(step => step.execution !== 'AUTOMATIC')) {
+      for (const input of step.inputs || []) {
+        if (!['Constant', 'PreviousStep', 'PreviousEvent', 'Generated'].includes(input.source?.kind)) {
+          throw new Error('Explicit input source required: ' + step.id + '.' + input.name);
+        }
+      }
+    }
     for (let index = 0; index < scenario.steps.length; index += 1) {
       const step = scenario.steps[index];
       log(logs, '');
       log(logs, '[' + (index + 1) + '/' + scenario.steps.length + '] ' + step.title);
-
-      const payload = resolvePayload(step, context, data);
-      context.put(step.id + '.command', payload);
 
       if (step.execution === 'AUTOMATIC') {
         log(logs, 'AUTO waiting for ' + expectedEventNames(step).join(', '));
@@ -755,6 +786,9 @@ export async function runScenario(model, options = {}) {
         log(logs, 'PASS');
         continue;
       }
+
+      const payload = resolvePayload(step, context, data);
+      context.put(step.id + '.command', payload);
 
       if (step.expectedRejection) {
         await expectRejection(step, payload, client, context, logs);
@@ -816,24 +850,25 @@ function resolvePayload(step, context, data) {
 }
 
 function resolveInput(step, input, context, data) {
-  const source = input.source || { kind: 'Generated' };
+  const source = input.source || { kind: 'Unresolved' };
   if (source.kind === 'Constant') {
     return source.value;
   }
   if (source.kind === 'PreviousStep') {
-    const value = context.get(source.stepId + '.' + source.field) ?? context.findValue(source.field);
+    const value = context.get(source.stepId + '.' + source.field);
     if (value === undefined) {
       throw new Error('Cannot resolve previous step input: ' + step.id + '.' + input.name);
     }
     return value;
   }
   if (source.kind === 'PreviousEvent') {
-    const value = context.eventValue(source.event, source.field) ?? context.findValue(source.field);
+    const value = context.eventValue(source.event, source.field);
     if (value === undefined) {
       throw new Error('Cannot resolve previous event input: ' + source.event + '.' + source.field);
     }
     return value;
   }
+  if (source.kind !== 'Generated') throw new Error('Explicit input source required: ' + step.id + '.' + input.name);
   return data.value(input, step.id + '.' + input.name);
 }
 
@@ -897,8 +932,9 @@ function renderReadme(model) {
 
 Generated service for executing business flows against a running business system.
 
-See [WORKFLOW.md](WORKFLOW.md) for the five independent stages: environment,
-deployment, case design, data preparation, and test execution. The existing
+See [WORKFLOW.md](WORKFLOW.md) for the seven-step workflow: environment preparation,
+build and publish, service deployment, case design, data preparation, test execution,
+and result collection. Build and publish are separate CLI stages. The existing
 scenario service below is not a substitute for reviewing candidate test cases.
 
 ## Start

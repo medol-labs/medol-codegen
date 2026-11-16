@@ -117,6 +117,7 @@ test('resource budgets, startup protection and storage sizing survive environmen
         assert.match(files[`${prefix}/infrastructure.yaml`], /storage: "10Gi"/);
         assert.match(files[`${prefix}/infrastructure.yaml`], /storage: "8Gi"/);
         assert.match(files[`${prefix}/infrastructure.yaml`], /storageClassName: "local-path"/);
+        assert.equal((files[`${prefix}/infrastructure.yaml`].match(/type: "Recreate"/g) || []).length, 2);
     }
 });
 

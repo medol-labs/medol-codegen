@@ -4,7 +4,30 @@ import {mkdtempSync, readFileSync, readdirSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createRequire} from 'node:module';
-import {planDeployment, runDeployment, deploymentSteps, workloadPatches} from '../deployment-runtime.mjs';
+import {planDeployment, runDeployment, deploymentSteps, workloadPatches, mergeServiceCatalog, executeDeployment} from '../deployment-runtime.mjs';
+
+test('service extensions preserve generated metadata without mutating their inputs', () => {
+    const base = {services: [{name: 'portal', image: 'example/portal', environments: ['test']}]};
+    const extension = {services: [{name: 'portal', requires: ['api']}, {name: 'api'}]};
+    const merged = mergeServiceCatalog(base, extension);
+    assert.deepEqual(merged.services[0], {...base.services[0], requires: ['api']});
+    assert.equal(base.services.length, 1);
+    assert.equal(base.services[0].requires, undefined);
+    assert.throws(() => mergeServiceCatalog(base, {services: [{name: 'api'}, {name: 'api'}]}), /Duplicate/);
+});
+
+test('declared dependencies require active instances and fail before adapter creation', async () => {
+    const services = {services: [{name: 'portal', requires: ['api']}, {name: 'api'}]};
+    const input = {target: 'kubernetes', environment: 'test', platform: 'linux/arm64',
+        instances: [{service: 'portal', replicas: 1}]};
+    await assert.rejects(executeDeployment(input, () => assert.fail('adapter must not be created'), {catalog: services}), /requires active service api/);
+    assert.throws(() => planDeployment({...input, instances: [...input.instances, {service: 'api', replicas: 0}]}, services), /requires active/);
+    assert.equal(planDeployment({...input, instances: [...input.instances, {service: 'api', replicas: 1}]}, services).instances.length, 2);
+    assert.doesNotThrow(() => planDeployment({...input, instances: [{service: 'portal', replicas: 0}]}, services));
+    for (const requires of [['missing'], ['portal'], ['api', 'api'], 'api']) {
+        assert.throws(() => planDeployment(input, {services: [{name: 'portal', requires}, {name: 'api'}]}), /Invalid service dependencies/);
+    }
+});
 
 test('explicit workload selection excludes unselected manifests without deleting live objects', () => {
     const patches = workloadPatches(['api', 'worker'], [{service: 'api', replicas: 2}]).map(item => JSON.parse(item.patch));
@@ -69,6 +92,8 @@ test('generator emits the runtime, entry, guide and generic config', () => {
     const {generateSimulationFiles} = require('../simulation-generator.js');
     const files = generateSimulationFiles({name: 'example', scenarios: []}, {target: 'runtime'});
     assert.equal(files['src/runtime/deployment.mjs'], readFileSync(new URL('../deployment-runtime.mjs', import.meta.url), 'utf8'));
+    assert.equal(files['src/runtime/kubernetes-deployment.mjs'], readFileSync(new URL('../kubernetes-deployment.mjs', import.meta.url), 'utf8')
+        .replace("'./deployment-runtime.mjs'", "'./deployment.mjs'").replace("'./readiness-runtime.mjs'", "'./readiness.mjs'"));
     assert.ok(files['src/deploy.mjs']);
     assert.ok(files['DEPLOYMENT.md']);
     assert.deepEqual(JSON.parse(files['pipelines/deployment-config.json-example']).instances, []);

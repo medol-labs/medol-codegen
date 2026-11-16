@@ -4,6 +4,11 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { checkCases } from './case-design.mjs';
 
+export function validateBaselineManifest(baseline, environment) {
+  if (baseline?.mode !== 'baseline' || baseline.status !== 'ready' || !Array.isArray(baseline.records)) throw new Error('A ready baseline data manifest is required');
+  if (!environment.deploymentId || !environment.environment || baseline.deploymentId !== environment.deploymentId || baseline.environment !== environment.environment) throw new Error('Baseline belongs to a different deployment');
+}
+
 export function validateDataPlan(plan, options = {}) {
   const mode = plan.mode ?? 'baseline';
   if (!['baseline', 'case'].includes(mode)) throw new Error('Data mode must be baseline or case');
@@ -45,6 +50,10 @@ function materialize(value, context) {
 
 export async function seedData(plan, environment, options = {}) {
   const mode = validateDataPlan(plan, options);
+  if (plan.requiresBaseline || options.baseline) {
+    if (mode !== 'case') throw new Error('Only case data may depend on a baseline manifest');
+    validateBaselineManifest(options.baseline, environment);
+  }
   const count = plan.count ?? 1;
   if (!Number.isInteger(count) || count < 1) throw new Error('count must be a positive integer');
   const ids = new Set();
@@ -52,28 +61,40 @@ export async function seedData(plan, environment, options = {}) {
     if (!step.id || ids.has(step.id)) throw new Error('Step ids must be unique');
     ids.add(step.id);
     if (!['command', 'wait'].includes(step.kind)) throw new Error(`Unknown step kind: ${step.kind}`);
-    if (!environment.endpoints?.[step.endpoint]) throw new Error(`Missing endpoint: ${step.endpoint}`);
+    if (step.operation) {
+      const operation = options.adapter?.operations?.[step.operation];
+      if (!operation || operation.kind !== step.kind || typeof operation.execute !== 'function') throw new Error(`Unsupported adapter operation: ${step.operation}`);
+    } else if (!environment.endpoints?.[step.endpoint]) throw new Error(`Missing endpoint: ${step.endpoint}`);
     if (step.kind === 'wait' && !step.expect) throw new Error('wait requires expect');
   }
   const results = [];
   for (let index = 0; index < count; index++) {
-    const context = { seed: plan.seed ?? 1001, index, variables: plan.variables || {}, steps: {} };
+    const context = { seed: plan.seed ?? 1001, index, variables: plan.variables || {}, steps: {}, ...(options.baseline ? {baseline: options.baseline} : {}) };
     for (const step of plan.steps || []) {
       const request = materialize(step, context);
-      const base = environment.endpoints[step.endpoint].replace(/\/$/, '');
-      if (!request.path?.startsWith('/') || request.path.startsWith('//')) throw new Error('path must be relative to its configured endpoint');
-      const url = base + request.path;
-      const headers = { 'content-type': 'application/json', ...(options.headers || {}) };
+      const base = request.operation ? undefined : environment.endpoints[step.endpoint].replace(/\/$/, '');
+      if (!request.operation && (!request.path?.startsWith('/') || request.path.startsWith('//'))) throw new Error('path must be relative to its configured endpoint');
+      const url = request.operation ? undefined : base + request.path;
       const deadline = Date.now() + (step.timeoutMs ?? 30000);
       while (true) {
-        const response = await (options.fetch || fetch)(url, {
-          method: step.kind === 'wait' ? 'GET' : 'POST', headers,
-          body: step.kind === 'command' ? JSON.stringify(request.body) : undefined,
-          signal: AbortSignal.timeout(Math.max(1, Math.min(10000, deadline - Date.now())))
-        });
-        if (!response.ok) throw new Error(`${step.id}: HTTP ${response.status}`);
-        const text = await response.text();
-        const body = text ? JSON.parse(text) : null;
+        const remaining = Math.max(1, deadline - Date.now());
+        const signal = AbortSignal.timeout(step.kind === 'command' ? remaining : Math.min(10000, remaining));
+        let body;
+        if (request.operation) {
+          body = await options.adapter.operations[request.operation].execute(request, {environment, baseline: options.baseline, index, signal});
+          signal.throwIfAborted();
+        } else {
+          const headers = { 'content-type': 'application/json', ...(options.headers || {}),
+            ...(await options.adapter?.headersFor?.({endpoint: step.endpoint, url, environment}) || {}) };
+          const response = await (options.fetch || fetch)(url, {
+            method: step.kind === 'wait' ? 'GET' : 'POST', headers,
+            body: step.kind === 'command' ? JSON.stringify(request.body) : undefined,
+            signal, redirect: 'error'
+          });
+          if (!response.ok) throw new Error(`${step.id}: HTTP ${response.status}`);
+          const text = await response.text();
+          body = text ? JSON.parse(text) : null;
+        }
         if (step.kind === 'command') {
           context.steps[step.id] = { request: request.body, response: body };
           break;
@@ -93,6 +114,7 @@ export async function seedData(plan, environment, options = {}) {
   const manifest = {schemaVersion: 1, mode, environment: environment.environment,
     deploymentId: environment.deploymentId, seed: plan.seed ?? 1001,
     caseIds: mode === 'case' ? plan.caseIds : [],
+    ...(options.baseline ? {baselineFingerprint: createHash('sha256').update(JSON.stringify(options.baseline)).digest('hex')} : {}),
     planFingerprint: createHash('sha256').update(JSON.stringify(plan)).digest('hex'),
     status: plan.steps.some(s => s.kind === 'wait') ? 'ready' : 'prepared',
     records: results.map(context => materialize(plan.exports || {}, context)),
@@ -102,15 +124,17 @@ export async function seedData(plan, environment, options = {}) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const [planPath, suppliedEnvironment, outputPath, casePlanPath] = process.argv.slice(2);
+    const [planPath, suppliedEnvironment, outputPath, casePlanPath, suppliedBaseline] = process.argv.slice(2);
+    const baselinePath = suppliedBaseline || process.env.MEDOL_BASELINE_DATA_MANIFEST;
     const environmentPath = suppliedEnvironment || process.env.MEDOL_ENVIRONMENT_MANIFEST;
-    if (!planPath || !environmentPath) throw new Error('Usage: node src/data-plan.mjs <plan> <environment> [output-manifest] [approved-case-plan]');
+    if (!planPath || !environmentPath) throw new Error('Usage: node src/data-plan.mjs <plan> <environment> [output-manifest] [approved-case-plan] [baseline-manifest]');
     if (outputPath && existsSync(outputPath)) throw new Error('Data manifest already exists; use a new output path');
     const read = path => JSON.parse(readFileSync(path, 'utf8'));
     const environment = read(environmentPath);
     if (outputPath && (!environment.environment || !environment.deploymentId)) throw new Error('Persisted data requires environment and deploymentId');
     const result = await seedData(read(planPath), environment, {
       casePlan: casePlanPath ? read(casePlanPath) : undefined,
+      baseline: baselinePath ? read(baselinePath) : undefined,
       headers: JSON.parse(process.env.BUSINESS_HEADERS || '{}')
     });
     if (outputPath) {

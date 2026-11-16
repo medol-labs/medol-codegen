@@ -4,6 +4,20 @@ import {randomUUID} from 'node:crypto';
 
 export const deploymentSteps = ['validateConnection', 'prepareImages', 'deploy', 'waitDeploymentReady'];
 
+export function mergeServiceCatalog(base, extension = {services: []}) {
+    const services = new Map();
+    for (const catalog of [base, extension]) {
+        if (!Array.isArray(catalog?.services)) throw new Error('Service catalog requires services');
+        const seen = new Set();
+        for (const service of catalog.services) {
+            if (!service?.name || seen.has(service.name)) throw new Error('Duplicate or missing service name');
+            seen.add(service.name);
+            services.set(service.name, {...services.get(service.name), ...service});
+        }
+    }
+    return {...base, services: [...services.values()]};
+}
+
 export function workloadPatches(services, instances) {
     if (!instances?.length) throw new Error('Explicit instances are required');
     const selected = new Map(instances.map(item => [item.service, item.replicas]));
@@ -39,6 +53,17 @@ export function planDeployment(config, catalog = {services: []}) {
         if (seen.has(instance.service)) throw new Error(`Duplicate instance configuration: ${instance.service}`);
         seen.add(instance.service);
         if (!Number.isInteger(instance.replicas) || instance.replicas < 0) throw new Error('replicas must be a nonnegative integer');
+    }
+    const active = new Set(config.instances.filter(instance => instance.replicas > 0).map(instance => instance.service));
+    for (const service of [...catalog.services, ...(config.externalServices || [])]) {
+        const dependencies = service.requires ?? [];
+        if (!Array.isArray(dependencies) || new Set(dependencies).size !== dependencies.length
+            || dependencies.some(name => typeof name !== 'string' || !known.has(name) || name === service.name)) {
+            throw new Error('Invalid service dependencies: ' + service.name);
+        }
+        if (active.has(service.name)) for (const dependency of dependencies) {
+            if (!active.has(dependency)) throw new Error('Service ' + service.name + ' requires active service ' + dependency);
+        }
     }
     return {target: config.target, environment: config.environment, platform: config.platform,
         computeNodes: config.computeNodes, instances: config.instances || [], steps: [...deploymentSteps]};

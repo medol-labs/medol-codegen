@@ -1,4 +1,5 @@
 target/
+**/.medol/build-cache/
 # Build provenance belongs to images and release bundles.
 **/.medol/build-manifest.json
 **/medol-build.json

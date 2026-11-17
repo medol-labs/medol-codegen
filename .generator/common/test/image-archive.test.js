@@ -118,6 +118,7 @@ for (const target of ['axon5', 'refine', 'engine']) {
         fs.mkdirSync(path.join(scriptRoot, 'scripts'), {recursive: true});
         fs.copyFileSync(helperFile, path.join(scriptRoot, 'scripts/image-archive-runtime.mjs'));
         fs.copyFileSync(path.join(generatorRoot, '.generator/common/image-platform-runtime.mjs'), path.join(scriptRoot, 'scripts/image-platform-runtime.mjs'));
+        fs.copyFileSync(path.join(generatorRoot, '.generator/common/maven-build-cache.mjs'), path.join(scriptRoot, 'scripts/maven-build-cache.mjs'));
         fs.copyFileSync(path.join(generatorRoot, '.generator/common/release-runtime.mjs'), path.join(scriptRoot, 'scripts/release-runtime.mjs'));
         const template = target === 'engine'
             ? path.resolve(generatorRoot, '../federation-learning/federation-learning-runtime-engine/scripts/image-bundle.mjs')

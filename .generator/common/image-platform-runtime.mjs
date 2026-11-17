@@ -115,5 +115,5 @@ export function createPlatformCache({dryRun = false, execute, log = console.log}
         });
         refs.forEach((ref, i) => { pin(ref); tag(images[i].Id, ref); });
     }
-    return {nativePlatform, pin, ensure, withImages, activate, reference: platformReference};
+    return {nativePlatform, pin, find, ensure, withImages, activate, reference: platformReference};
 }

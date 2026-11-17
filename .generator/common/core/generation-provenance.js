@@ -104,6 +104,7 @@ function writeGenerationSupport(generator, target, options = {}) {
     generator.fs.copy(path.resolve(__dirname, '../release-runtime.mjs'), generator.destinationPath('scripts/release-runtime.mjs'));
     generator.fs.copy(path.resolve(__dirname, '../image-archive-runtime.mjs'), generator.destinationPath('scripts/image-archive-runtime.mjs'));
     generator.fs.copy(path.resolve(__dirname, '../image-platform-runtime.mjs'), generator.destinationPath('scripts/image-platform-runtime.mjs'));
+    if (target === 'axon5') generator.fs.copy(path.resolve(__dirname, '../maven-build-cache.mjs'), generator.destinationPath('scripts/maven-build-cache.mjs'));
     generator.fs.copy(path.resolve(__dirname, '../IMAGE-PLATFORMS.md'), generator.destinationPath('scripts/IMAGE-PLATFORMS.md'));
     const label = record.model.metadata?.source.release?.label;
     const released = record.model.metadata?.source.release?.channel === 'stable';

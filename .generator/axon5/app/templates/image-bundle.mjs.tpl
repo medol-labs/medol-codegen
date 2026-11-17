@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
-import {existsSync, readFileSync} from 'node:fs';
+import {existsSync, readFileSync, copyFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {writeArchiveManifest, verifyArchiveManifest, verifyLoadedImages} from './image-archive-runtime.mjs';
 import {prepareRelease, defaultImageVersion} from './release-runtime.mjs';
 import {createPlatformCache} from './image-platform-runtime.mjs';
+import {createMavenBuildCache} from './maven-build-cache.mjs';
 
 const defaultModules = <%- JSON.stringify(imageModules, null, 4) %>;
 const defaultTar = '<%= imageTarName %>';
@@ -61,27 +62,55 @@ function buildImages() {
     if (skipInstall && release.manifest.packageVersion) {
         fail('Stable deliveries require a fresh reactor install; disable --skip-install/FAST_IMAGE_BUILD.');
     }
-    release.embed(modules.map((name) => `${name}/src/main/resources/META-INF/medol-build.json`));
-    if (!skipInstall) {
-        run('./mvnw', [...mavenGlobalArgs(), '-pl', modules.join(','), '-am', '-DskipTests', 'clean', 'install']);
-    } else {
-        console.log('[images] skipping Maven install; using already-built local reactor artifacts');
-    }
-    for (const moduleName of modules) {
-        platformCache.pin(imageName(moduleName));
-        run('./mvnw', [
-            ...mavenGlobalArgs(),
-            '-pl', moduleName,
-            '-DskipTests',
-            `-Djib.to.image=${imageName(moduleName)}`,
-            `-Djib.container.platform.os=${platform.os}`,
-            `-Djib.container.platform.architecture=${platform.architecture}`,
-            ...release.jibArgs,
-            jibGoal
-        ]);
-        platformCache.pin(imageName(moduleName));
-    }
-    release.writeManifest('.medol/build-manifest.json', imageNames());
+    const force = flagEnabled(args['force-build'], process.env.FORCE_IMAGE_BUILD);
+    const version = dryRun ? {status: 0, stdout: 'dry-run'} : spawnSync('./mvnw', ['-v'], {cwd: root, encoding: 'utf8'});
+    if (version.status !== 0) throw new Error('Cannot identify Maven/JDK toolchain');
+    const cache = createMavenBuildCache({root, modules, toolchain: version.stdout,
+        options: mavenGlobalArgs()});
+    const execute = () => {
+        const source = dryRun ? undefined : cache.source();
+        const reusable = !dryRun && !force && cache.valid();
+        if (skipInstall && !reusable && !dryRun) throw new Error('--skip-install requires verified unchanged build artifacts; run build without this option');
+        release.embed(modules.map((name) => `${name}/src/main/resources/META-INF/medol-build.json`));
+        if (reusable) console.log('[images] reuse verified JVM artifacts (independent of target image architecture)');
+        else run('./mvnw', [...mavenGlobalArgs(), '-pl', modules.join(','), '-am', '-DskipTests', 'clean', 'install']);
+        if (!dryRun && source !== cache.source()) throw new Error('Build inputs changed during compilation; retry with stable inputs');
+        // Jib packages target/classes; refresh provenance without recompiling Kotlin.
+        if (!dryRun) for (const name of modules) copyFileSync(resolve(root, name, 'src/main/resources/META-INF/medol-build.json'), resolve(root, name, 'target/classes/META-INF/medol-build.json'));
+        if (!dryRun) cache.record();
+        for (const moduleName of modules) {
+            const key = dryRun ? '' : cache.imageKey({moduleName, platformName, labels: release.labels, jibGoal});
+            const existing = dryRun ? undefined : platformCache.find(imageName(moduleName), platformName);
+            if (!force && !dryRun && cache.imageMatches(key, existing)
+                && Object.entries(release.labels).every(([key, value]) => existing.Config?.Labels?.[key] === value)) {
+                platformCache.activate([imageName(moduleName)], platformName);
+                console.log(`[images] reuse verified image ${imageName(moduleName)} ${platformName}`);
+                continue;
+            }
+            platformCache.pin(imageName(moduleName));
+            run('./mvnw', [
+                ...mavenGlobalArgs(),
+                '-pl', moduleName,
+                '-DskipTests',
+                `-Djib.to.image=${imageName(moduleName)}`,
+                `-Djib.container.platform.os=${platform.os}`,
+                `-Djib.container.platform.architecture=${platform.architecture}`,
+                ...release.jibArgs,
+                jibGoal
+            ]);
+            const built = platformCache.pin(imageName(moduleName));
+            if (!dryRun) {
+                if (!built?.Id || platformCache.find(imageName(moduleName), platformName)?.Id !== built.Id) {
+                    throw new Error(`Built image does not match requested platform: ${platformName}`);
+                }
+                cache.recordImage(key, built);
+            }
+        }
+        if (!dryRun && source !== cache.source()) throw new Error('Build inputs changed during image packaging; retry with stable inputs');
+        if (!dryRun) cache.record();
+        release.writeManifest('.medol/build-manifest.json', imageNames());
+    };
+    return dryRun ? execute() : cache.withLock(execute);
 }
 
 async function exportImages() {
@@ -268,7 +297,8 @@ Options:
   --prefix <name>          Docker image prefix. Defaults to DOCKER_IMAGE_PREFIX or medol.
   --version <tag>          Image tag. Defaults to IMAGE_VERSION or 0.0.1-SNAPSHOT.
   --platform <os/arch>     Target CPU architecture. Defaults to DOCKER_DEFAULT_PLATFORM or Docker Engine architecture.
-  --skip-install           Skip the preliminary reactor install. Also enabled by FAST_IMAGE_BUILD=true.
+  --skip-install           Require verified reusable JVM artifacts (FAST_IMAGE_BUILD=true).
+  --force-build            Recompile and rebuild images instead of reusing verified caches.
   --offline                Run Maven with -o. Also enabled by MAVEN_OFFLINE=true.
   --output <file>          Image archive path. Defaults to IMAGE_TAR or ${defaultTar}.
   --root <dir>             Generated backend root. Defaults to current directory.

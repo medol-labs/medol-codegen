@@ -38,6 +38,23 @@ their normal layer caches. select changes public tags to the requested cached
 architecture without rebuilding or downloading; it does not recreate containers.
 Use the same prefix/version/module selection as the original build.
 
+Axon5 Maven builds also maintain `.medol/build-cache/` (local, not committed).
+Unchanged source/resources/POMs, Maven/JDK identity, settings, dependency repository
+metadata and verified target artifacts allow reusing JVM compilation across image
+architectures. An unchanged image key additionally requires the cached Docker image
+ID, architecture and provenance labels to match before skipping Jib.
+The first build after upgrading these scripts establishes the cache; old images are
+not trusted merely because their tags match. Missing or modified target artifacts
+invalidate compilation reuse. The cache is conservative across reactor modules.
+Explicit custom Maven repository/settings overrides disable automatic compilation
+reuse when the dependency location cannot be verified.
+
+Use `node scripts/image-bundle.mjs build --platform linux/arm64 --force-build`
+to deliberately rebuild, for example after upstream mutable dependencies/base images
+change. Normal reuse does not check remote tags. `--skip-install` (or
+`FAST_IMAGE_BUILD=true`) now requires verified cached compilation rather than blindly
+trusting target files. Stable release identity rules remain enforced.
+
 Cache tags are medol-platform-cache/<hash-of-reference>:<os>-<arch>[-variant].
 They are local retention references, not published versions. Pruning these images
 removes the guarantee of offline reuse. Legacy overwritten/dangling images are not

@@ -52,6 +52,7 @@ export const useCommandForm = <
     refineCoreProps: {
       resource,
       action: "create",
+      mutationMode: "pessimistic",
       dataProviderName,
       redirect,
       meta: {
@@ -98,6 +99,8 @@ export const useCommandForm = <
         id: aggregateId,
         dataProviderName: queryDataProviderName ?? dataProviderName,
         invalidates: ["list", "many", "detail"],
+      }).catch((cause) => {
+        throw Object.assign(new Error("Command accepted, but refreshing its read model failed", {cause}), {commandAccepted: true, result});
       });
       window.setTimeout(() => {
         void invalidate({
@@ -105,7 +108,7 @@ export const useCommandForm = <
           id: aggregateId,
           dataProviderName: queryDataProviderName ?? dataProviderName,
           invalidates: ["list", "many", "detail"],
-        });
+        }).catch(() => undefined);
       }, 500);
       return result;
     },

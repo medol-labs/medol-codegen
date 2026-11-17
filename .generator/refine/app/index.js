@@ -214,6 +214,7 @@ const RefineGenerator = class extends Generator {
             this._writeSkeleton(frontendApp);
             const model = buildFrontendModel(codegenModel, undefined, { frontendApp });
             logGenerationWarnings(this, model.generationWarnings);
+            require('./ai-capability-model').writeCapabilities(this, model.frontendSource, model);
             this._writeDomainModel(buildDomainModel(model.frontendSource));
             this._writeI18n(model.i18n);
             this._writeExtensionManifest(model);
@@ -226,6 +227,7 @@ const RefineGenerator = class extends Generator {
         const model = buildFrontendModel(codegenModel, selectedCommandKeys, { frontendApp });
         logGenerationWarnings(this, model.generationWarnings);
         this._writeFrameworkComponents();
+        require('./ai-capability-model').writeCapabilities(this, model.frontendSource, model);
         this._writeDomainModel(buildDomainModel(model.frontendSource));
         this._writeI18n(model.i18n);
         this._writeExtensionManifest(model);
@@ -450,6 +452,9 @@ const RefineGenerator = class extends Generator {
     }
 
     _writeFrameworkComponents() {
+        for (const file of ['index.ts', 'command-execution.ts']) {
+            this.fs.copy(this.templatePath('root/src/platform/composition/' + file), this.destinationPath('src/platform/composition/' + file));
+        }
         this._writeTenantRuntime();
         this.fs.copy(
             this.templatePath('root/src/components/reporting/report-panel.tsx'),

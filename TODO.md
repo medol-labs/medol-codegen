@@ -21,3 +21,8 @@
   - [x] 生成 typed composition target 清单，作为 IDE、AI agent 和后续 Medol UI 的稳定扩展点入口。
   - [ ] MEDOL/codegen model schema 显式输出扩展点元数据，供 UI、文档、蓝图生成和后续设计器展示使用。
   - [ ] 在 MEDOL 文档中补充 Blueprint / Extension / Override 的建模含义和示例。
+- 完善 Refine 生成列表的表格操作：保留 TanStack Table v8 + shadcn/ui，不引入 AG Grid 或 Excel 式编辑。
+  - [ ] 在公共 `RefineDataTable` 和 `View` 工具栏支持列拖拽调序、调宽、左右固定和显隐；按用户和资源保存列布局，支持恢复默认。保留业务 `XxxList` 的列与操作声明，不在各页面重复实现。
+  - [ ] 列头筛选复用现有 `QueryFilter`、URL 和 Refine data provider 查询链路；列布局独立于查询状态，调整布局不触发重新查询。
+  - [ ] 用宽表验证固定列、横向滚动和刷新恢复；按实际数据量评估 TanStack Virtual。CSV 导出明确区分当前页与全部筛选结果，后者单独评估服务端取数与权限。
+  - [ ] 等 Refine 表格适配器支持 TanStack Table v9 后再评估升级，不把升级作为上述功能的前置条件。

@@ -18,6 +18,11 @@ function safePath(root, path) {
 function materialize(value, credentials) {
     if (Array.isArray(value)) return value.map(item => materialize(item, credentials));
     if (!value || typeof value !== 'object') return value;
+    if (Object.hasOwn(value, '$env')) {
+        const key = value.$env;
+        if (Object.keys(value).length !== 1 || !/^[A-Z_][A-Z0-9_]*$/.test(key) || !process.env[key]) throw new Error('Required environment variable: ' + key);
+        return process.env[key];
+    }
     if (Object.hasOwn(value, '$secret')) {
         if (Object.keys(value).length !== 1 || !Object.hasOwn(credentials, value.$secret)) throw new Error('Unknown credential reference');
         return credentials[value.$secret];

@@ -48,8 +48,14 @@ function serviceFiles(root, model) {
         [outputPath(root, 'EXTENSIONS.md')]: readFileSync(path.join(__dirname, '../extension-guide.md'), 'utf8'),
         [outputPath(root, 'src/cases.mjs')]: readFileSync(path.join(__dirname, '../case-design.mjs'), 'utf8'),
         [outputPath(root, 'cases/README.md')]: readFileSync(path.join(__dirname, '../case-guide.md'), 'utf8'),
+        [outputPath(root, 'cases/WORKFLOWS.md')]: readFileSync(path.join(__dirname, '../case-workflow-guide.md'), 'utf8'),
         ...Object.fromEntries(['generated', 'manual', 'ai', 'approved'].map(name => [outputPath(root, `cases/${name}/.gitkeep`), ''])),
         [outputPath(root, 'src/execute-cases.mjs')]: readFileSync(path.join(__dirname, '../case-executor.mjs'), 'utf8').replace("'./case-design.mjs'", "'./cases.mjs'"),
+        [outputPath(root, 'src/http-case-executor.mjs')]: readFileSync(path.join(__dirname, '../http-case-executor.mjs'), 'utf8').replace("'./case-design.mjs'", "'./cases.mjs'"),
+        [outputPath(root, 'src/flow-values.mjs')]: readFileSync(path.join(__dirname, '../flow-values.mjs'), 'utf8'),
+        [outputPath(root, 'src/http-workflow.mjs')]: readFileSync(path.join(__dirname, '../http-workflow.mjs'), 'utf8').replace("'./case-executor.mjs'", "'./execute-cases.mjs'"),
+        [outputPath(root, 'src/case-sequence.mjs')]: readFileSync(path.join(__dirname, '../case-sequence.mjs'), 'utf8'),
+        [outputPath(root, 'src/workflow-tasks.mjs')]: readFileSync(path.join(__dirname, '../workflow-tasks.mjs'), 'utf8').replace("'./case-design.mjs'", "'./cases.mjs'").replace("'./case-executor.mjs'", "'./execute-cases.mjs'").replace("'./prepare-data-entry.mjs'", "'./prepare-data.mjs'").replace("'./data-plan-runtime.mjs'", "'./data-plan.mjs'"),
         [outputPath(root, 'WORKFLOW.md')]: readFileSync(path.join(__dirname, '../workflow-guide.md'), 'utf8'),
         [outputPath(root, 'src/runtime/stages.mjs')]: readFileSync(path.join(__dirname, '../stage-runtime.mjs'), 'utf8'),
         [outputPath(root, 'src/runtime/deployment.mjs')]: readFileSync(path.join(__dirname, '../deployment-runtime.mjs'), 'utf8'),
@@ -91,6 +97,18 @@ function serviceFiles(root, model) {
             ]
         }, null, 2) + '\n',
         [outputPath(root, 'pipelines/case-selection.json-example')]: JSON.stringify({tags: ['smoke']}, null, 2) + '\n',
+        [outputPath(root, 'pipelines/http-executor.json-example')]: JSON.stringify({
+            endpoints: {service: {bearerTokenEnv: 'SIMULATION_API_TOKEN'}},
+            probes: [{endpoint: 'service', path: '/actuator/health', expect: {status: 'UP'}}]
+        }, null, 2) + '\n',
+        [outputPath(root, 'pipelines/workflow-tasks.json-example')]: JSON.stringify({tasks: {
+            'select-cases': {module: 'simulation/src/workflow-tasks.mjs', export: 'select', scope: 'execution',
+                inputs: {library: {path: 'simulation/cases/approved/cases.json'}, selection: {path: 'simulation/pipelines/case-selection.json'}}, output: 'execution-plan.json', successStatuses: ['ready']},
+            'prepare-baseline': {module: 'simulation/src/workflow-tasks.mjs', export: 'prepareWorkflow', scope: 'execution',
+                inputs: {environment: {artifact: 'deployment.json', binding: 'deployment'}, workflow: {path: 'simulation/cases/approved/baseline.json'}, config: {path: 'simulation/pipelines/http-executor.json'}}, output: 'baseline.json'},
+            test: {module: 'simulation/src/workflow-tasks.mjs', export: 'test', scope: 'execution',
+                inputs: {environment: {artifact: 'deployment.json', binding: 'deployment'}, data: {artifact: 'data.json', binding: 'data'}, cases: {artifact: 'execution-plan.json', binding: 'plan'}, config: {path: 'simulation/pipelines/http-executor.json'}}, output: 'test.json'}
+        }}, null, 2) + '\n',
         [outputPath(root, 'package.json')]: renderPackageJson(model),
         [outputPath(root, '.env-example')]: renderEnvExample(),
         [outputPath(root, 'Dockerfile')]: renderDockerfile(),

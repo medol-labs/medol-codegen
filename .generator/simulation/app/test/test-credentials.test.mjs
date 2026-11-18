@@ -5,6 +5,20 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {prepareTestCredentials} from '../test-credentials-runtime.mjs';
 
+test('public settings are rendered from explicit environment references', t => {
+    const root = mkdtempSync(join(tmpdir(), 'credentials-env-'));
+    t.after(()=>rmSync(root,{recursive:true,force:true}));
+    const config={schemaVersion:1,environment:'test',stateFile:'state.json',generate:['key'],outputs:[{format:'env',path:'.env',template:{VALUE:{$env:'SIM_TEST_ENDPOINT_234'}}}]};
+    const prior=process.env.SIM_TEST_ENDPOINT_234;
+    try {
+        delete process.env.SIM_TEST_ENDPOINT_234;
+        assert.throws(()=>prepareTestCredentials(config,{root}),/Required environment/);
+        process.env.SIM_TEST_ENDPOINT_234='http://sample.test:8100';
+        prepareTestCredentials(config,{root});
+        assert.equal(readFileSync(join(root,'.env'),'utf8'),'VALUE=http://sample.test:8100\n');
+    } finally {if(prior===undefined)delete process.env.SIM_TEST_ENDPOINT_234;else process.env.SIM_TEST_ENDPOINT_234=prior;}
+});
+
 test('arbitrary credential names and paths are configuration driven and repeatable', () => {
     const root = mkdtempSync(join(tmpdir(), 'credentials-'));
     const config = {schemaVersion: 1, environment: 'sample', stateFile: 'private/state.json', generate: ['serviceKey'],

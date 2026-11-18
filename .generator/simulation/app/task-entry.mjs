@@ -12,6 +12,11 @@ export function runDirectory(root, runId) {
 
 export function extensionPath(root, module) {
     if (typeof module !== 'string' || !module) throw new Error('Extension module is required');
+    if (module === 'simulation/src/workflow-tasks.mjs') {
+        const file = realpathSync(resolve(root, module));
+        if (file !== resolve(realpathSync(root), module)) throw new Error('Built-in task module must not be a symlink');
+        return file;
+    }
     const base = realpathSync(resolve(root, 'simulation/extensions'));
     const file = realpathSync(resolve(root, module));
     const path = relative(base, file);

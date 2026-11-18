@@ -355,3 +355,10 @@ AbortSignal to stop in-flight I/O. Cleanup policy requires an adapter cleanup.
 The executor does not roll back already accepted business commands.
 Reports record each assertion result, fail fast and mark remaining cases skipped.
 Missing events never pass, including in the legacy scenario runner.
+
+## Configuration-Driven Business Workflows
+
+The shared HTTP executor supports nested iteration, projection waits, explicit
+assertions and artifact digest checks. Preparation workflows use the same engine
+but produce data manifests, not test verdicts. See [case workflows](cases/WORKFLOWS.md).
+New ordinary HTTP workflows should use reviewed JSON instead of business-specific JS.

@@ -8,10 +8,10 @@ import {createComposeDeployment} from '../compose-deployment.mjs';
 test('Compose uses explicit context/project, existing native images and no cleanup', async t => {
   const root = mkdtempSync(join(tmpdir(), 'compose-deploy-'));
   t.after(() => rmSync(root, {recursive: true, force: true}));
-  writeFileSync(join(root, '.env'), 'PASSWORD=private\n');
+  writeFileSync(join(root, '.env'), 'PASSWORD=private\nSERVICE_URL=http://lan.test:8100\n');
   const calls = [];
   const config = {target: 'docker-compose', dockerContext: 'test', composeProject: 'app', files: ['compose.yml'],
-    envFile: '.env', platform: 'linux/amd64', instances: [{service: 'backend', replicas: 1}]};
+    envFile: '.env', endpointEnv:{api:'SERVICE_URL'}, platform: 'linux/amd64', instances: [{service: 'backend', replicas: 1}]};
   const execute = (_cmd, args) => {
     calls.push(args);
     if (args.includes('info')) return JSON.stringify({ID: 'daemon', Architecture: 'x86_64', Name: 'test'});
@@ -24,6 +24,7 @@ test('Compose uses explicit context/project, existing native images and no clean
   const adapter = createComposeDeployment(config, {root, execute});
   await adapter.validateConnection(); await adapter.prepareImages(); await adapter.deploy(); await adapter.waitDeploymentReady();
   assert.equal(adapter.deploymentSnapshot().nodes[0].architecture, 'amd64');
+  assert.equal(adapter.deploymentSnapshot().endpoints.api, 'http://lan.test:8100');
   assert.ok(calls.some(args => args.includes('--pull') && args.includes('never')));
   assert.ok(calls.every(args => args[1] === 'test' && !args.includes('down')));
   const wrong = createComposeDeployment({...config, platform: 'linux/arm64'}, {root, execute});

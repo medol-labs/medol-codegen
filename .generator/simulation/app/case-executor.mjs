@@ -1,21 +1,12 @@
 import {readFileSync, mkdirSync, writeFileSync} from 'node:fs';
 import {resolve, dirname} from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {isDeepStrictEqual} from 'node:util';
 import {randomUUID, createHash} from 'node:crypto';
-import {checkCases, checkApproval} from './case-design.mjs';
+import {allSteps, checkCases, checkApproval} from './case-design.mjs';
+import {createHttpExecutor} from './http-case-executor.mjs';
+import {at, compare, resolveInputs} from './flow-values.mjs';
+export {resolveInputs} from './flow-values.mjs';
 
-const at = (value, path) => path.split('.').filter(Boolean).reduce((v, key) => v?.[key], value);
-export function resolveInputs(value, context) {
-  if (Array.isArray(value)) return value.map(v => resolveInputs(v, context));
-  if (!value || typeof value !== 'object') return value;
-  if (Object.hasOwn(value, '$ref')) {
-    const found = at(context, value.$ref);
-    if (found === undefined) throw new Error(`Unresolved input reference: ${value.$ref}`);
-    return structuredClone(found);
-  }
-  return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, resolveInputs(v, context)]));
-}
 
 export function validateDataManifest(data, environment) {
   if (environment.status !== 'ready') throw new Error('Deployment must be ready');
@@ -39,14 +30,14 @@ export async function executeCases(plan, environment, data, adapter, options = {
     if (typeof adapter.validateEnvironment !== 'function' || typeof adapter.validateData !== 'function') throw new Error('Executor requires live environment and data validators');
     if (typeof adapter.execute !== 'function') throw new Error('Executor requires execute');
     if (plan.cases.some(c => c.cleanupPolicy === 'cleanup') && typeof adapter.cleanup !== 'function') throw new Error('Cleanup is not supported by executor');
-    if (plan.cases.some(c => c.assertions.some(a => a.type === 'event')) && typeof adapter.observe !== 'function') throw new Error('Event observation is not supported by executor');
+    if (plan.cases.some(c => [...c.assertions, ...allSteps(c.steps).flatMap(s => s.assertions || [])].some(a => a.type === 'event')) && typeof adapter.observe !== 'function') throw new Error('Event observation is not supported by executor');
     await adapter.validatePlan?.(plan);
     await adapter.validateEnvironment(environment);
     await adapter.validateData(data, environment);
     for (const item of plan.cases) {
       const result = {id: item.id, status: 'running', steps: [], assertions: []};
       report.cases.push(result);
-      const context = {data, steps: {}};
+      const context = {data, environment, steps: {}, variables: {}};
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), item.timeoutMs);
       const bounded = async operation => {
@@ -60,38 +51,69 @@ export async function executeCases(plan, environment, data, adapter, options = {
         } finally { controller.signal.removeEventListener('abort', onAbort); }
       };
       try {
-        for (const step of item.steps) {
+        context.variables = resolveInputs(item.variables || {}, context);
+        const runSteps = async (steps, context, results, outerAssertions = []) => {
+        for (const step of steps) {
+          controller.signal.throwIfAborted();
           const stepResult = {id: step.id, status: 'running'};
-          result.steps.push(stepResult);
+          results.push(stepResult);
+          if (step.when) {
+            const condition = resolveInputs(step.when, context);
+            if (!compare(condition.value, condition.operator, condition.expected)) {stepResult.status = 'skipped'; continue;}
+          }
           save();
-          const value = await bounded(() => adapter.execute(resolveInputs(step, context), {environment, context, signal: controller.signal}));
+          const assertions = [...(step.assertions || []), ...outerAssertions.filter(a => a.stepId === step.id)];
+          let value;
+          if (step.type === 'foreach') {
+            const values = resolveInputs(step.items, context);
+            if (!Array.isArray(values) || (!values.length && step.allowEmpty !== true) || values.length > (step.maxItems || 1000)) throw new Error(`Invalid foreach collection: ${step.id}`);
+            const items = [];
+            stepResult.iterations = [];
+            for (const [index, entry] of values.entries()) {
+              const child = {...context, item: entry, index, steps: {...context.steps}, variables: {...context.variables}};
+              if (step.as) child[step.as] = entry;
+              if (step.indexAs) child[step.indexAs] = index;
+              const iteration = {index, steps: []};
+              stepResult.iterations.push(iteration);
+              await runSteps(step.steps, child, iteration.steps);
+              items.push(resolveInputs(step.exports || {index: {$ref: 'index'}}, child));
+            }
+            value = {status: 'ok', body: {items}};
+          } else if (step.type === 'assert') {
+            value = {status: 'ok', body: resolveInputs(step.value, context)};
+          } else {
+            const {assertions: ignored, ...operation} = step;
+            value = await bounded(() => adapter.execute(resolveInputs(operation, context), {environment, context, signal: controller.signal}));
+          }
           // Rejections must be explicit business responses; transport errors fail the case.
           if (!value || !['ok', 'rejected'].includes(value.status)) throw new Error(`Invalid executor response: ${step.id}`);
           context.steps[step.id] = value;
-          if (value.status === 'rejected' && !item.assertions.some(a => a.stepId === step.id && a.type === 'rejection')) throw new Error(`Unexpected rejection: ${step.id}`);
-          for (const assertion of item.assertions.filter(a => a.stepId === step.id)) {
+          if (value.status === 'rejected' && !assertions.some(a => a.type === 'rejection')) throw new Error(`Unexpected rejection: ${step.id}`);
+          for (const assertion of assertions) {
             const expected = resolveInputs(assertion, context);
             let passed;
             if (expected.type === 'rejection') passed = value.status === 'rejected' && value.reason === expected.reason;
             else if (expected.type === 'event') passed = await bounded(() => adapter.observe(expected, {environment, context, signal: controller.signal})) === true;
             else {
               const actual = at(value.body, expected.path);
-              passed = expected.operator === 'exists' ? actual !== undefined && actual !== null
-                : expected.operator === 'equals' ? isDeepStrictEqual(actual, expected.expected)
-                : Array.isArray(actual) ? actual.some(v => isDeepStrictEqual(v, expected.expected))
-                : typeof actual === 'string' && typeof expected.expected === 'string' && actual.includes(expected.expected);
+              passed = compare(actual, expected.operator, expected.expected);
             }
             result.assertions.push({stepId: step.id, type: expected.type, status: passed ? 'passed' : 'failed'});
             save();
             if (!passed) throw new Error(`Assertion failed: ${step.id}/${expected.type}`);
           }
           stepResult.status = 'passed';
+          if (step.evidence) stepResult.output = resolveInputs(step.evidence, context);
         }
+        };
+        await runSteps(item.steps, context, result.steps, item.assertions);
+        if (item.exports) result.exports = resolveInputs(item.exports, context);
         result.status = 'passed';
       } catch (error) {
         result.status = 'failed';
         result.error = error.message;
-        for (const step of result.steps) if (step.status === 'running') step.status = 'failed';
+        const markFailed = steps => {for (const step of steps) {if (step.status === 'running') step.status = 'failed'; for (const iteration of step.iterations || []) markFailed(iteration.steps);}};
+        markFailed(result.steps);
       } finally {
         clearTimeout(timer);
         controller.abort();
@@ -113,10 +135,11 @@ export async function executeCases(plan, environment, data, adapter, options = {
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
     const [plan, environment, data, adapterPath, output, model] = process.argv.slice(2);
-    if (!output) throw new Error('Usage: execute-cases.mjs <cases> <environment> <data-manifest> <trusted-adapter.mjs> <new-report> [model]');
+    if (!output) throw new Error('Usage: execute-cases.mjs <cases> <environment> <data-manifest> <http-config.json|trusted-adapter.mjs> <new-report> [model]');
     const read = path => JSON.parse(readFileSync(path, 'utf8'));
     const inputs = {plan: read(plan), environment: read(environment), data: read(data), model: model ? read(model) : undefined};
-    const adapter = (await import(pathToFileURL(resolve(adapterPath)).href)).default;
+    const adapter = adapterPath.endsWith('.json') ? createHttpExecutor(read(adapterPath))
+      : (await import(pathToFileURL(resolve(adapterPath)).href)).default;
     mkdirSync(dirname(resolve(output)), {recursive: true});
     writeFileSync(output, JSON.stringify({status: 'running'}), {flag: 'wx', mode: 0o600});
     const report = await executeCases(inputs.plan, inputs.environment, inputs.data, adapter, {

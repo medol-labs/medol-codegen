@@ -9,6 +9,12 @@ export function createComposeDeployment(config, options = {}) {
   const root = resolve(options.root || '.');
   const execute = options.execute || ((cmd, args, settings) => execFileSync(cmd, args, {encoding: 'utf8', timeout: 600000, maxBuffer: 16 * 1024 * 1024, ...settings}));
   const environment = {...process.env, ...parseEnv(readFileSync(resolve(root, config.envFile), 'utf8'))};
+  const endpoints = {...config.endpoints};
+  for (const [name, key] of Object.entries(config.endpointEnv || {})) {
+    const url = new URL(environment[key]);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('Invalid endpoint URL: ' + key);
+    endpoints[name] = url.href.replace(/\/$/, '');
+  }
   const args = ['--context', config.dockerContext, 'compose', '-p', config.composeProject, '--env-file', resolve(root, config.envFile),
     ...config.files.flatMap(file => ['-f', resolve(root, file)])];
   const docker = argv => execute('docker', ['--context', config.dockerContext, ...argv], {env: environment});
@@ -45,7 +51,7 @@ export function createComposeDeployment(config, options = {}) {
     },
     deploymentSnapshot() {
       return {dockerContext: config.dockerContext, composeProject: config.composeProject, infrastructureId: info?.ID,
-        endpoints: config.endpoints, credentialRefs: {environmentFile: resolve(root, config.envFile)}, images,
+        endpoints, credentialRefs: {environmentFile: resolve(root, config.envFile)}, images,
         nodes: info ? [{name: info.Name, architecture: info.Architecture === 'x86_64' ? 'amd64' : info.Architecture === 'aarch64' ? 'arm64' : info.Architecture, ready: true}] : []};
     }
   };

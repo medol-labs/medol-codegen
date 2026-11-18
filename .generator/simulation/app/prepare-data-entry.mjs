@@ -2,6 +2,7 @@ import {readFileSync, writeFileSync, mkdirSync, existsSync} from 'node:fs';
 import {resolve, dirname} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
+import {createHttpExecutor} from './http-case-executor.mjs';
 import {seedData, validateDataPlan, validateBaselineManifest} from './data-plan-runtime.mjs';
 import {checkApproval, checkCases} from './case-design.mjs';
 
@@ -62,7 +63,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
         if (existsSync(args.output)) throw new Error('Output already exists; choose a new manifest path');
         const read = file => JSON.parse(readFileSync(file, 'utf8'));
         const plan = read(args.plan), environment = read(args.environment);
-        const adapter = args.adapter ? (await import(pathToFileURL(resolve(args.adapter)).href)).default : undefined;
+        const adapter = args.adapter ? (args.adapter.endsWith('.json') ? createHttpExecutor(read(args.adapter)) : (await import(pathToFileURL(resolve(args.adapter)).href)).default) : undefined;
         const result = await prepareData(args.mode, plan, environment, {
             adapter, casePlan: args.cases ? read(args.cases) : undefined,
             baseline: args.baseline ? read(args.baseline) : undefined,

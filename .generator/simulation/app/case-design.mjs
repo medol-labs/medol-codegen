@@ -2,11 +2,16 @@ import {readFileSync, writeFileSync, mkdirSync} from 'node:fs';
 import {resolve, dirname} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
+import {operators} from './flow-values.mjs';
 
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const sources = ['model', 'ai', 'manual'];
 const assertionTypes = ['event', 'rejection', 'query'];
-const stepTypes = ['command', 'await-event', 'query'];
+const stepTypes = ['command', 'await-event', 'query', 'foreach', 'assert'];
+export function allSteps(steps, depth = 0) {
+  if (depth > 10 || !Array.isArray(steps)) throw new Error('Invalid nested workflow');
+  return steps.flatMap(step => [step, ...(step.type === 'foreach' ? allSteps(step.steps, depth + 1) : [])]);
+}
 const fail = message => { throw new Error(message); };
 const named = value => typeof value === 'string' && value.trim().length > 0;
 const reviewFingerprint = ({approval, ...item}) => hash(item);
@@ -75,22 +80,27 @@ export function checkCases(plan, {draft = false, model, capabilities} = {}) {
     for (const field of ['prerequisites', 'dataRequirements', 'steps', 'assertions']) {
       if (!Array.isArray(item[field])) fail(`Expected array ${field}: ${item.id}`);
     }
-    if (!draft && (!item.steps.length || !item.assertions.length)) fail(`Incomplete case: ${item.id}`);
+    if (!draft && (!item.steps.length || (!item.assertions.length && !allSteps(item.steps).some(s => s.assertions?.length)))) fail(`Incomplete case: ${item.id}`);
     if (!Number.isFinite(item.timeoutMs) || item.timeoutMs <= 0 || !['retain', 'cleanup'].includes(item.cleanupPolicy)) throw new Error(`Missing execution policy: ${item.id}`);
     const stepIds = new Set();
-    for (const step of item.steps) {
+    for (const step of allSteps(item.steps)) {
       if (!named(step.id) || stepIds.has(step.id) || !stepTypes.includes(step.type)) fail(`Invalid or duplicate step: ${item.id}`);
       stepIds.add(step.id);
       if (step.type === 'command' && !named(step.command)) fail(`Missing command: ${step.id}`);
       if (step.type === 'query' && !named(step.query)) fail(`Missing query: ${step.id}`);
-      if (capabilities && !capabilities.steps?.includes(step.type)) fail(`Unsupported executor step: ${step.type}`);
+      if (step.type === 'foreach' && (!step.items || !step.steps.length || (step.as && !/^[a-zA-Z][a-zA-Z0-9]*$/.test(step.as)) || ['steps', 'data', 'environment', 'variables', 'index'].includes(step.as))) fail('Invalid foreach');
+      if (step.type === 'foreach' && step.maxItems !== undefined && (!Number.isInteger(step.maxItems) || step.maxItems < 1)) fail('Invalid maxItems');
+      if (step.type === 'foreach' && step.allowEmpty !== undefined && typeof step.allowEmpty !== 'boolean') fail('Invalid allowEmpty');
+      if (step.as && step.indexAs === step.as) fail('Item and index aliases must differ');
+      if (step.indexAs && (!/^[a-zA-Z][a-zA-Z0-9]*$/.test(step.indexAs) || ['steps', 'data', 'environment', 'variables', 'item'].includes(step.indexAs))) fail('Invalid indexAs');
+      if (capabilities && !['foreach', 'assert'].includes(step.type) && !capabilities.steps?.includes(step.type)) fail(`Unsupported executor step: ${step.type}`);
     }
-    for (const assertion of item.assertions) {
+    for (const assertion of [...item.assertions, ...allSteps(item.steps).flatMap(s => (s.assertions || []).map(a => ({...a, stepId: s.id})))]) {
       if (!assertionTypes.includes(assertion.type) || !stepIds.has(assertion.stepId)) fail(`Invalid assertion or step reference: ${item.id}`);
       if (assertion.type === 'event' && !named(assertion.event) && !named(assertion.event?.name)) fail('Missing expected event');
       if (assertion.type === 'rejection' && typeof assertion.reason !== 'string') fail('Missing rejection reason');
-      if (assertion.type === 'query' && (!assertion.path || !['equals', 'exists', 'contains'].includes(assertion.operator)
-        || (assertion.operator !== 'exists' && !Object.hasOwn(assertion, 'expected')))) fail('Invalid query assertion');
+      if (assertion.type === 'query' && (!assertion.path || !operators.includes(assertion.operator)
+        || (!['exists', 'unique'].includes(assertion.operator) && !Object.hasOwn(assertion, 'expected')))) fail('Invalid query assertion');
       if (capabilities && !capabilities.assertions?.includes(assertion.type)) fail(`Unsupported executor assertion: ${assertion.type}`);
     }
     if (model && item.sourceScenarioId) {

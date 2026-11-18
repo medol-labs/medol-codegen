@@ -2,6 +2,7 @@ import {readFileSync, mkdirSync, writeFileSync, renameSync} from 'node:fs';
 import {resolve, dirname} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {execFileSync} from 'node:child_process';
+import {assertStaticNetwork, inspectNetwork} from './k3d-network.mjs';
 
 export function planEnvironment(config) {
     if (config.kubeContext) throw new Error('Use a dedicated kubeconfig with the intended current context');
@@ -18,6 +19,7 @@ export function planEnvironment(config) {
         throw new Error('k3d requires clusterName and an Operations clusterConfig file');
     }
     if (config.workerNodes !== undefined && (!Number.isInteger(config.workerNodes) || config.workerNodes < 0)) throw new Error('Invalid workerNodes');
+    if (config.subnet !== undefined && (typeof config.subnet !== 'string' || !config.subnet.trim())) throw new Error('subnet must be auto or a CIDR');
     if (config.timeoutMs !== undefined && (!Number.isFinite(config.timeoutMs) || config.timeoutMs <= 0)) throw new Error('Invalid timeoutMs');
     return {environment: config.environment, target: config.target, provisioner: config.provisioner,
         steps: [...(config.provisioner === 'k3d' ? ['createOrReuseCluster', 'writeKubeconfig'] : []), 'checkConnection', 'waitNodesReady']};
@@ -38,15 +40,21 @@ export async function prepareEnvironment(config, options = {}) {
             architecture: info.Architecture, verifiedAt: new Date().toISOString()};
     }
     const kubeconfigFile = resolve(config.kubeconfigFile);
+    let network;
     if (config.provisioner === 'k3d') {
         // The checked-in Operations cluster asset remains unchanged.
         const clusters = JSON.parse(execute('k3d', ['cluster', 'list', '-o', 'json']));
         if (!clusters.some(cluster => cluster.name === config.clusterName)) {
-            const args = ['cluster', 'create', config.clusterName, '--config', resolve(config.clusterConfig)];
+            const args = ['cluster', 'create', config.clusterName, '--config', resolve(config.clusterConfig), '--subnet', config.subnet || 'auto'];
             if (config.workerNodes !== undefined) args.push('--agents', String(config.workerNodes));
             if (config.registryConfig) args.push('--registry-config', resolve(config.registryConfig));
             execute('k3d', args);
+        } else {
+            // Existing clusters are never recreated or silently migrated.
+            assertStaticNetwork(inspectNetwork(config.clusterName, execute));
+            execute('k3d', ['cluster', 'start', config.clusterName, '--timeout', `${Math.ceil((config.timeoutMs || 300000) / 1000)}s`]);
         }
+        network = assertStaticNetwork(inspectNetwork(config.clusterName, execute));
         const contents = execute('k3d', ['kubeconfig', 'get', config.clusterName]);
         mkdirSync(dirname(kubeconfigFile), {recursive: true});
         writeFileSync(kubeconfigFile, contents, {mode: 0o600});
@@ -71,6 +79,8 @@ export async function prepareEnvironment(config, options = {}) {
     if (!infrastructureId) throw new Error('Cluster identity is missing');
     return {schemaVersion: 1, status: 'ready', environment: config.environment, target: config.target,
         infrastructureId, kubeContext: config.kubeContext,
+        network: network && {name: network.networkName, id: network.networkId, subnets: network.subnets,
+            nodes: network.containers.map(c => ({name: c.name, ip: c.staticIp}))},
         provisioner: config.provisioner, clusterName: config.clusterName, kubeconfigFile,
         verifiedAt: new Date().toISOString(), nodes: nodes.map(node => ({name: node.metadata.name, architecture: node.status.nodeInfo.architecture}))};
 }

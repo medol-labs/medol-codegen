@@ -21,6 +21,45 @@ Docker/Compose environment preparation is not implemented by this entry yet.
 Operations supplies deployment assets; Simulation executes them locally or via
 the existing SSH pipeline runner.
 
+## K3d Restart Safety
+
+Managed K3d environments default to `subnet: "auto"`, passed to K3d's
+experimental IPAM feature as `--subnet auto`. An explicit non-overlapping IPv4
+CIDR can be supplied instead. This overrides the cluster asset's subnet.
+Environment preparation verifies explicit Docker endpoint IP assignments,
+starts an existing cluster, waits for `/readyz` and all nodes Ready, and records
+the actual subnet and node IPs in the environment report. Application readiness
+remains the deployment stage's responsibility. A running container is not a
+healthy Kubernetes node.
+
+Legacy clusters using dynamic addresses are rejected without modification.
+During a maintenance window, after recovering the cluster to a healthy state:
+
+```bash
+node simulation/src/k3d-network.mjs check <cluster-name>
+node simulation/src/k3d-network.mjs pin <cluster-name> simulation/reports/network-backup.json
+node simulation/src/prepare-environment.mjs simulation/environments/<environment>.json
+```
+
+`pin` saves a new, private endpoint snapshot before stopping the cluster, then
+reconnects the same containers to the same network with their current IPs and
+aliases. It never removes containers, volumes or Kubernetes records. Custom
+IPv6/link/driver options require manual migration. If interrupted, keep the
+cluster stopped and use the snapshot to complete the endpoint connections;
+do not delete or recreate the cluster. Back up business data before maintenance.
+Keep the network dedicated to the cluster: unrelated dynamic containers must
+not consume stopped nodes' addresses. Check new nodes after any explicit resize.
+
+For offline execution prefix the commands with `sh run-simulation.sh exec` and
+run from the host toolkit directory. Existing toolkit workspaces must receive
+both updated `simulation/src/prepare-environment.mjs` and `k3d-network.mjs`.
+This is not applied by rebuilding application images.
+
+Verify restart safety with a controlled stop/start and, in an approved window,
+a host reboot: unchanged node IPs, API readiness, all nodes Ready, authenticated
+application requests and retained business records. Do not automatically patch
+Kubernetes node status or disable network policies during normal startup.
+
 From the project root:
 
 ```bash

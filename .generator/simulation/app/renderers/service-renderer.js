@@ -55,6 +55,7 @@ function serviceFiles(root, model) {
         [outputPath(root, 'src/runtime/deployment.mjs')]: readFileSync(path.join(__dirname, '../deployment-runtime.mjs'), 'utf8'),
         [outputPath(root, 'src/deploy.mjs')]: readFileSync(path.join(__dirname, '../deployment-entry.mjs'), 'utf8'),
         [outputPath(root, 'src/prepare-environment.mjs')]: readFileSync(path.join(__dirname, '../environment-preparation.mjs'), 'utf8'),
+        [outputPath(root, 'src/k3d-network.mjs')]: readFileSync(path.join(__dirname, '../k3d-network.mjs'), 'utf8'),
         [outputPath(root, 'pipelines/environment.json-example')]: JSON.stringify({
             environment: 'test', target: 'kubernetes', provisioner: 'existing',
             kubeconfigFile: '/path/to/test-kubeconfig', timeoutMs: 300000

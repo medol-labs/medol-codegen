@@ -25,12 +25,17 @@ test('k3d creates only a missing cluster and keeps worker count explicit', async
             await prepareEnvironment({...base, provisioner: 'k3d', clusterName: 'test', clusterConfig: 'operations/cluster.yaml', kubeconfigFile: join(root, 'config')}, {
                 execute: (cmd, args) => {
                     calls.push([cmd, args]);
+                    if (cmd === 'docker' && args[0] === 'ps') return 'id';
+                    if (cmd === 'docker' && args[0] === 'inspect') return JSON.stringify([{Id: 'id', Name: '/node', State: {Running: true}, NetworkSettings: {Networks: {test: {IPAddress: '172.20.0.2', IPAMConfig: {IPv4Address: '172.20.0.2'}}}}}]);
+                    if (cmd === 'docker') return JSON.stringify([{Id: 'net', Name: 'test', Driver: 'bridge', IPAM: {Config: [{Subnet: '172.20.0.0/16'}]}}]);
                     if (cmd === 'k3d' && args[1] === 'list') return JSON.stringify(exists ? [{name: 'test'}] : []);
                     if (cmd === 'k3d' && args[0] === 'kubeconfig') return 'kubeconfig';
                     return args.includes('nodes') ? JSON.stringify(nodes) : args.includes('namespace') ? JSON.stringify({metadata: {uid: 'cluster-1'}}) : 'ok';
                 }
             });
             assert.equal(calls.some(([, args]) => args[1] === 'create'), !exists);
+            assert.equal(calls.some(([, args]) => args[1] === 'start'), exists);
+            if (!exists) assert.ok(calls.some(([, args]) => args.includes('--subnet') && args.includes('auto')));
             assert.equal(readFileSync(join(root, 'config'), 'utf8'), 'kubeconfig');
         }
     } finally { rmSync(root, {recursive: true, force: true}); }

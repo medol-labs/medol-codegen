@@ -30,6 +30,9 @@ function simulationFiles(model, options = {}) {
 
 function serviceFiles(root, model) {
     return {
+        ...Object.fromEntries(['Dockerfile', 'entrypoint.mjs', 'run.sh', 'package.mjs', 'README.md'].map(name =>
+            [outputPath(root, `toolkit/${name}`), readFileSync(path.join(__dirname, '../toolkit', name), 'utf8')])),
+        [outputPath(root, 'toolkit/config.json-example')]: JSON.stringify({image: 'medol/simulation-tool:1.0.0', platform: 'linux/arm64', inputs: ['simulation/', 'operations/'], publicPolicies: []}, null, 2) + '\n',
         [outputPath(root, 'src/run.mjs')]: readFileSync(path.join(__dirname, '../environment-runner.mjs'), 'utf8'),
         [outputPath(root, 'src/task.mjs')]: readFileSync(path.join(__dirname, '../task-entry.mjs'), 'utf8'),
         [outputPath(root, 'src/instance-registry.mjs')]: readFileSync(path.join(__dirname, '../instance-registry.mjs'), 'utf8'),

@@ -450,6 +450,7 @@ test('writes system notification summary projector with unread count and latest 
     ];
     const readmodel = {
         name: 'SystemNotificationSummary',
+        projectionExtension: {capability: 'system-notification', role: 'summary', batchEventId: allRead.id},
         dependencies: [
             {direction: 'INBOUND', elementType: 'EVENT', id: 'event-published'},
             {direction: 'INBOUND', elementType: 'EVENT', id: 'event-read'},
@@ -508,6 +509,27 @@ test('writes system notification summary projector with unread count and latest 
     assert.match(projector, /entity\.hasUnreadError = \(entity\.hasUnreadError == true\) \|\| event\.severity == NotificationSeverity\.ERROR/);
     assert.match(projector, /entity\.unreadCount = maxOf\(0L, \(entity\.unreadCount \?: 0L\) - 1L\)/);
     assert.match(projector, /entity\.unreadCount = 0L/);
+});
+
+test('recipient acknowledgement updates only unread rows in the built-in notification catalog', () => {
+    const event = {id: 'all-read', name: 'AllSystemNotificationsRead', title: 'All System Notifications Read',
+        fields: [{name: 'recipientUserId', type: 'String'}, {name: 'readAt', type: 'DateTime'}]};
+    const slice = {context: 'SystemNotification', events: [event]};
+    const id = {name: 'notificationId', type: 'UUID', idAttribute: true};
+    const readmodel = {name: 'SystemNotificationCatalog', fields: [id, ...event.fields, {name: 'state', type: 'SystemNotification.State'}],
+        projectionExtension: {capability: 'system-notification', role: 'catalog', batchEventId: event.id},
+        dependencies: [{direction: 'INBOUND', elementType: 'EVENT', id: event.id}]};
+    let code;
+    const writer = {...readModelWriterMethods, model: {rootPackage: 'sample', slices: [slice]},
+        fs: {write(_, value) { code = value; }}, _kotlinPath: s => s};
+    writer._writeReadModelProjector('sample.notifications', 'systemnotification', 'catalog', slice, readmodel, readmodel.name, [id]);
+    assert.match(code, /findProjectionsByRecipientUserId\(event.recipientUserId\)/);
+    assert.match(code, /if \(entity.state == SystemNotificationStateEnum.Unread\)/);
+    assert.match(code, /entity.readAt = event.readAt/);
+    assert.match(code, /entity.state = SystemNotificationStateEnum.Read/);
+    delete readmodel.projectionExtension;
+    writer._writeReadModelProjector('sample.notifications', 'systemnotification', 'catalog', slice, readmodel, readmodel.name, [id]);
+    assert.doesNotMatch(code, /findProjectionsByRecipientUserId/);
 });
 
 test('does not write sync registration for read models without sync source or a single id', () => {

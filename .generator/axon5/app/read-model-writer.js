@@ -87,6 +87,7 @@ const {contextPackage} = require('../../common/util/value-types');
 const {writeOperationAudit} = require('./operation-audit-writer');
 const {_commandTitle, _eventTitle, _readmodelTitle, _sliceTitle} = require('../../common/util/naming');
 const {tenantScoped} = require('./tenant-support');
+const {projectionExtension} = require('./projection-extensions');
 
 function deploymentName(generator) {
     return kebab(generator.currentDeployment?.name ?? generator.model.deployment ?? generator.modulePrefix ?? 'application');
@@ -486,8 +487,9 @@ ${criteriaFields.map((field) => `    var ${field.name}: ${criteriaFilterType(fie
             .map((field) => `${field.name}: ${readModelStorageType(field, false)}?`)
             .join(', ');
         const filterSignaturePrefix = filterFields.length > 0 ? `${filterParameters}, ` : '';
-        const partialLookupMethods = compositeId
-            ? idFields.map((field) =>
+        const projectionLookups = projectionLookupFields(readmodel, idFields);
+        const partialLookupMethods = projectionLookups.length
+            ? projectionLookups.map((field) =>
                 `    fun findProjectionsBy${pascal(field.name)}(${field.name}: ${readModelStorageType(field, false)}): List<${name}Projection>`
             ).join('\n')
             : '';
@@ -2302,13 +2304,14 @@ ${assignments}
         ];
         const jsonFields = (readmodel.fields ?? []).filter(isJsonJpaField);
         const imports = readModelStorageImports([...idFields, ...filterFields, ...jsonFields, ...criteriaFields.filter((field) => field.name !== 'projectionUpdatedAt')], this.model.rootPackage);
-        const partialLookupMethods = idFields.length > 1
-            ? idFields.map((field) =>
+        const projectionLookups = projectionLookupFields(readmodel, idFields);
+        const partialLookupMethods = projectionLookups.length
+            ? projectionLookups.map((field) =>
                 `    fun findAllBy${pascal(field.name)}(${field.name}: ${readModelStorageType(field, false)}): List<${entityName}>`
             ).join('\n')
             : '';
-        const projectionLookupMethods = idFields.length > 1
-            ? idFields.map((field) =>
+        const projectionLookupMethods = projectionLookups.length
+            ? projectionLookups.map((field) =>
                 `    override fun findProjectionsBy${pascal(field.name)}(${field.name}: ${readModelStorageType(field, false)}): List<${name}Projection> =
         ${scoped ? `jpaRepository.findAll(Specification<${entityName}> { root, _, builder -> builder.equal(root.get<${readModelStorageType(field, false)}>("${field.name}"), ${field.name}) }.and(tenantSpecification()))` : `jpaRepository.findAllBy${pascal(field.name)}(${field.name})`}.map { it.toProjection() }`
             ).join('\n\n')
@@ -2887,9 +2890,9 @@ class ${resourceName}(
         const archiveGuard = require('./archiving-writer').localArchiving(this) && slice.context !== this.model.archiving.context;
         const managementCapability = this.model.reporting?.context === slice.context ? 'reporting' : this.model.organizationManagement?.context === slice.context ? 'organization' : this.model.systemConfiguration?.context === slice.context ? 'configuration' : this.model.businessCalendar?.context === slice.context ? 'calendar' : null;
         const documentCatalogueGuard = this.model.documentGeneration?.context === slice.context && ['DocumentTemplateCatalog','GeneratedDocumentCatalog'].includes(readmodel.name);
-        if (readmodel.name === 'SystemNotificationSummary') {
-            this._writeSystemNotificationSummaryProjector(packageName, context, slicePackage, readmodel, name);
-            return;
+        const extension = projectionExtension(readmodel);
+        if (extension?.writeProjector) {
+            return extension.writeProjector.call(this, packageName, context, slicePackage, readmodel, name, mergeKotlinImports);
         }
 
         const inboundEventIds = new Set((readmodel.dependencies ?? [])
@@ -3003,6 +3006,10 @@ ${appendOutbox(keyExpression)}
     }`;
             }
 
+            const override = extension?.renderEvent?.({contract: readmodel.projectionExtension, event,
+                eventType: _eventTitle(event.title), metadataAssignments, appendOutbox});
+            if (override !== undefined) return override;
+
             if (availableIds.length === 1 && idFields.length > 1) {
                 const lookupField = availableIds[0];
                 const lookupEventField = event.fields.find((field) => field.name === lookupField.name);
@@ -3104,151 +3111,6 @@ ${scopedDataExchangeReadModel ? `    private fun accepts(message: EventMessage):
 `);
     },
 
-    _writeSystemNotificationSummaryProjector(packageName, context, slicePackage, readmodel, name) {
-        const scoped = tenantScoped(this.model, (this.model.contexts ?? []).find((item) => contextPackage(item.name) === context)?.name ?? context);
-        const eventRefsByName = new Map(this.model.slices
-            .flatMap((candidateSlice) => (candidateSlice.events ?? []).map((event) => [event.name, {slice: candidateSlice, event}])));
-        const published = eventRefsByName.get('SystemNotificationPublished');
-        const read = eventRefsByName.get('SystemNotificationRead');
-        const allRead = eventRefsByName.get('AllSystemNotificationsRead');
-        if (!published || !read || !allRead) {
-            return;
-        }
-
-        const repositoryName = `${name}Repository`;
-        const eventImports = [published, read, allRead]
-            .map((ref) => `import ${this.model.rootPackage}.${contextPackage(ref.slice.context)}.events.${_eventTitle(ref.event.title)}`)
-            .join('\n');
-        const fieldImports = readModelStorageImports(readmodel.fields, this.model.rootPackage);
-        const imports = mergeKotlinImports(eventImports, fieldImports);
-
-        this.fs.write(this._kotlinPath(`${context}/${slicePackage}/${name}Projector.kt`), `package ${packageName}
-
-${imports}
-import org.axonframework.messaging.eventhandling.annotation.EventHandler
-import org.axonframework.messaging.eventhandling.EventMessage
-import org.axonframework.messaging.core.annotation.Namespace
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Configuration
-import org.springframework.stereotype.Component
-import org.springframework.transaction.annotation.Transactional
-
-interface ${name}ProjectionUpdater {
-    fun update(
-        event: ${_eventTitle(published.event.title)},
-        message: EventMessage
-    )
-
-    fun update(
-        event: ${_eventTitle(read.event.title)},
-        message: EventMessage
-    )
-
-    fun update(
-        event: ${_eventTitle(allRead.event.title)},
-        message: EventMessage
-    )
-}
-
-open class Default${name}ProjectionUpdater(
-    private val repository: ${repositoryName}
-) : ${name}ProjectionUpdater {
-    @Transactional
-    open override fun update(
-        event: ${_eventTitle(published.event.title)},
-        message: EventMessage
-    ) {
-        val entity = repository.findProjectionById(event.recipientUserId) ?: ${name}Projection().apply {
-            recipientUserId = event.recipientUserId
-        }
-        entity.unreadCount = (entity.unreadCount ?: 0L) + 1L
-        entity.latestNotificationId = event.notificationId
-        entity.latestSeverity = event.severity
-        entity.latestPublishedAt = event.publishedAt
-        entity.messageKey = event.messageKey
-        entity.fallbackTitle = event.fallbackTitle
-        entity.fallbackBody = event.fallbackBody
-        entity.toastPolicy = event.toastPolicy
-        entity.hasUnreadError = (entity.hasUnreadError == true) || event.severity == NotificationSeverity.ERROR
-        repository.save(entity)
-    }
-
-    @Transactional
-    open override fun update(
-        event: ${_eventTitle(read.event.title)},
-        message: EventMessage
-    ) {
-        val entity = repository.findProjectionById(event.recipientUserId) ?: return
-        entity.unreadCount = maxOf(0L, (entity.unreadCount ?: 0L) - 1L)
-        if (entity.unreadCount == 0L) {
-            entity.hasUnreadError = false
-        }
-        repository.save(entity)
-    }
-
-    @Transactional
-    open override fun update(
-        event: ${_eventTitle(allRead.event.title)},
-        message: EventMessage
-    ) {
-        val entity = repository.findProjectionById(event.recipientUserId) ?: return
-        entity.unreadCount = 0L
-        entity.hasUnreadError = false
-        repository.save(entity)
-    }
-}
-
-@Configuration(proxyBeanMethods = false)
-class ${name}ProjectionUpdaterConfiguration {
-    @Bean
-    @ConditionalOnMissingBean(${name}ProjectionUpdater::class)
-    fun default${name}ProjectionUpdater(
-        repository: ${repositoryName}
-    ): ${name}ProjectionUpdater =
-        Default${name}ProjectionUpdater(repository)
-}
-
-@Namespace("${readModelProcessingGroup(readmodel)}")
-@Component
-class ${name}Projector(
-    private val updater: ${name}ProjectionUpdater${scoped ? `,\n    private val tenantExecution: ${this.model.rootPackage}.shared.application.tenancy.TenantExecution = ${this.model.rootPackage}.shared.application.tenancy.TenantExecution()` : ''}
-) {
-    @EventHandler
-    fun on(
-        event: ${_eventTitle(published.event.title)},
-        message: EventMessage
-    ) {
-${scoped ? `        tenantExecution.verifyEventTenant(event.medolTenantScope, message)
-        tenantExecution.project(
-            ${this.model.rootPackage}.shared.application.tenancy.TenantIdentity(event.medolTenantScope, message.metadata()["userId"] ?: "event-projector"), "${packageName}.${name}Projector", message.identifier(), message.metadata()["medol.eventSource"]
-        ) { updater.update(event, message) }` : '        updater.update(event, message)'}
-    }
-
-    @EventHandler
-    fun on(
-        event: ${_eventTitle(read.event.title)},
-        message: EventMessage
-    ) {
-${scoped ? `        tenantExecution.verifyEventTenant(event.medolTenantScope, message)
-        tenantExecution.project(
-            ${this.model.rootPackage}.shared.application.tenancy.TenantIdentity(event.medolTenantScope, message.metadata()["userId"] ?: "event-projector"), "${packageName}.${name}Projector", message.identifier(), message.metadata()["medol.eventSource"]
-        ) { updater.update(event, message) }` : '        updater.update(event, message)'}
-    }
-
-    @EventHandler
-    fun on(
-        event: ${_eventTitle(allRead.event.title)},
-        message: EventMessage
-    ) {
-${scoped ? `        tenantExecution.verifyEventTenant(event.medolTenantScope, message)
-        tenantExecution.project(
-            ${this.model.rootPackage}.shared.application.tenancy.TenantIdentity(event.medolTenantScope, message.metadata()["userId"] ?: "event-projector"), "${packageName}.${name}Projector", message.identifier(), message.metadata()["medol.eventSource"]
-        ) { updater.update(event, message) }` : '        updater.update(event, message)'}
-    }
-}
-`);
-    },
 
     _readModelDerivedAssignments(readmodel, event, directFieldNames = new Set()) {
         const assignments = [];
@@ -3481,6 +3343,11 @@ ${scoped ? `        tenantExecution.verifyEventTenant(event.medolTenantScope, me
         return `${this.model.rootPackage}.${contextPackage(slice.context)}.events`;
     }
 };
+
+function projectionLookupFields(readmodel, ids) {
+    const names = new Set(projectionExtension(readmodel)?.lookupFields);
+    return [...new Set([...(ids.length > 1 ? ids : []), ...readmodel.fields.filter(f => names.has(f.name))])];
+}
 
 function readModelFilterFields(readmodel) {
     const dictionaryValueProvider = dictionaryValueProviderFor(readmodel);

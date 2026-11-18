@@ -41,3 +41,12 @@ test('decimal literals are not interpreted as external command references', () =
     slice.specifications[0].expressions = ['assert Check.score < Other.score'];
     assert.throws(() => renderCommandAssertions({}, slice, command), /external operand/);
 });
+
+test('a single modeled rejection supplies its reason, conflicting scenarios do not', () => {
+    const command = {id: 'check', name: 'Check', fields: [{name: 'label', type: 'String'}]};
+    const spec = {expressions: ['assert Check.label == "ok"'], when: [{id: 'check'}],
+        then: {outcome: 'REJECT', description: 'Expected "ok".'}};
+    const render = specifications => renderCommandAssertions({rootPackage: 'sample'}, {specifications}, command);
+    assert.ok(render([spec]).includes('message = ' + JSON.stringify(spec.then.description)));
+    assert.ok(render([spec, {...spec, then: {...spec.then, description: 'Different reason'}}]).includes('message = "Command validation failed."'));
+});

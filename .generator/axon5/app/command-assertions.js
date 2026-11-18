@@ -68,12 +68,19 @@ function renderCommandAssertions(model, slice, command, options = {}) {
             const checks = [left, right].filter(value => value.nullable).map(value => `${value.expression} != null`);
             predicate = [...checks, predicate].join(' && ');
         }
+        // Only attribute a scenario's rejection to an unambiguous single guard.
+        const reasons = new Set((slice.specifications ?? []).filter(spec =>
+            spec.expressions?.filter(e => /^assert\s/.test(e)).length === 1 &&
+            spec.expressions.includes(expression) &&
+            spec.when?.some(w => w.id && w.id === command.id || w.title && w.title === command.title)
+        ).flatMap(spec => [spec.then].flat().filter(t => t?.outcome === 'REJECT' && t.description).map(t => t.description)));
+        const message = reasons.size === 1 ? [...reasons][0] : 'Command validation failed.';
         return `        if (!(${predicate})) {
             throw ${model.rootPackage}.shared.domain.CommandRejectedException(
                 code = "COMMAND_ASSERTION_FAILED",
                 i18nKey = "errors.commandAssertionFailed",
                 args = mapOf("command" to ${kotlinString(command.name)}, "expression" to ${kotlinString(expression)}),
-                message = "Command validation failed."
+                message = ${kotlinString(message)}
             )
         }`;
     }).filter(Boolean).join('\n');

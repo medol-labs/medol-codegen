@@ -54,6 +54,19 @@ export function createHttpExecutor(config, {fetchImpl = fetch, env = process.env
       if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
     }
     const bodyValues = {...spec.body};
+    let form;
+    if (spec.multipart) {
+      if (method !== 'POST' || spec.bodyEnv || !Array.isArray(spec.multipart) || !spec.multipart.length) throw new Error('Multipart requires POST and inline parts');
+      form = new FormData();
+      for (const [key, value] of Object.entries(bodyValues)) {
+        if (typeof value !== 'string') throw new Error('Multipart fields must be strings');
+        form.append(key, value);
+      }
+      for (const part of spec.multipart) {
+        if (!part.name || !part.filename || typeof part.text !== 'string') throw new Error('Invalid inline file part');
+        form.append(part.name, new Blob([part.text], {type: part.contentType || 'text/plain'}), part.filename);
+      }
+    }
     for (const [key, variable] of Object.entries(spec.bodyEnv || {})) {
       if (!env[variable]) throw new Error(`Missing request environment variable: ${variable}`);
       bodyValues[key] = env[variable];
@@ -65,9 +78,9 @@ export function createHttpExecutor(config, {fetchImpl = fetch, env = process.env
       let response;
       try {
         response = await fetchImpl(url, {method, redirect: 'error',
-          headers: {'Content-Type': 'application/json', ...headers(spec.endpoint), ...(spec.bearerToken ? {Authorization: `Bearer ${spec.bearerToken}`} : {})},
+          headers: {...(form ? {} : {'Content-Type': 'application/json'}), ...headers(spec.endpoint), ...(spec.bearerToken ? {Authorization: `Bearer ${spec.bearerToken}`} : {})},
           signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-          body: method === 'POST' ? JSON.stringify(bodyValues) : undefined});
+          body: method === 'POST' ? form ?? JSON.stringify(bodyValues) : undefined});
       } catch { throw new Error(`HTTP transport failed for ${spec.endpoint}`); }
       if (spec.acceptStatuses ? !spec.acceptStatuses.includes(response.status) : !response.ok) throw new Error(`HTTP ${method} ${spec.endpoint}${spec.path} returned ${response.status}`);
       if (method === 'POST' && spec.ignoreResponseBody === true) {
@@ -83,7 +96,7 @@ export function createHttpExecutor(config, {fetchImpl = fetch, env = process.env
         return {status: 'ok', body: {bytes, digest, verified: true}};
       }
       let body;
-      try {body = response.status === 204 ? null : await response.json();}
+      try {body = spec.responseType === 'text' ? {text: await response.text(), contentType: response.headers.get('content-type')} : response.status === 204 ? null : await response.json();}
       catch {throw new Error(`Invalid JSON response from ${spec.endpoint}`);}
       if ((spec.failWhen || []).some(c => compare(at(body, c.path), c.operator, c.expected))) throw new Error('Configured terminal failure condition observed');
       if (method !== 'GET' || (matches(body, spec.expect) && (!spec.anyChecks || matchesAny(body, spec.anyChecks)) && (spec.checks || []).every(c => compare(at(body, c.path), c.operator, c.expected)))) return {status: 'ok', httpStatus: response.status, body};

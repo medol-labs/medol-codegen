@@ -2,7 +2,7 @@ import {readFileSync, mkdirSync, writeFileSync} from 'node:fs';
 import {resolve, dirname} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {randomUUID, createHash} from 'node:crypto';
-import {allSteps, checkCases, checkApproval} from './case-design.mjs';
+import {allSteps, checkCases, checkApproval, checkCaseEnvironment} from './case-design.mjs';
 import {createHttpExecutor} from './http-case-executor.mjs';
 import {at, compare, resolveInputs} from './flow-values.mjs';
 export {resolveInputs} from './flow-values.mjs';
@@ -27,6 +27,7 @@ export async function executeCases(plan, environment, data, adapter, options = {
     checkApproval(plan);
     if (plan.execution && data.casePlanFingerprint !== report.planFingerprint) throw new Error('Case data must match the selected execution plan');
     validateDataManifest(data, environment);
+    checkCaseEnvironment(plan, environment);
     if (typeof adapter.validateEnvironment !== 'function' || typeof adapter.validateData !== 'function') throw new Error('Executor requires live environment and data validators');
     if (typeof adapter.execute !== 'function') throw new Error('Executor requires execute');
     if (plan.cases.some(c => c.cleanupPolicy === 'cleanup') && typeof adapter.cleanup !== 'function') throw new Error('Cleanup is not supported by executor');

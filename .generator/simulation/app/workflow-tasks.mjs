@@ -1,21 +1,33 @@
 import {readFileSync, writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
-import {selectCases, checkCases, checkApproval} from './case-design.mjs';
+import {selectCases, checkCases, checkApproval, checkCaseEnvironment, loadCaseLibrary} from './case-design.mjs';
 import {createHttpExecutor} from './http-case-executor.mjs';
 import {executeCases} from './case-executor.mjs';
 import {prepareData} from './prepare-data-entry.mjs';
 import {createHash} from 'node:crypto';
 import {validateBaselineManifest} from './data-plan-runtime.mjs';
 
-export function select({library, selection}, {root}) {
-  return selectCases(library, selection, selection.failedReport
+export function select({library, selection, environment}, {root = '.'}) {
+  const plan = selectCases(loadCaseLibrary(library, root), selection, selection.failedReport
     ? JSON.parse(readFileSync(resolve(root, selection.failedReport), 'utf8')) : undefined);
+  if (environment) checkCaseEnvironment(plan, environment);
+  return plan;
 }
 
 export function test({environment, data, cases, config}, {directory}) {
   return executeCases(cases, environment, data, createHttpExecutor(config), {
     record: report => writeFileSync(resolve(directory, 'case-progress.json'), JSON.stringify(report, null, 2), {mode: 0o600}),
   });
+}
+
+// A self-contained case needs a bound data manifest, not project-specific fixture creation.
+export function prepareWithoutFixtures(environment, baseline, cases) {
+  validateBaselineManifest(baseline, environment);
+  checkCases(cases); checkApproval(cases); checkCaseEnvironment(cases, environment);
+  if (cases.cases.some(item => item.dataRequirements.length)) return undefined;
+  return {schemaVersion: 1, mode: 'case', status: 'ready', environment: environment.environment,
+    deploymentId: environment.deploymentId, caseIds: cases.cases.map(item => item.id),
+    casePlanFingerprint: createHash('sha256').update(JSON.stringify(cases)).digest('hex'), records: []};
 }
 
 export function prepare({environment, plan, baseline, cases, config}) {

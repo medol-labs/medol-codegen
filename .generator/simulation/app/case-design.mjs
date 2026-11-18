@@ -2,7 +2,7 @@ import {readFileSync, writeFileSync, mkdirSync} from 'node:fs';
 import {resolve, dirname} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
-import {operators} from './flow-values.mjs';
+import {at, operators} from './flow-values.mjs';
 
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const sources = ['model', 'ai', 'manual'];
@@ -15,6 +15,43 @@ export function allSteps(steps, depth = 0) {
 const fail = message => { throw new Error(message); };
 const named = value => typeof value === 'string' && value.trim().length > 0;
 const reviewFingerprint = ({approval, ...item}) => hash(item);
+
+// Only indexed approval files are acceptance cases; the same directory may also hold preparation workflows.
+export function loadCaseLibrary(source, root = '.') {
+  if (!Object.hasOwn(source, 'scenarioFiles')) return source;
+  if (source.schemaVersion !== 1 || !Array.isArray(source.scenarioFiles) || !source.scenarioFiles.length) fail('Invalid approved case catalog');
+  const cases = source.scenarioFiles.flatMap(file => {
+    if (typeof file !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.-]*\.json$/.test(file)) fail('Invalid approved scenario filename');
+    const plan = JSON.parse(readFileSync(resolve(root, 'simulation/cases/approved', file), 'utf8'));
+    checkCases(plan); checkApproval(plan);
+    return plan.cases;
+  });
+  const library = {schemaVersion: 2, cases};
+  checkCases(library);
+  return library;
+}
+
+function validateRequirements(item) {
+  const rules = item.environmentRequirements === undefined ? [] : item.environmentRequirements;
+  if (!Array.isArray(rules) || rules.some(r => !r || typeof r.path !== 'string' ||
+    !/^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)*$/.test(r.path) ||
+    Object.keys(r).some(k => !['path', 'minItems', 'maxItems'].includes(k)) ||
+    ['minItems', 'maxItems'].some(k => Object.hasOwn(r, k) && (!Number.isSafeInteger(r[k]) || r[k] < 1)) ||
+    r.maxItems < r.minItems)) fail('Invalid environment requirements: ' + item.id);
+  return rules;
+}
+
+export class EnvironmentRequirementError extends Error {}
+export function checkCaseEnvironment(plan, environment) {
+  if (environment?.status !== 'ready') throw new EnvironmentRequirementError('Deployment must be ready');
+  for (const item of plan.cases) for (const rule of validateRequirements(item)) {
+    const value = at(environment, rule.path);
+    if (rule.minItems || rule.maxItems) {
+      if (!Array.isArray(value) || value.length < rule.minItems || value.length > rule.maxItems)
+        throw new EnvironmentRequirementError(`Case ${item.id}: ${rule.path} needs ${rule.minItems ?? 0}..${rule.maxItems ?? 'unbounded'} items; found ${Array.isArray(value) ? value.length : 'no list'}`);
+    } else if (value == null || value === '' || value === false) throw new EnvironmentRequirementError(`Case ${item.id} requires deployment field ${rule.path}`);
+  }
+}
 
 export function approveCases(plan, reviewer) {
   if (!named(reviewer)) fail('Reviewer is required');
@@ -70,6 +107,7 @@ export function checkCases(plan, {draft = false, model, capabilities} = {}) {
   for (const item of plan.cases) {
     if (!named(item.id) || ids.has(item.id)) throw new Error('Missing or duplicate case id');
     ids.add(item.id);
+    validateRequirements(item);
     for (const key of ['tags', 'suites']) {
       if (item[key] !== undefined && (!Array.isArray(item[key]) || item[key].some(v => !named(v)))) fail('Invalid case ' + key);
     }
@@ -174,7 +212,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     if (action === 'select') {
       if (!output || !extra) fail('Usage: cases.mjs select <library> <new-plan> <selection.json>');
       const selection = read(extra);
-      const result = selectCases(read(input), selection, selection.failedReport ? read(resolve(dirname(resolve(extra)), selection.failedReport)) : undefined);
+      const result = selectCases(loadCaseLibrary(read(input)), selection, selection.failedReport ? read(resolve(dirname(resolve(extra)), selection.failedReport)) : undefined);
       mkdirSync(dirname(resolve(output)), {recursive: true});
       writeFileSync(output, JSON.stringify(result, null, 2), {flag: 'wx'});
       console.log('Created: ' + output);

@@ -13,7 +13,7 @@ export function stageOf(step) {
 
 const quote = value => "'" + String(value).replaceAll("'", "'\\''") + "'";
 
-export function executionCommand(step, host, runId, environmentRef, boundRun = false) {
+export function executionCommand(step, host, runId, environmentRef, boundRun = false, selection) {
   if (!host || host.transport === 'local') return step.command;
   if (host.transport !== 'ssh') throw new Error('Unsupported host transport');
   if (!/^[a-zA-Z0-9_.@-]+$/.test(host.target || '') || host.target.startsWith('-')) throw new Error('Invalid SSH target; use an SSH config alias');
@@ -21,7 +21,7 @@ export function executionCommand(step, host, runId, environmentRef, boundRun = f
   if (step.cwd?.startsWith('/') || step.cwd?.split('/').includes('..')) throw new Error('Remote step cwd must stay within workDir');
   const cwd = host.workDir + (step.cwd ? '/' + step.cwd : '');
   return ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', host.target,
-    `cd ${quote(cwd)} && exec env MEDOL_PIPELINE_RUN_ID=${quote(runId)} ${boundRun ? `MEDOL_SIMULATION_RUN_ID=${quote(runId)} ` : ''}${environmentRef ? `MEDOL_ENVIRONMENT_MANIFEST=${quote(environmentRef)} ` : ''}${step.command.map(quote).join(' ')}`];
+    `cd ${quote(cwd)} && exec env MEDOL_PIPELINE_RUN_ID=${quote(runId)} ${boundRun ? `MEDOL_SIMULATION_RUN_ID=${quote(runId)} ` : ''}${environmentRef ? `MEDOL_ENVIRONMENT_MANIFEST=${quote(environmentRef)} ` : ''}${selection && step.phase === 'case-design' ? `MEDOL_CASE_SELECTION=${quote(selection)} ` : ''}${step.command.map(quote).join(' ')}`];
 }
 
 export function loadExistingEnvironment(config, root) {
@@ -134,7 +134,7 @@ export function runPipeline(catalog, config, options = {}) {
     }
     const host = step.host ? config.hosts[step.host] : undefined;
     const environmentRef = existing && (host?.transport === 'ssh' ? existing.remoteManifestPaths[step.host] : existing.path);
-    const command = executionCommand(step, host, runId, environmentRef, Boolean(options.runId));
+    const command = executionCommand(step, host, runId, environmentRef, Boolean(options.runId), process.env.MEDOL_CASE_SELECTION);
     const result = spawnSync(command[0], command.slice(1), {
       cwd: host?.transport === 'ssh' ? root : resolve(root, step.cwd || '.'), stdio: 'inherit',
       env: { ...process.env, MEDOL_PIPELINE_RUN_ID: runId, ...(options.runId ? {MEDOL_SIMULATION_RUN_ID: runId} : {}), ...(environmentRef ? {MEDOL_ENVIRONMENT_MANIFEST: environmentRef} : {}) },

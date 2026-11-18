@@ -3,6 +3,7 @@ import {resolve, relative, sep} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {loadRun, checkRunInfrastructure} from './instance-registry.mjs';
 import {createHash} from 'node:crypto';
+import {EnvironmentRequirementError} from './case-design.mjs';
 
 const name = value => typeof value === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value) && value !== '..';
 export function runDirectory(root, runId) {
@@ -77,6 +78,7 @@ export async function executeTask(config, taskName, options = {}) {
         const failure = resolve(directory, `${taskName}.failure.json`);
         if (!existsSync(failure)) writeFileSync(failure, JSON.stringify({runId, task: taskName, status: 'failed'}), {flag: 'wx', mode: 0o600});
         // Exceptions may contain credentials or request payloads.
+        if (error instanceof EnvironmentRequirementError) throw error;
         throw new Error(`Task ${taskName} failed; inspect trusted extension diagnostics`);
     } finally { unlinkSync(lock); }
 }

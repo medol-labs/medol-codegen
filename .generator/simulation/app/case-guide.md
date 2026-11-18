@@ -2,6 +2,25 @@
 
 ## Selecting Cases For A Run
 
+Keep one reviewed scenario per file (a scenario can contain several cases) in
+`simulation/cases/approved/`. From the project root use `simulation/cases/catalog.json`,
+for example `{"schemaVersion":1,"scenarioFiles":["smoke.json","exports.json"]}`.
+Only list acceptance suites, not setup workflows, drafts, execution plans or reports.
+IDs must be unique across the catalog; every indexed case must have valid approval.
+
+An approved case may declare `environmentRequirements`, for example
+`[{"path":"endpoints.api"},{"path":"workers","minItems":2}]`. Paths refer to the
+selected deployment manifest. For lists, optional inclusive `minItems` and
+`maxItems` constrain capacity. Requirements are covered by case approval.
+The deployment-bound selection task rejects the entire incompatible selection;
+it does not silently skip cases. Execution checks again before calling adapters.
+The standalone design CLI below does not need or check a deployment.
+
+Set `MEDOL_CASE_SELECTION` to a selector JSON path for a deployment-bound run.
+For SSH workers use a workspace-relative path already synced to the worker.
+Registered runs read their own deployment snapshot; for an existing deployment
+outside the registry supply its ready manifest via `MEDOL_ENVIRONMENT_MANIFEST`.
+
 Case libraries are not execution plans. Add optional `tags` and `suites` arrays
 to cases before approval; editing these fields invalidates approval.
 
@@ -12,7 +31,7 @@ and library order is retained. Empty arrays, unknown IDs, unknown selector keys
 and zero matches fail. An empty object explicitly selects the whole library.
 
 ```bash
-node simulation/src/cases.mjs select simulation/cases/approved/cases.json simulation/cases/runs/run-001.json simulation/pipelines/case-selection.json
+node simulation/src/cases.mjs select simulation/cases/catalog.json simulation/cases/runs/run-001.json simulation/pipelines/case-selection.json
 ```
 
 The output is create-only: choose a new path for each plan. It contains approved

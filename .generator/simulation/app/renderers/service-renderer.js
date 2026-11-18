@@ -34,7 +34,7 @@ function serviceFiles(root, model) {
             [outputPath(root, `toolkit/${name}`), readFileSync(path.join(__dirname, '../toolkit', name), 'utf8')])),
         [outputPath(root, 'toolkit/config.json-example')]: JSON.stringify({image: 'medol/simulation-tool:1.0.0', platform: 'linux/arm64', inputs: ['simulation/', 'operations/'], publicPolicies: []}, null, 2) + '\n',
         [outputPath(root, 'src/run.mjs')]: readFileSync(path.join(__dirname, '../environment-runner.mjs'), 'utf8'),
-        [outputPath(root, 'src/task.mjs')]: readFileSync(path.join(__dirname, '../task-entry.mjs'), 'utf8'),
+        [outputPath(root, 'src/task.mjs')]: readFileSync(path.join(__dirname, '../task-entry.mjs'), 'utf8').replace("'./case-design.mjs'", "'./cases.mjs'"),
         [outputPath(root, 'src/instance-registry.mjs')]: readFileSync(path.join(__dirname, '../instance-registry.mjs'), 'utf8'),
         [outputPath(root, 'src/runtime/compose-deployment.mjs')]: readFileSync(path.join(__dirname, '../compose-deployment.mjs'), 'utf8'),
         [outputPath(root, 'ENVIRONMENTS.md')]: readFileSync(path.join(__dirname, '../instance-guide.md'), 'utf8'),
@@ -92,18 +92,19 @@ function serviceFiles(root, model) {
         [outputPath(root, 'pipelines/data-preparation.json-example')]: JSON.stringify({
             steps: [
                 {id: 'prepare-baseline', phase: 'data-preparation', command: ['node', 'simulation/src/prepare-data.mjs', 'baseline', '--plan', 'simulation/data/baseline.plan.json', '--environment', 'simulation/instances/deployment.json', '--output', 'simulation/data/results/baseline.json']},
-                {id: 'review-cases', phase: 'case-design', command: ['node', 'simulation/src/cases.mjs', 'select', 'simulation/cases/approved/cases.json', 'simulation/cases/runs/selected.json', 'simulation/pipelines/case-selection.json']},
+                {id: 'review-cases', phase: 'case-design', command: ['node', 'simulation/src/cases.mjs', 'select', 'simulation/cases/catalog.json', 'simulation/cases/runs/selected.json', 'simulation/pipelines/case-selection.json']},
                 {id: 'prepare-case', phase: 'data-preparation', dependsOn: ['prepare-baseline', 'review-cases'], command: ['node', 'simulation/src/prepare-data.mjs', 'case', '--plan', 'simulation/data/case.plan.json', '--environment', 'simulation/instances/deployment.json', '--baseline', 'simulation/data/results/baseline.json', '--cases', 'simulation/cases/runs/selected.json', '--output', 'simulation/data/results/case.json']}
             ]
         }, null, 2) + '\n',
         [outputPath(root, 'pipelines/case-selection.json-example')]: JSON.stringify({tags: ['smoke']}, null, 2) + '\n',
+        [outputPath(root, 'cases/catalog.json-example')]: JSON.stringify({schemaVersion: 1, scenarioFiles: ['smoke.json']}, null, 2) + '\n',
         [outputPath(root, 'pipelines/http-executor.json-example')]: JSON.stringify({
             endpoints: {service: {bearerTokenEnv: 'SIMULATION_API_TOKEN'}},
             probes: [{endpoint: 'service', path: '/actuator/health', expect: {status: 'UP'}}]
         }, null, 2) + '\n',
         [outputPath(root, 'pipelines/workflow-tasks.json-example')]: JSON.stringify({tasks: {
             'select-cases': {module: 'simulation/src/workflow-tasks.mjs', export: 'select', scope: 'execution',
-                inputs: {library: {path: 'simulation/cases/approved/cases.json'}, selection: {path: 'simulation/pipelines/case-selection.json'}}, output: 'execution-plan.json', successStatuses: ['ready']},
+                inputs: {library: {path: 'simulation/cases/catalog.json'}, environment: {artifact: 'deployment.json', binding: 'deployment', env: 'MEDOL_ENVIRONMENT_MANIFEST', status: 'ready'}, selection: {path: 'simulation/pipelines/case-selection.json', env: 'MEDOL_CASE_SELECTION'}}, output: 'execution-plan.json', successStatuses: ['ready']},
             'prepare-baseline': {module: 'simulation/src/workflow-tasks.mjs', export: 'prepareWorkflow', scope: 'execution',
                 inputs: {environment: {artifact: 'deployment.json', binding: 'deployment'}, workflow: {path: 'simulation/cases/approved/baseline.json'}, config: {path: 'simulation/pipelines/http-executor.json'}}, output: 'baseline.json'},
             test: {module: 'simulation/src/workflow-tasks.mjs', export: 'test', scope: 'execution',

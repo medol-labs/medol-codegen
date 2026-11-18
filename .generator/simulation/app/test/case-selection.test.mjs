@@ -1,7 +1,10 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {approveCases, newCase, selectCases, checkCases} from '../case-design.mjs';
+import {approveCases, newCase, selectCases, checkCases, loadCaseLibrary} from '../case-design.mjs';
+import {mkdtempSync, mkdirSync, writeFileSync, rmSync} from 'node:fs';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
 import {executeCases} from '../case-executor.mjs';
 
 const library = () => approveCases({schemaVersion: 2, cases: ['a', 'b', 'c'].map(id => ({
@@ -10,6 +13,31 @@ const library = () => approveCases({schemaVersion: 2, cases: ['a', 'b', 'c'].map
   assertions: [{type: 'query', stepId: 'read', path: 'ok', operator: 'equals', expected: true}]
 }))}, 'reviewer');
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+
+test('catalog rejects duplicate ids, unreviewed edits and paths outside approved files', t => {
+  const root = mkdtempSync(join(tmpdir(), 'case-catalog-'));
+  t.after(()=>rmSync(root,{recursive:true,force:true}));
+  const dir = join(root,'simulation/cases/approved'); mkdirSync(dir,{recursive:true});
+  const source = library(), put = () => writeFileSync(join(dir,'scenario.json'),JSON.stringify(source));
+  const load = (...scenarioFiles) => loadCaseLibrary({schemaVersion:1,scenarioFiles},root);
+  put();
+  assert.equal(load('scenario.json').cases.length,3);
+  assert.throws(()=>load('scenario.json','scenario.json'),/duplicate/);
+  assert.throws(()=>load('../scenario.json'),/filename/);
+  source.cases[0].environmentRequirements = [{path:'workers',minItems:2}]; put();
+  assert.throws(()=>load('scenario.json'),/stale/);
+});
+
+test('reused approved plan checks current manifest before any adapter call', async()=>{
+  const source = library();
+  source.cases[0].environmentRequirements = [{path:'resources.workers',minItems:2}];
+  const plan = selectCases(approveCases(source,'review'),{ids:['a']});
+  const environment = {deploymentId:'d',environment:'local',status:'ready',resources:{workers:[{}]}};
+  const data = {...environment,schemaVersion:1,records:[],casePlanFingerprint:digest(plan)};
+  const report = await executeCases(plan,environment,data,{capabilities:{steps:['query'],assertions:['query']}});
+  assert.equal(report.status,'failed');
+  assert.match(report.error,/resources.workers.*found 1/);
+});
 
 test('selection intersects dimensions, preserves order and case approvals', () => {
   const plan = selectCases(library(), {ids: ['c', 'a', 'b'], tags: ['smoke'], suites: ['core'], excludeIds: ['b']});

@@ -4,7 +4,7 @@ import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
 import {createHttpExecutor} from './http-case-executor.mjs';
 import {seedData, validateDataPlan, validateBaselineManifest} from './data-plan-runtime.mjs';
-import {checkApproval, checkCases} from './case-design.mjs';
+import {checkApproval, checkCases, checkCaseEnvironment} from './case-design.mjs';
 
 const fingerprint = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
@@ -20,6 +20,7 @@ export async function prepareData(mode, plan, environment, options = {}) {
     const effectivePlan = mode === 'case' ? {...plan, requiresBaseline: plan.requiresBaseline !== false} : plan;
     validateDataPlan(effectivePlan, options);
     if (mode === 'case') {
+        checkCaseEnvironment(options.casePlan, environment);
         checkApproval({cases: options.casePlan.cases.filter(item => plan.caseIds.includes(item.id))});
         if (effectivePlan.requiresBaseline || options.baseline) validateBaselineManifest(options.baseline, environment);
     }

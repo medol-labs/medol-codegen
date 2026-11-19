@@ -702,6 +702,8 @@ The generated files use placeholder environment references only. Real passwords,
 
 ## Generate Simulation Service
 
+See the [journey acceptance design](docs/simulation-journey-design.md) for the proposed contract between MEDOL, the generator, and the Simulation runner.
+
 ### Seven-Step Workflow
 
 Simulation orchestrates the complete validation lifecycle, not only business-flow replay:

@@ -702,6 +702,7 @@ test('writes read model access policy filter and applies it in JPA queries', () 
     const writes = new Map();
     const writer = syncWriter(writes);
     writer.model = {
+        dataAccess: {enabled: true},
         rootPackage: 'tech.medo',
         defaultAccessPolicy: 'DefaultAccess',
         accessPolicies: [{
@@ -752,7 +753,7 @@ test('writes read model access policy filter and applies it in JPA queries', () 
     assert.match(autoConfiguration, /@Bean\s+@ConditionalOnMissingBean\(ReadModelAccessPolicyFilter::class\)/);
     assert.equal(writes.get('shared/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports'),
         'tech.medo.shared.application.access.ReadModelAccessPolicyAutoConfiguration\n');
-    assert.match(support, /Specification<T> = Specification\.where\(null\)/);
+    assert.match(support, /return Specification\.where\(null\)/);
     assert.match(adapter, /private val accessPolicyFilter: ReadModelAccessPolicyFilter/);
     assert.match(adapter, /queryService\.createSpecification\(criteria\)\.and\(accessSpecification\(\)\)/);
     assert.match(adapter, /jpaRepository\.findOne\(idSpecification\(id\)\.and\(accessSpecification\(\)\)\)/);
@@ -769,7 +770,7 @@ test('writes read model access policy filter and applies it in JPA queries', () 
 function syncWriter(writes) {
     return {
         ...readModelWriterMethods,
-        model: {rootPackage: 'tech.medo'},
+        model: {rootPackage: 'tech.medo', dataAccess: {enabled: true}},
         fs: {
             write(path, content) {
                 writes.set(path, content);
@@ -786,3 +787,45 @@ function syncWriter(writes) {
         }
     };
 }
+
+test('protected exports propagate owner and restore current permissions; sync deltas gate raw outbox reads', () => {
+    const writes = new Map();
+    const writer = syncWriter(writes);
+    writer.model.accessPolicies = [{name: 'Own', rules: [{kind: 'scope', field: 'ownerId', source: 'identity.userId'}]}];
+    writer.model.defaultAccessPolicy = 'Own';
+    const readmodel = {name: 'Records', title: 'Records', exportable: {capability: 'DataExchange'}, fields: [
+        {name: 'id', type: 'UUID', idAttribute: true}, {name: 'ownerId', type: 'UUID'}
+    ]};
+    const slice = {name: 'Views', context: 'Business', concepts: [{name: 'Record'}]};
+    readModelWriterMethods._writeDataExportSupport.call(writer);
+    readModelWriterMethods._writeReadModelResource.call(writer, 'tech.medo.business.views', 'business', 'views', slice, readmodel, 'RecordsReadModel', [readmodel.fields[0]]);
+    readModelWriterMethods._writeSyncReadModelSourceResource.call(writer, 'tech.medo.business.views', 'business', 'views', slice, readmodel, 'RecordsReadModel');
+    const resource = writes.get('kotlin/business/views/RecordsReadModelResource.kt');
+    assert.match(resource, /protectedAccess = true/);
+    assert.match(resource, /backgroundAccess.run\(task.requestedBy/);
+    assert.match(resource, /requestedBy = requireNotNull\(task.requestedBy\)/);
+    const service = writes.get('shared/shared/application/export/DataExportService.kt');
+    assert.match(service, /backgroundAccess.prepare\(\)/);
+    assert.match(service, /resolve\("owners"\).resolve\(owner.toString\(\)\)/);
+    assert.match(service, /StandardOpenOption.CREATE_NEW/);
+    const download = writes.get('shared/shared/application/export/DataExportJobResource.kt');
+    assert.match(download, /dataExportService.ownedDownload\(filePath\)/);
+    const sync = writes.get('kotlin/business/views/RecordsReadModelSyncReadModelResource.kt');
+    assert.ok(sync.indexOf('accessPolicyFilter.requireUnrestricted(') < sync.indexOf('val rows = outboxRepository'));
+    assert.match(sync, /ReadModelAccessRule\(name = "ownerId"/);
+});
+
+test('without data-access generated queries, export and sync have no data permission runtime dependency', () => {
+    const writes = new Map(); const writer = syncWriter(writes); delete writer.model.dataAccess;
+    writer.model.defaultAccessPolicy = 'MetadataOnly';
+    writer.model.accessPolicies = [{name: 'MetadataOnly', rules: [{kind: 'scope', field: 'missing', source: 'identity.userId'}]}];
+    const readmodel = {name: 'Records', title: 'Records', exportable: {capability: 'DataExchange'}, fields: [{name: 'id', type: 'UUID', idAttribute: true}]};
+    const slice = {name: 'Views', context: 'Business', concepts: [{name: 'Record'}]};
+    readModelWriterMethods._writeDataExportSupport.call(writer);
+    readModelWriterMethods._writeReadModelJpaRepository.call(writer, 'tech.medo.business.views', 'business', 'views', slice, readmodel, 'RecordsReadModel', readmodel.fields, false);
+    readModelWriterMethods._writeReadModelResource.call(writer, 'tech.medo.business.views', 'business', 'views', slice, readmodel, 'RecordsReadModel', readmodel.fields);
+    readModelWriterMethods._writeSyncReadModelSourceResource.call(writer, 'tech.medo.business.views', 'business', 'views', slice, readmodel, 'RecordsReadModel');
+    const output = [...writes.values()].join('\n');
+    assert.doesNotMatch(output, /shared\.application\.access|accessPolicyFilter|backgroundAccess|requireUnrestricted/);
+    assert.match(output, /ownedDownload/); // Artifact safety is independent of row scope capabilities.
+});

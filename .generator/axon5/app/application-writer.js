@@ -346,6 +346,7 @@ ${beanMethods}
     },
 
     _writeSharedKernelArtifacts({hasInfra}) {
+        require('./access-policy').writeAccessSupport(this);
         this.fs.copyTpl(this.templatePath('OpenApiConfig.kt.tpl'), this._sharedKernelKotlinPath('shared/infrastructure/configuration/OpenApiConfig.kt'), {
             rootPackage: this.model.rootPackage,
             domain: this.model.domain
@@ -457,6 +458,7 @@ ${beanMethods}
             this.fs.copyTpl(this.templatePath(`identity-access-management/src/main/kotlin/infrastructure/security/${fileName}.tpl`), this.destinationPath(`${modulePrefix}src/main/kotlin/${this.model.rootPackage.split('.').join('/')}/${IAM_PACKAGE_SEGMENT}/infrastructure/security/${fileName}`), {
                 rootPackage: this.model.rootPackage,
                 security,
+                dataAccessEnabled: require('./access-policy').dataAccessEnabled(model),
                 iam
             });
         });

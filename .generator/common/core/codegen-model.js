@@ -27,6 +27,7 @@ function fromConfig(config = {}) {
         ...(config.scheduling ? {scheduling: config.scheduling} : {}),
         ...(config.archiving ? {archiving: config.archiving} : {}),
         ...(config.organizationManagement ? {organizationManagement: config.organizationManagement} : {}),
+        ...(config.dataAccess ? {dataAccess: config.dataAccess} : {}),
         ...(config.reporting ? {reporting: config.reporting} : {}),
         ...(config.businessCalendar ? {businessCalendar: config.businessCalendar} : {}),
         ...(config.systemConfiguration ? {systemConfiguration: config.systemConfiguration} : {}),
@@ -72,6 +73,7 @@ function fromCodegenModel(model = {}) {
         ...(model.scheduling ? {scheduling: model.scheduling} : {}),
         ...(model.archiving ? {archiving: model.archiving} : {}),
         ...(model.organizationManagement ? {organizationManagement: model.organizationManagement} : {}),
+        ...(model.dataAccess ? {dataAccess: model.dataAccess} : {}),
         ...(model.reporting ? {reporting: model.reporting} : {}),
         ...(model.businessCalendar ? {businessCalendar: model.businessCalendar} : {}),
         ...(model.systemConfiguration ? {systemConfiguration: model.systemConfiguration} : {}),
@@ -110,6 +112,7 @@ function toGeneratorConfig(model, source = {}) {
         ...(model.scheduling ? {scheduling: model.scheduling} : {}),
         ...(model.archiving ? {archiving: model.archiving} : {}),
         ...(model.organizationManagement ? {organizationManagement: model.organizationManagement} : {}),
+        ...(model.dataAccess ? {dataAccess: model.dataAccess} : {}),
         ...(model.reporting ? {reporting: model.reporting} : {}),
         ...(model.businessCalendar ? {businessCalendar: model.businessCalendar} : {}),
         ...(model.systemConfiguration ? {systemConfiguration: model.systemConfiguration} : {}),
@@ -438,9 +441,9 @@ function normalizeAccessPolicyRules(rules = []) {
                     fields: Array.isArray(rule.fields) ? rule.fields.map(String) : []
                 };
             }
-            return undefined;
-        })
-        .filter(Boolean);
+            if (rule?.kind === 'scope') return {...rule};
+            throw new Error(`Unsupported access policy rule ${rule?.kind}.`);
+        });
 }
 
 function normalizeFields(fields, valueTypes = []) {

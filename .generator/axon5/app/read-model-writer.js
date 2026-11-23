@@ -1,3 +1,4 @@
+const {accessPolicyFor, policyLiteral, writeAccessSupport, writeBusinessAccessSource, dataAccessEnabled} = require('./access-policy');
 /*
  * Copyright (c) 2025 Nebulit GmbH
  * Licensed under the MIT License.
@@ -110,25 +111,8 @@ function readModelProcessingGroupFor(generator, context, readmodel) {
         : group;
 }
 
-function readModelAccessPolicyFor(model, readmodel) {
-    const policyName = readmodel?.accessPolicy ?? model.defaultAccessPolicy;
-    const policy = (model.accessPolicies ?? []).find((candidate) => candidate.name === policyName);
-    return {
-        name: policyName,
-        fields: (policy?.rules ?? [])
-            .filter((rule) => rule?.kind === 'fields')
-            .flatMap((rule) => rule.fields ?? [])
-            .map(String)
-    };
-}
-
-function readModelAccessPolicyLiteral(policy) {
-    const name = policy.name ? `"${escapeKotlin(policy.name)}"` : 'null';
-    return `ReadModelAccessPolicy(
-            name = ${name},
-            fields = ${stringList(policy.fields)}
-        )`;
-}
+function readModelAccessPolicyFor(model, readmodel) { return accessPolicyFor(model, readmodel); }
+function readModelAccessPolicyLiteral(policy) { return policyLiteral(policy); }
 
 function permissionCode(name) {
     return kebab(name)
@@ -561,51 +545,9 @@ ${assignMetadata}
     },
 
     _writeReadModelAccessPolicySupport() {
-        if (this._readModelAccessPolicySupportWritten) {
-            return;
-        }
+        if (this._readModelAccessPolicySupportWritten) return;
         this._readModelAccessPolicySupportWritten = true;
-        const basePackage = `${this.model.rootPackage}.shared.application.access`;
-        const basePath = 'shared/application/access';
-        this.fs.write(this._sharedKernelKotlinPath(`${basePath}/ReadModelAccessPolicyFilter.kt`), `package ${basePackage}
-
-import org.springframework.data.jpa.domain.Specification
-
-data class ReadModelAccessPolicy(
-    val name: String?,
-    val fields: List<String> = emptyList()
-)
-
-interface ReadModelAccessPolicyFilter {
-    fun <T> specification(
-        contextName: String,
-        readModelName: String,
-        policy: ReadModelAccessPolicy
-    ): Specification<T>
-}
-
-class PermitAllReadModelAccessPolicyFilter : ReadModelAccessPolicyFilter {
-    override fun <T> specification(
-        contextName: String,
-        readModelName: String,
-        policy: ReadModelAccessPolicy
-    ): Specification<T> = Specification.where(null)
-}
-`);
-        this.fs.write(this._sharedKernelKotlinPath(`${basePath}/ReadModelAccessPolicyAutoConfiguration.kt`), `package ${basePackage}
-
-import org.springframework.boot.autoconfigure.AutoConfiguration
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
-import org.springframework.context.annotation.Bean
-
-@AutoConfiguration
-class ReadModelAccessPolicyAutoConfiguration {
-    @Bean
-    @ConditionalOnMissingBean(ReadModelAccessPolicyFilter::class)
-    fun readModelAccessPolicyFilter(): ReadModelAccessPolicyFilter = PermitAllReadModelAccessPolicyFilter()
-}
-`);
-        this.fs.write(this._sharedKernelResourcePath('META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports'), `${basePackage}.ReadModelAccessPolicyAutoConfiguration\n`);
+        writeAccessSupport(this);
     },
 
     _writeDictionaryDataExportLabelProviderIfNeeded(packageName, context, slicePackage, slice, readmodel) {
@@ -749,7 +691,8 @@ data class DataExportJobRequestMessage(
     val requestedAt: Instant,
     val snapshotUpperBound: Instant,
     val requestHash: String,
-    val fileName: String
+    val fileName: String,
+    val requestedBy: String? = null
 )
 
 data class DataExportExecutionTask(
@@ -762,7 +705,8 @@ data class DataExportExecutionTask(
     val requestedAt: Instant,
     val snapshotUpperBound: Instant,
     val requestHash: String,
-    val fileName: String
+    val fileName: String,
+    val requestedBy: String? = null
 )
 
 data class DataExportExecutionResult(
@@ -839,7 +783,8 @@ class DataExportService(
     private val properties: DataExportProperties,
     private val objectMapper: ObjectMapper,
     private val requestPort: ObjectProvider<DataExportJobRequestPort>,
-    private val dictionaryLabelProviders: ObjectProvider<DataExportDictionaryLabelProvider>
+    private val dictionaryLabelProviders: ObjectProvider<DataExportDictionaryLabelProvider>,
+    private val currentUsers: ${this.model.rootPackage}.shared.security.CurrentUserProvider${dataAccessEnabled(this.model) ? `,\n    private val backgroundAccess: ${this.model.rootPackage}.shared.application.access.BackgroundDataAccess` : ''}
 ) {
     private val accessorCache = java.util.concurrent.ConcurrentHashMap<String, java.lang.reflect.Method?>()
     private val columnsType = object : TypeReference<List<DataExportColumn>>() {}
@@ -869,7 +814,8 @@ class DataExportService(
         firstPage: Page<T>,
         fetchPage: (Pageable) -> Page<T>,
         requestedLocale: String? = null,
-        snapshotUpperBound: Instant? = null
+        snapshotUpperBound: Instant? = null,
+        protectedAccess: Boolean = false
     ): ResponseEntity<Any> {
         val total = firstPage.totalElements
         if (total > properties.maxRows) {
@@ -877,13 +823,14 @@ class DataExportService(
         }
         val fileName = exportFileName(resourceName)
         return if (total > properties.asyncThreshold) {
+            val requestedBy = ${dataAccessEnabled(this.model) ? 'if (protectedAccess) backgroundAccess.prepare() else exportOwner()' : 'exportOwner()'}
             val requestedAt = Instant.now()
             val effectiveSnapshotUpperBound = snapshotUpperBound ?: requestedAt
             val criteriaJson = objectMapper.writeValueAsString(criteria)
             val sortJson = objectMapper.writeValueAsString(sortOrders(sort))
             val columnsJson = objectMapper.writeValueAsString(columns)
             val requestHash = requestHash(resourceName, criteriaJson, sortJson, columnsJson, requestedLocale, effectiveSnapshotUpperBound)
-            val jobId = UUID.nameUUIDFromBytes(requestHash.toByteArray(StandardCharsets.UTF_8))
+            val jobId = UUID.nameUUIDFromBytes((requestHash + "|" + (requestedBy ?: "")).toByteArray(StandardCharsets.UTF_8))
             val request = DataExportJobRequestMessage(
                 dataExportJobId = jobId,
                 resourceName = resourceName,
@@ -894,7 +841,8 @@ class DataExportService(
                 requestedAt = requestedAt,
                 snapshotUpperBound = effectiveSnapshotUpperBound,
                 requestHash = requestHash,
-                fileName = fileName
+                fileName = fileName,
+                requestedBy = requestedBy
             )
             val port = requestPort.getIfAvailable()
                 ?: throw ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Data export job request port is not available.")
@@ -918,13 +866,35 @@ class DataExportService(
         columns: List<DataExportColumn>,
         firstPage: Page<T>,
         requestedLocale: String? = null,
+        requestedBy: String,
         fetchPage: (Pageable) -> Page<T>
     ): DataExportExecutionResult {
         val rendered = renderCsv(columns, firstPage, fetchPage, requestedLocale)
-        val directory = ${this.model.tenancy ? `${this.model.rootPackage}.shared.application.tenancy.TenantFiles.directory(properties.storagePath)` : 'Path.of(properties.storagePath)'}.createDirectories()
-        val path = directory.resolve(${this.model.tenancy ? 'Path.of(fileName).fileName' : 'fileName'}).normalize()
-        Files.write(path, rendered.content)
+        val owner = UUID.fromString(requestedBy)
+        require(owner != UUID(0, 0)) { "Export owner is required." }
+        val directory = exportRoot().resolve("owners").resolve(owner.toString()).createDirectories()
+        val path = directory.resolve(UUID.randomUUID().toString() + "-" + Path.of(fileName).fileName).normalize()
+        Files.write(path, rendered.content, java.nio.file.StandardOpenOption.CREATE_NEW)
         return DataExportExecutionResult(fileName, path.toString(), rendered.rowCount)
+    }
+
+    private fun exportOwner(): String {
+        val actor = currentUsers.currentUser()
+        if (actor.id == UUID(0, 0)) throw org.springframework.security.access.AccessDeniedException("An authenticated export owner is required.")
+        return actor.id.toString()
+    }
+
+    private fun exportRoot(): Path = ${this.model.tenancy ? `${this.model.rootPackage}.shared.application.tenancy.TenantFiles.directory(properties.storagePath)` : 'Path.of(properties.storagePath)'}.toAbsolutePath().normalize()
+
+    fun ownedDownload(filePath: String): Path {
+        val owner = exportOwner()
+        val directory = exportRoot().resolve("owners").resolve(owner).normalize()
+        val path = Path.of(filePath).toAbsolutePath().normalize()
+        if (!path.startsWith(directory) || path == directory) throw org.springframework.security.access.AccessDeniedException("Export file does not belong to the current user.")
+        if (Files.exists(path) && (!Files.isRegularFile(path) || !path.toRealPath().startsWith(directory.toRealPath()))) {
+            throw org.springframework.security.access.AccessDeniedException("Export file is outside its owner directory.")
+        }
+        return path
     }
 
     fun columnsFromJson(columnsJson: String, allowed: List<DataExportColumn>): List<DataExportColumn> =
@@ -1099,7 +1069,7 @@ import java.nio.file.Path
 @RestController("dataExportJobDownloadResource")
 @RequestMapping("/data-export/jobs")
 class DataExportJobResource(
-    private val dataExportService: DataExportService${this.model.tenancy ? ',\n    private val properties: DataExportProperties' : ''}
+    private val dataExportService: DataExportService
 ) {
     @PreAuthorize("isAuthenticated()")
     @GetMapping("/download")
@@ -1107,7 +1077,7 @@ class DataExportJobResource(
         @RequestParam filePath: String,
         @RequestParam fileName: String
     ): ResponseEntity<Any> {
-        val path = ${this.model.tenancy ? `${this.model.rootPackage}.shared.application.tenancy.TenantFiles.owned(filePath, properties.storagePath)` : 'Path.of(filePath).normalize()'}
+        val path = dataExportService.ownedDownload(filePath)
         if (!Files.exists(path)) return ResponseEntity.notFound().build()
         return dataExportService.csvResponse(fileName, Files.readAllBytes(path))
     }
@@ -1174,7 +1144,7 @@ class AxonDataExportJobRequestPort(
                 fileName = message.fileName,
                 status = DataExportJobStatus.REQUESTED
             ),
-            metadata
+            message.requestedBy?.let { Metadata.from(mapOf(MetadataKeys.DEPLOYMENT_NAME to DEPLOYMENT_NAME, MetadataKeys.USER_ID to it)) } ?: metadata
         ).resultMessage.toCompletableFuture().join()
     }
 
@@ -1258,7 +1228,8 @@ ${this.model.tenancy ? `        ${this.model.rootPackage}.shared.application.ten
             requestedAt = event.requestedAt.toInstant(ZoneOffset.UTC),
             snapshotUpperBound = event.snapshotUpperBound.toInstant(ZoneOffset.UTC),
             requestHash = event.requestHash,
-            fileName = event.fileName
+            fileName = event.fileName,
+            requestedBy = message.metadata()[MetadataKeys.USER_ID]?.toString()
         )
         try {
             lifecyclePort.markProcessing(event.dataExportJobId)
@@ -2287,6 +2258,7 @@ ${assignments}
     },
 
     _writeReadModelJpaRepository(readModelPackageName, context, slicePackage, slice, readmodel, name, idFields, hasJsonJpaFields = false) {
+        const hasDataAccess = dataAccessEnabled(this.model);
         const schedulingProjection = this.model.scheduling?.context === slice.context && readmodel.name === 'ScheduleCatalog';
         const numberingRuleProjection = this.model.numbering?.context === slice.context && readmodel.name === 'NumberingRuleCatalog';
         const scoped = tenantScoped(this.model, slice.context);
@@ -2317,6 +2289,8 @@ ${assignments}
             ).join('\n\n')
             : '';
         const packageName = readModelPersistencePackage(this.model.rootPackage, context, name);
+        writeBusinessAccessSource(this, {context: slice.context, readmodel, packageName, entityName, scoped, tenantField,
+            path: this._kotlinPath(`${readModelPersistencePath(context, name)}/${entityName}AccessScopeSource.kt`)});
         const filterParameters = filterFields
             .map((field) => `${field.name}: ${readModelStorageType(field, false)}?`)
             .join(', ');
@@ -2391,9 +2365,9 @@ import org.springframework.data.domain.Pageable
 import org.springframework.stereotype.Repository
 ${hasJsonJpaFields ? 'import com.fasterxml.jackson.databind.ObjectMapper\n' : ''}${hasJsonJpaFields ? 'import com.fasterxml.jackson.module.kotlin.readValue\n' : ''}
 ${imports}
-import ${this.model.rootPackage}.shared.application.access.ReadModelAccessPolicy
-import ${this.model.rootPackage}.shared.application.access.ReadModelAccessPolicyFilter
-import ${readModelPackageName}.${name}
+${hasDataAccess ? `import ${this.model.rootPackage}.shared.application.access.ReadModelAccessPolicy
+import ${this.model.rootPackage}.shared.application.access.ReadModelAccessRule
+import ${this.model.rootPackage}.shared.application.access.ReadModelAccessPolicyFilter\n` : ''}import ${readModelPackageName}.${name}
 import ${readModelPackageName}.${name}Criteria
 ${idFields.length > 1 ? `import ${readModelPackageName}.${name}Key\n` : ''}import ${readModelPackageName}.${name}Projection
 import ${readModelPackageName}.${repositoryName}
@@ -2403,8 +2377,7 @@ import ${readModelPackageName}.toReadModel
 ${this.model.tenancy && !scoped ? `@${this.model.rootPackage}.shared.application.tenancy.TenantControlRepository\n` : ''}\
 class ${adapterName}(
     private val jpaRepository: ${springDataRepositoryName},
-    private val accessPolicyFilter: ReadModelAccessPolicyFilter,
-    private val queryService: ${name}QueryService${scoped ? `,\n    private val tenantBoundary: ${this.model.rootPackage}.shared.application.tenancy.TenantPersistenceBoundary` : ''}${hasJsonJpaFields ? ',\n    private val objectMapper: ObjectMapper' : ''}
+${hasDataAccess ? '    private val accessPolicyFilter: ReadModelAccessPolicyFilter,\n' : ''}    private val queryService: ${name}QueryService${scoped ? `,\n    private val tenantBoundary: ${this.model.rootPackage}.shared.application.tenancy.TenantPersistenceBoundary` : ''}${hasJsonJpaFields ? ',\n    private val objectMapper: ObjectMapper' : ''}
 ) : ${repositoryName} {
 ${findAllImplementation}
 
@@ -2439,11 +2412,11 @@ ${scoped ? `    private fun tenantSpecification(): Specification<${entityName}> 
     }
 
 ` : ''}    private fun accessSpecification(): Specification<${entityName}> =
-        accessPolicyFilter.specification${scoped ? `<${entityName}>` : ''}(
+        ${hasDataAccess ? `accessPolicyFilter.specification${scoped ? `<${entityName}>` : ''}(
             contextName = "${escapeKotlin(contextName)}",
             readModelName = "${escapeKotlin(readModelName)}",
             policy = ${accessPolicyLiteral}
-        )${scoped ? '.and(tenantSpecification())' : ''}
+        )${scoped ? '.and(tenantSpecification())' : ''}` : scoped ? 'tenantSpecification()' : 'Specification.where(null)'}
 
     private fun ${entityName}.toProjection(): ${name}Projection =
         ${name}Projection().also {
@@ -2598,6 +2571,8 @@ ${entityToProjectionAssignments}
         const conceptRoute = httpRoute(slice.concepts[0] ?? slice.name);
         const readmodelRoute = httpRoute(readmodel.title);
         const readModelPermission = permissionCode(readmodel.name ?? readmodel.title);
+        const effectiveAccess = readModelAccessPolicyFor(this.model, readmodel);
+        const protectedAccess = effectiveAccess.rules.length > 0 || effectiveAccess.fields.length > 0;
         const filterFields = readModelFilterFields(readmodel);
         const imports = readModelStorageImports([...idFields, ...filterFields], this.model.rootPackage);
         const resourceImports = mergeKotlinImports(
@@ -2663,7 +2638,7 @@ ${exportable ? `    @PreAuthorize("hasAuthority('*:*') or hasAuthority('${readMo
         val firstPage = findPage(snapshotCriteria, exportPageable)
         return dataExportService.export("${readmodelRoute}", columns, snapshotCriteria, pageable.sort, firstPage, fetchPage = { nextPage ->
             findPage(snapshotCriteria, nextPage)
-        }, requestedLocale = request?.requestedLocale, snapshotUpperBound = snapshotUpperBound.toInstant(ZoneOffset.UTC))
+        }, requestedLocale = request?.requestedLocale, snapshotUpperBound = snapshotUpperBound.toInstant(ZoneOffset.UTC), protectedAccess = ${protectedAccess})
     }
 
 ` : ''}
@@ -2694,21 +2669,24 @@ ${exportable ? `
 class ${name}DataExportExecutor(
     private val repository: ${repositoryName},
     private val dataExportService: DataExportService,
-    private val objectMapper: ObjectMapper
+    private val objectMapper: ObjectMapper${protectedAccess ? `,\n    private val backgroundAccess: ${this.model.rootPackage}.shared.application.access.BackgroundDataAccess` : ''}
 ) : DataExportResourceExecutor {
     override val resourceName: String = "${readmodelRoute}"
     private val exportColumns = listOf(
 ${exportColumns(readmodel).map((field) => `        ${dataExportColumnLiteral(field)}`).join(',\n')}
     )
 
-    override fun execute(task: DataExportExecutionTask): DataExportExecutionResult {
+    override fun execute(task: DataExportExecutionTask): DataExportExecutionResult${protectedAccess ? ` =
+        backgroundAccess.run(task.requestedBy, setOf("*:*", "${readModelPermission}:export", "${readModelPermission}:list", "${readModelPermission}:read")) { executeAuthorized(task) }
+
+    private fun executeAuthorized(task: DataExportExecutionTask): DataExportExecutionResult` : ''} {
         val criteria = objectMapper.readValue<${name}Criteria>(task.criteriaJson)
         val snapshotUpperBound = LocalDateTime.ofInstant(task.snapshotUpperBound, ZoneOffset.UTC)
         applyExportSnapshot(criteria, snapshotUpperBound)
         val columns = dataExportService.columnsFromJson(task.columnsJson, exportColumns)
         val sort = dataExportService.sortFromJson(task.sortJson)
         val firstPage = repository.findAllByCriteria(criteria, PageRequest.of(0, dataExportService.pageSize(), sort))
-        return dataExportService.writeCsvFile(task.fileName, columns, firstPage, requestedLocale = task.requestedLocale) { nextPage ->
+        return dataExportService.writeCsvFile(task.fileName, columns, firstPage, requestedLocale = task.requestedLocale, requestedBy = requireNotNull(task.requestedBy) { "Export owner is required." }) { nextPage ->
             repository.findAllByCriteria(criteria, nextPage)
         }
     }
@@ -2750,6 +2728,8 @@ ${exportColumns(readmodel).map((field) => `        ${dataExportColumnLiteral(fie
     },
 
     _writeSyncReadModelSourceResource(packageName, context, slicePackage, slice, readmodel, name) {
+        const hasDataAccess = dataAccessEnabled(this.model);
+        const syncAccessLiteral = readModelAccessPolicyLiteral(readModelAccessPolicyFor(this.model, readmodel));
         const repositoryName = `${name}Repository`;
         const resourceName = `${name}SyncReadModelResource`;
         const sourceAlias = this._syncSourceAliasForReadModel(slice, readmodel);
@@ -2770,14 +2750,16 @@ import org.springframework.web.bind.annotation.RestController
 import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.ObjectMapper
 import ${this.model.rootPackage}.shared.application.outbox.MedolOutboxRepository
-
+${hasDataAccess ? `import ${this.model.rootPackage}.shared.application.access.ReadModelAccessPolicyFilter
+import ${this.model.rootPackage}.shared.application.access.ReadModelAccessPolicy
+import ${this.model.rootPackage}.shared.application.access.ReadModelAccessRule\n` : ''}
 @CrossOrigin
 @RestController
 @RequestMapping("${sourcePath}")
 class ${resourceName}(
     private val repository: ${repositoryName},
     private val outboxRepository: MedolOutboxRepository,
-    private val objectMapper: ObjectMapper
+    private val objectMapper: ObjectMapper${hasDataAccess ? ',\n    private val accessPolicyFilter: ReadModelAccessPolicyFilter' : ''}
 ) {
     private val mapType = object : TypeReference<Map<String, Any?>>() {}
 
@@ -2819,6 +2801,7 @@ class ${resourceName}(
     ): Map<String, Any?> {
         val reserved = setOf("afterSequence", "size", "cursor")
         val filters = parameters.filterKeys { it !in reserved }
+${hasDataAccess ? `        accessPolicyFilter.requireUnrestricted("${sourceContext}", "${sourceReadModel}", ${syncAccessLiteral})\n` : ''}
         val rows = outboxRepository
             .findBySourceContextAndSourceNameAndSequenceGreaterThanOrderBySequenceAsc(
                 "${sourceContext}",

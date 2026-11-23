@@ -1,3 +1,4 @@
+const {validateAccessGrantNames, dataAccessEnabled} = require('./access-policy');
 const {kebab} = require('./model-helpers');
 
 function roleCode(actorName) {
@@ -39,6 +40,7 @@ function uniqBy(items, key) {
 }
 
 function actorSecurityModel(model, options = {}) {
+    validateAccessGrantNames(model);
     const selectedContexts = options.contexts ? new Set(options.contexts) : null;
     const slices = (model.slices ?? [])
         .filter((slice) => !selectedContexts || selectedContexts.has(slice.context));
@@ -111,6 +113,16 @@ function actorSecurityModel(model, options = {}) {
         }
     }
 
+    // Register scope grants, but never infer them from an actor's command/read permission.
+    for (const policy of dataAccessEnabled(model) ? (model.accessPolicies ?? []) : []) {
+        const additions = (model.slices ?? []).flatMap(slice => (slice.readmodels ?? [])
+            .filter(r => (r.accessPolicy ?? model.defaultAccessPolicy) === policy.name).flatMap(r => r.accessRules ?? []));
+        for (const rule of [...(policy.rules ?? []), ...additions].filter(r => r.kind === 'scope')) {
+            const prefix = `data:${policy.name}:${rule.field}`.toLowerCase();
+            addPermission(`${prefix}:scope`, `${policy.name}: modeled ${rule.field} scope`);
+            addPermission(`${prefix}:all`, `${policy.name}: all ${rule.field} values`);
+        }
+    }
     addPermission('*:*', 'All permissions');
 
     actorNames.push({

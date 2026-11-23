@@ -14,7 +14,9 @@ import <%= rootPackage %>.shared.security.CurrentUserJwtResolver
 @Service
 class IamPermissionService(
     private val authIdentityRepository: AuthIdentityRepository,
-) : CurrentUserJwtResolver {
+) : CurrentUserJwtResolver<% if (dataAccessEnabled) { %>, <%= rootPackage %>.shared.application.access.BackgroundAccessActorResolver<% } %> {
+<% if (dataAccessEnabled) { %>    override fun resolve(userId: UUID): CurrentUser = loadBySubject(userId.toString())
+<% } %>
     private val logger = LoggerFactory.getLogger(javaClass)
 
     override fun resolve(jwt: Jwt, fallback: CurrentUser): CurrentUser =

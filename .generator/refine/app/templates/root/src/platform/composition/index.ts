@@ -1,3 +1,5 @@
+import {prepareCommand} from "./command-execution";
+export {prepareCommand} from "./command-execution";
 import { createElement } from "react";
 import type { ComponentType, ReactElement, ReactNode } from "react";
 
@@ -142,27 +144,8 @@ export async function runFormBehavior<TVariables>(
     (item) => item.type === "behavior" && item.target === target,
   )?.implementation as FormBehaviorExtension<TVariables> | undefined;
 
-  if (!behavior) {
-    return submit(values);
-  }
-
-  const validationErrors = await behavior.validate?.(values);
-  if (validationErrors && Object.keys(validationErrors).length > 0) {
-    throw new Error(
-      Object.entries(validationErrors)
-        .map(([field, message]) => `${field}: ${message}`)
-        .join("; "),
-    );
-  }
-
-  const beforeSubmitValues = await behavior.beforeSubmit?.(values);
-  const nextValues = (beforeSubmitValues ?? values) as TVariables;
-  const payload = behavior.mapCommandPayload
-    ? (behavior.mapCommandPayload(nextValues) as TVariables)
-    : nextValues;
-  const result = await submit(payload);
-  await behavior.afterSubmit?.(nextValues, result);
-  return result;
+  const prepared = await prepareCommand(values, behavior, submit);
+  return prepared.execute();
 }
 
 function validateResolvedComposition(composition: FrontendComposition) {

@@ -1,5 +1,6 @@
 "use client";
 
+import { AgentShell } from "@/ai/shell";
 import { Header } from "@/components/refine-ui/layout/header";
 import { ThemeProvider } from "@/components/refine-ui/theme/theme-provider";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
@@ -9,7 +10,7 @@ import { Sidebar } from "./sidebar";
 
 export function Layout({ children }: PropsWithChildren) {
   return (
-    <ThemeProvider>
+    <AgentShell><ThemeProvider>
       <SidebarProvider>
         <Sidebar />
         <SidebarInset>
@@ -35,7 +36,7 @@ export function Layout({ children }: PropsWithChildren) {
           </main>
         </SidebarInset>
       </SidebarProvider>
-    </ThemeProvider>
+    </ThemeProvider></AgentShell>
   );
 }
 

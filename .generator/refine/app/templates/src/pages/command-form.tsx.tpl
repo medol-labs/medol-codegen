@@ -1,4 +1,7 @@
 // Generated from config.json by the refine generator.
+<% if (command.agentCapabilityId) { -%>
+import { useAgentForm } from "@/ai/use-agent-form";
+<% } -%>
 import { useParsed<% if (command.hasHistoryPrefillFields) { -%>, useList<% } -%> } from "@refinedev/core";
 import { useTranslate } from "@refinedev/core";
 <% if (command.hasFileFields) { -%>
@@ -219,6 +222,23 @@ export const <%= command.pageComponent %> = () => {
 <% } -%>
     },
   });
+<% if (command.agentCapabilityId) { -%>
+  useAgentForm({
+    capability: <%- JSON.stringify(command.agentCapabilityId) %>,
+    writableFields: <%- JSON.stringify(command.agentWritableFields) %>,
+    form, schema: <%= command.schemaName %>, defaultValues,
+    composition: frontendComposition,
+    behaviorTarget: "behavior:<%= resource.route %>:<%= command.name %>",
+    submit: async (payload: <%= command.inputTypeName %>) => {
+      const result = await onFinish(payload);
+<% if (command.hasResultFields) { -%>
+      const data = result && typeof result === 'object' && 'data' in result ? result.data : result;
+      if (data && typeof data === 'object') setCommandResult(data as Record<string, unknown>);
+<% } -%>
+      return result;
+    },
+  });
+<% } -%>
 <% command.historyPrefillFields.forEach((field) => { -%>
   const <%= field.fieldName %>History = useList<Record<string, unknown>>({
     resource: "<%= field.resource %>",
